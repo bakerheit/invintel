@@ -1,11 +1,19 @@
 import type {
   AdjustmentInput,
   Item,
-  ItemInput,
+  ItemCreate,
   ItemUpdate,
+  Location,
+  LocationInput,
+  LocationUpdate,
   LoginInput,
+  OrganizationInput,
+  OrgMember,
+  OrgSummary,
   RegisterInput,
+  RegisterResult,
   StockMovement,
+  TransferInput,
   User,
 } from "@invintel/shared";
 
@@ -47,22 +55,42 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const body = (value: unknown) => JSON.stringify(value);
+const post = (value?: unknown): RequestInit => ({ method: "POST", body: value === undefined ? undefined : body(value) });
+const patch = (value: unknown): RequestInit => ({ method: "PATCH", body: body(value) });
 
 export const api = {
   me: () => request<User>("/auth/me"),
   authConfig: () => request<{ registrationOpen: boolean }>("/auth/config"),
-  login: (input: LoginInput) => request<User>("/auth/login", { method: "POST", body: body(input) }),
-  register: (input: RegisterInput) =>
-    request<User>("/auth/register", { method: "POST", body: body(input) }),
-  logout: () => request<void>("/auth/logout", { method: "POST" }),
+  login: (input: LoginInput) => request<User>("/auth/login", post(input)),
+  register: (input: RegisterInput) => request<RegisterResult>("/auth/register", post(input)),
+  logout: () => request<void>("/auth/logout", post()),
 
-  listItems: () => request<Item[]>("/items"),
-  createItem: (input: Partial<ItemInput> & Pick<ItemInput, "sku" | "name">) =>
-    request<Item>("/items", { method: "POST", body: body(input) }),
-  updateItem: (id: string, patch: ItemUpdate) =>
-    request<Item>(`/items/${id}`, { method: "PATCH", body: body(patch) }),
-  deleteItem: (id: string) => request<void>(`/items/${id}`, { method: "DELETE" }),
-  adjustStock: (id: string, input: Partial<AdjustmentInput> & Pick<AdjustmentInput, "delta">) =>
-    request<Item>(`/items/${id}/adjust`, { method: "POST", body: body(input) }),
-  listMovements: (id: string) => request<StockMovement[]>(`/items/${id}/movements`),
+  listOrgs: () => request<OrgSummary[]>("/orgs"),
+  createOrg: (input: OrganizationInput) => request<OrgSummary>("/orgs", post(input)),
+  joinOrg: (input: { joinCode: string }) => request<OrgSummary>("/orgs/join", post(input)),
+  renameOrg: (orgId: string, input: OrganizationInput) => request<OrgSummary>(`/orgs/${orgId}`, patch(input)),
+  rotateJoinCode: (orgId: string) => request<OrgSummary>(`/orgs/${orgId}/join-code`, post()),
+  listMembers: (orgId: string) => request<OrgMember[]>(`/orgs/${orgId}/members`),
+
+  listLocations: (orgId: string) => request<Location[]>(`/orgs/${orgId}/locations`),
+  createLocation: (orgId: string, input: Partial<LocationInput> & Pick<LocationInput, "name">) =>
+    request<Location>(`/orgs/${orgId}/locations`, post(input)),
+  updateLocation: (orgId: string, id: string, input: LocationUpdate) =>
+    request<Location>(`/orgs/${orgId}/locations/${id}`, patch(input)),
+  deleteLocation: (orgId: string, id: string) =>
+    request<void>(`/orgs/${orgId}/locations/${id}`, { method: "DELETE" }),
+
+  listItems: (orgId: string) => request<Item[]>(`/orgs/${orgId}/items`),
+  createItem: (orgId: string, input: Partial<ItemCreate> & Pick<ItemCreate, "sku" | "name">) =>
+    request<Item>(`/orgs/${orgId}/items`, post(input)),
+  updateItem: (orgId: string, id: string, input: ItemUpdate) =>
+    request<Item>(`/orgs/${orgId}/items/${id}`, patch(input)),
+  deleteItem: (orgId: string, id: string) =>
+    request<void>(`/orgs/${orgId}/items/${id}`, { method: "DELETE" }),
+  adjustStock: (orgId: string, id: string, input: Partial<AdjustmentInput> & Pick<AdjustmentInput, "locationId" | "delta">) =>
+    request<Item>(`/orgs/${orgId}/items/${id}/adjust`, post(input)),
+  transferStock: (orgId: string, id: string, input: Partial<TransferInput> & Pick<TransferInput, "fromLocationId" | "toLocationId" | "quantity">) =>
+    request<Item>(`/orgs/${orgId}/items/${id}/transfer`, post(input)),
+  listMovements: (orgId: string, id: string) =>
+    request<StockMovement[]>(`/orgs/${orgId}/items/${id}/movements`),
 };

@@ -1,6 +1,7 @@
-import type { LoginInput, RegisterInput, User } from "@invintel/shared";
+import type { LoginInput, RegisterInput, RegisterResult, User } from "@invintel/shared";
 import { create } from "zustand";
 import { api, setUnauthorizedHandler } from "@/lib/api";
+import { clearLastOrg } from "@/lib/last-org";
 import { queryClient } from "@/lib/query";
 
 interface AuthState {
@@ -9,7 +10,7 @@ interface AuthState {
   status: "loading" | "ready";
   init: () => Promise<void>;
   login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
+  register: (input: RegisterInput) => Promise<RegisterResult>;
   logout: () => Promise<void>;
 }
 
@@ -26,11 +27,14 @@ export const useAuth = create<AuthState>((set) => ({
   },
   register: async (input) => {
     queryClient.clear();
-    set({ user: await api.register(input) });
+    const result = await api.register(input);
+    set({ user: result.user });
+    return result;
   },
   logout: async () => {
     await api.logout().catch(() => {});
     queryClient.clear();
+    clearLastOrg();
     set({ user: null });
   },
 }));

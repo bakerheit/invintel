@@ -1,17 +1,31 @@
 import { zValidator } from "@hono/zod-validator";
-import { loginInputSchema, registerInputSchema, type User } from "@invintel/shared";
+import {
+  loginInputSchema,
+  registerInputSchema,
+  type RegisterResult,
+  type User,
+} from "@invintel/shared";
 import { hash, verify } from "@node-rs/argon2";
 import { createHash, randomBytes } from "node:crypto";
 import { ObjectId } from "mongodb";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
-import { isDuplicateKey, type Store, type UserDoc } from "./db.js";
+import { getConnInfo } from "@hono/node-server/conninfo";
+import type { Context } from "hono";
+import { isDuplicateKey, type OrgDoc, type Store, type UserDoc } from "./db.js";
+import {
+  createOrganization,
+  findOrgByJoinCode,
+  joinOrganization,
+  summarizeOrg,
+} from "./org-service.js";
+import { FailureLimiter } from "./ratelimit.js";
 
 const COOKIE = "invintel_session";
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_MAX_FAILURES = 10;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILURES = 10;
 
 export interface AuthOptions {
   allowRegistration: boolean;
@@ -26,29 +40,24 @@ export const toUser = (u: UserDoc): User => ({
   id: u._id.toHexString(),
   name: u.name,
   email: u.email,
-  role: u.role,
 });
 
 // Verified against when the email is unknown so response time doesn't reveal which emails exist.
 const dummyHash = hash("invintel-dummy-password");
 
-export function createAuth(store: Store, opts: AuthOptions) {
-  const failures = new Map<string, { count: number; resetAt: number }>();
+/** Best-effort client address for rate limiting. Behind a proxy this is the proxy's address. */
+function clientKey(c: Context) {
+  try {
+    return getConnInfo(c).remote.address ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
-  const isLocked = (key: string) => {
-    const f = failures.get(key);
-    if (!f) return false;
-    if (f.resetAt < Date.now()) {
-      failures.delete(key);
-      return false;
-    }
-    return f.count >= LOGIN_MAX_FAILURES;
-  };
-  const recordFailure = (key: string) => {
-    const f = failures.get(key);
-    if (f && f.resetAt >= Date.now()) f.count++;
-    else failures.set(key, { count: 1, resetAt: Date.now() + LOGIN_WINDOW_MS });
-  };
+export function createAuth(store: Store, opts: AuthOptions) {
+  const loginLimiter = new FailureLimiter(MAX_FAILURES, FAILURE_WINDOW_MS);
+  // Wrong join codes at sign-up are limited per client address. The user doesn't exist yet.
+  const joinLimiter = new FailureLimiter(MAX_FAILURES, FAILURE_WINDOW_MS);
 
   async function startSession(c: Parameters<typeof setCookie>[0], userId: ObjectId) {
     const token = randomBytes(32).toString("base64url");
@@ -93,41 +102,69 @@ export function createAuth(store: Store, opts: AuthOptions) {
   );
 
   routes.post("/register", zValidator("json", registerInputSchema), async (c) => {
-    const { name, email, password } = c.req.valid("json");
-    const userCount = await store.users.estimatedDocumentCount();
-    if (!opts.allowRegistration && userCount > 0) {
+    const { name, email, password, organization } = c.req.valid("json");
+    if (!opts.allowRegistration && (await store.users.estimatedDocumentCount()) > 0) {
       return c.json({ error: "Registration is closed" }, 403);
     }
-    const doc = {
+
+    // Check the join code before creating anything so a typo doesn't leave a half-made account.
+    let orgToJoin: OrgDoc | null = null;
+    if (organization.mode === "join") {
+      const key = clientKey(c);
+      if (joinLimiter.isLocked(key)) {
+        return c.json({ error: "Too many wrong join codes. Try again in a few minutes." }, 429);
+      }
+      orgToJoin = await findOrgByJoinCode(store, organization.joinCode);
+      if (!orgToJoin) {
+        joinLimiter.fail(key);
+        return c.json({ error: "That join code isn't valid" }, 400);
+      }
+    }
+
+    const user: UserDoc = {
       _id: new ObjectId(),
       name,
       email,
       passwordHash: await hash(password),
-      role: userCount === 0 ? ("admin" as const) : ("member" as const),
       createdAt: new Date(),
     };
     try {
-      await store.users.insertOne(doc);
+      await store.users.insertOne(user);
     } catch (e) {
       if (isDuplicateKey(e)) return c.json({ error: "An account with that email already exists" }, 409);
       throw e;
     }
-    await startSession(c, doc._id);
-    return c.json(toUser(doc), 201);
+
+    let result: RegisterResult;
+    try {
+      if (organization.mode === "create") {
+        const org = await createOrganization(store, user._id, organization.name);
+        result = { user: toUser(user), organization: await summarizeOrg(store, org, "owner") };
+      } else {
+        const joined = await joinOrganization(store, user._id, orgToJoin!);
+        result = { user: toUser(user), organization: await summarizeOrg(store, orgToJoin!, joined.role) };
+      }
+    } catch (e) {
+      await store.users.deleteOne({ _id: user._id });
+      await store.memberships.deleteMany({ userId: user._id });
+      throw e;
+    }
+    await startSession(c, user._id);
+    return c.json(result, 201);
   });
 
   routes.post("/login", zValidator("json", loginInputSchema), async (c) => {
     const { email, password } = c.req.valid("json");
-    if (isLocked(email)) {
+    if (loginLimiter.isLocked(email)) {
       return c.json({ error: "Too many failed attempts. Try again in a few minutes." }, 429);
     }
     const user = await store.users.findOne({ email });
     const ok = await verify(user?.passwordHash ?? (await dummyHash), password).catch(() => false);
     if (!user || !ok) {
-      recordFailure(email);
+      loginLimiter.fail(email);
       return c.json({ error: "Invalid email or password" }, 401);
     }
-    failures.delete(email);
+    loginLimiter.reset(email);
     await startSession(c, user._id);
     return c.json(toUser(user));
   });

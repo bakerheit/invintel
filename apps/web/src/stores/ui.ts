@@ -1,11 +1,14 @@
-import type { Item } from "@invintel/shared";
+import type { Item, Location } from "@invintel/shared";
 import { create } from "zustand";
 
 type Dialog =
   | { kind: "none" }
-  | { kind: "create" }
-  | { kind: "edit"; item: Item }
-  | { kind: "adjust"; item: Item };
+  | { kind: "create-item" }
+  | { kind: "edit-item"; item: Item }
+  | { kind: "adjust"; item: Item; locationId?: string }
+  | { kind: "transfer"; item: Item }
+  | { kind: "create-location" }
+  | { kind: "edit-location"; location: Location };
 
 interface UiState {
   search: string;

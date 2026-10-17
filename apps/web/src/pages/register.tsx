@@ -1,19 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
-import { Link, Navigate } from "react-router";
+import { Link, Navigate, useNavigate } from "react-router";
 import { AuthField } from "@/components/auth-field";
 import { AuthLayout } from "@/components/auth-layout";
+import { initialOrgChoice, OrgChoice, toOrgInput } from "@/components/org-choice";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { setLastOrg } from "@/lib/last-org";
 import { useAuth } from "@/stores/auth";
 
 export default function RegisterPage() {
   const { user, register } = useAuth();
+  const navigate = useNavigate();
   const config = useQuery({ queryKey: ["auth-config"], queryFn: api.authConfig });
+  const [org, setOrg] = useState(initialOrgChoice);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  if (user) return <Navigate to="/" replace />;
+  if (user && !pending) return <Navigate to="/" replace />;
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -25,14 +29,16 @@ export default function RegisterPage() {
     setError(null);
     setPending(true);
     try {
-      await register({
+      const { organization } = await register({
         name: String(form.get("name")),
         email: String(form.get("email")),
         password: String(form.get("password")),
+        organization: toOrgInput(org),
       });
+      setLastOrg(organization.id);
+      navigate(`/o/${organization.id}`, { replace: true });
     } catch (err) {
       setError((err as Error).message);
-    } finally {
       setPending(false);
     }
   };
@@ -40,7 +46,7 @@ export default function RegisterPage() {
   const closed = config.data?.registrationOpen === false;
 
   return (
-    <AuthLayout title="Create account" description="The first account becomes the admin.">
+    <AuthLayout title="Create account" description="Start your own organization or join your team's.">
       {closed ? (
         <div className="grid gap-4 text-sm">
           <p className="text-muted-foreground">Registration is closed. Ask an admin for access.</p>
@@ -52,6 +58,7 @@ export default function RegisterPage() {
           <AuthField label="Email" id="email" type="email" autoComplete="email" required />
           <AuthField label="Password" id="password" type="password" autoComplete="new-password" minLength={8} required />
           <AuthField label="Confirm password" id="confirm" type="password" autoComplete="new-password" required />
+          <OrgChoice value={org} onChange={setOrg} />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create account"}</Button>
           <p className="text-center text-sm text-muted-foreground">
