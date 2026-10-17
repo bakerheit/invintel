@@ -1,10 +1,14 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 import { AppShell } from "./components/app-shell";
+import { ConfirmProvider } from "./components/confirm";
+import { Toaster } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { queryClient } from "./lib/query";
+import { ThemeProvider } from "./lib/theme";
 import InventoryPage from "./pages/inventory";
 import LocationsPage from "./pages/locations";
 import LoginPage from "./pages/login";
@@ -17,32 +21,47 @@ import { useAuth } from "./stores/auth";
 function RequireAuth() {
   const { user, status } = useAuth();
   const location = useLocation();
-  if (status === "loading") return <p className="p-6 text-muted-foreground">Loading…</p>;
+  if (status === "loading") {
+    return <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">Loading…</div>;
+  }
   if (!user) return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />;
   return <Outlet />;
+}
+
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <ConfirmProvider>
+            <BrowserRouter>{children}</BrowserRouter>
+            <Toaster closeButton />
+          </ConfirmProvider>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
+  );
 }
 
 void useAuth.getState().init();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route element={<RequireAuth />}>
-            <Route path="/" element={<OrgRedirect />} />
-            <Route path="/orgs/new" element={<NewOrgPage />} />
-            <Route path="/o/:orgId" element={<AppShell />}>
-              <Route index element={<InventoryPage />} />
-              <Route path="locations" element={<LocationsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-            </Route>
+    <Providers>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route element={<RequireAuth />}>
+          <Route path="/" element={<OrgRedirect />} />
+          <Route path="/orgs/new" element={<NewOrgPage />} />
+          <Route path="/o/:orgId" element={<AppShell />}>
+            <Route index element={<InventoryPage />} />
+            <Route path="locations" element={<LocationsPage />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Providers>
   </StrictMode>,
 );

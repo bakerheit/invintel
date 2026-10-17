@@ -1,5 +1,6 @@
 import type { Item, Location } from "@invintel/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -42,7 +43,7 @@ function LocationSelect({ label, value, onChange, locations }: {
         onValueChange={(v) => v && onChange(v)}
         items={locations.map((l) => ({ value: l.id, label: l.hint ? `${l.name} (${l.hint})` : l.name }))}
       >
-        <SelectTrigger aria-label={label}>
+        <SelectTrigger aria-label={label} className="w-full">
           <SelectValue placeholder="Choose a location" />
         </SelectTrigger>
         <SelectContent>
@@ -59,7 +60,7 @@ function LocationSelect({ label, value, onChange, locations }: {
 }
 
 /** Shared submit plumbing: runs the mutation, refreshes the org's data, closes on success. */
-function useSubmit<T>(run: (form: FormData) => Promise<T>) {
+function useSubmit<T>(run: (form: FormData) => Promise<T>, successMessage: string) {
   const qc = useQueryClient();
   const { id: orgId } = useCurrentOrg();
   const close = useUi((s) => s.closeDialog);
@@ -68,6 +69,7 @@ function useSubmit<T>(run: (form: FormData) => Promise<T>) {
     mutationFn: run,
     onSuccess: async () => {
       await invalidateOrg(qc, orgId);
+      toast.success(successMessage);
       close();
     },
     onError: (e: Error) => setError(e.message),
@@ -117,7 +119,7 @@ function ItemForm({ item, locations }: { item?: Item; locations: Location[] }) {
     if (item) return api.updateItem(orgId, item.id, base);
     const quantity = Number(text(form, "quantity") || 0);
     return api.createItem(orgId, { ...base, ...(quantity > 0 && locationId ? { initialStock: { locationId, quantity } } : {}) });
-  });
+  }, item ? "Changes saved" : "Item created");
 
   return (
     <FormShell {...submit} submitLabel={item ? "Save" : "Create"}>
@@ -151,6 +153,7 @@ function AdjustForm({ item, locations, locationId: preferred }: { item: Item; lo
       delta: Number(form.get("delta")),
       reason: text(form, "reason"),
     }),
+    "Stock updated",
   );
 
   return (
@@ -183,6 +186,7 @@ function TransferForm({ item, locations }: { item: Item; locations: Location[] }
       quantity: Number(form.get("quantity")),
       reason: text(form, "reason"),
     }),
+    "Stock moved",
   );
 
   if (!sources.length) {
@@ -215,7 +219,7 @@ function LocationForm({ location }: { location?: Location }) {
   const submit = useSubmit((form) => {
     const input = { name: text(form, "name"), description: text(form, "description") };
     return location ? api.updateLocation(orgId, location.id, input) : api.createLocation(orgId, input);
-  });
+  }, location ? "Location updated" : "Location created");
   return (
     <FormShell {...submit} submitLabel={location ? "Save" : "Create"}>
       <Field label="Name" name="name" defaultValue={location?.name} required />

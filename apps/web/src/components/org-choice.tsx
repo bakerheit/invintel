@@ -14,6 +14,11 @@ export const initialOrgChoice: OrgChoiceValue = { mode: "create", name: "", join
 export const toOrgInput = (v: OrgChoiceValue): RegistrationOrganization =>
   v.mode === "create" ? { mode: "create", name: v.name } : { mode: "join", joinCode: v.joinCode };
 
+const OPTIONS = [
+  { value: "create", title: "Create a new organization", text: "Start fresh. You'll be the owner and can invite others." },
+  { value: "join", title: "Join with a code", text: "Your team already has one. Ask an admin for the join code." },
+] as const;
+
 /** Radio toggle between starting an organization and joining one. Swaps the field underneath. */
 export function OrgChoice({ value, onChange, idPrefix = "org" }: {
   value: OrgChoiceValue;
@@ -22,20 +27,25 @@ export function OrgChoice({ value, onChange, idPrefix = "org" }: {
 }) {
   return (
     <fieldset className="grid gap-3">
-      <legend className="mb-1 text-sm font-medium">Organization</legend>
+      <legend className="mb-2 text-sm font-medium">Organization</legend>
       <RadioGroup
         value={value.mode}
         onValueChange={(mode) => onChange({ ...value, mode: mode as OrgChoiceValue["mode"] })}
         className="grid gap-2"
       >
-        <div className="flex items-center gap-2">
-          <RadioGroupItem value="create" id={`${idPrefix}-create`} />
-          <Label htmlFor={`${idPrefix}-create`} className="font-normal">Create a new organization</Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <RadioGroupItem value="join" id={`${idPrefix}-join`} />
-          <Label htmlFor={`${idPrefix}-join`} className="font-normal">Join with a code</Label>
-        </div>
+        {OPTIONS.map((o) => (
+          <Label
+            key={o.value}
+            htmlFor={`${idPrefix}-${o.value}`}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal transition-colors hover:bg-muted/50 has-data-checked:border-primary has-data-checked:bg-accent/50"
+          >
+            <RadioGroupItem value={o.value} id={`${idPrefix}-${o.value}`} className="mt-0.5" />
+            <span className="grid gap-0.5">
+              <span className="text-sm font-medium">{o.title}</span>
+              <span className="text-xs text-muted-foreground">{o.text}</span>
+            </span>
+          </Label>
+        ))}
       </RadioGroup>
       {value.mode === "create" ? (
         <AuthField

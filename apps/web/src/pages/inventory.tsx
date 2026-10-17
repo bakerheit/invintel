@@ -1,15 +1,23 @@
 import type { Item } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Boxes, CircleDollarSign, Layers, Package, Plus, Search, TriangleAlert, X } from "lucide-react";
 import { useCallback } from "react";
 import { useSearchParams } from "react-router";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm";
 import { Dialogs } from "@/components/dialogs";
+import { EmptyState } from "@/components/empty-state";
 import { ItemsTable } from "@/components/items-table";
+import { PageHeader } from "@/components/page-header";
+import { StatCard } from "@/components/stat-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { invalidateOrg, orgKey, useCurrentOrg, useLocations } from "@/lib/org";
+import { needsAttention } from "@/lib/stock";
 import { useUi } from "@/stores/ui";
 
 const ALL = "__all__";
@@ -17,6 +25,7 @@ const ALL = "__all__";
 export default function InventoryPage() {
   const { id: orgId } = useCurrentOrg();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const { search, setSearch, lowStockOnly, setLowStockOnly, openDialog } = useUi();
   const [params, setParams] = useSearchParams();
   const { data: locations = [] } = useLocations(orgId);
@@ -27,59 +36,123 @@ export default function InventoryPage() {
   const locationId = locations.find((l) => l.id === requested)?.id;
 
   const remove = useMutation({
-    mutationFn: (id: string) => api.deleteItem(orgId, id),
-    onSuccess: () => invalidateOrg(qc, orgId),
+    mutationFn: (item: Item) => api.deleteItem(orgId, item.id),
+    onSuccess: async (_data, item) => {
+      await invalidateOrg(qc, orgId);
+      toast.success(`Deleted ${item.name}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
   const onDelete = useCallback(
-    (item: Item) => {
-      if (confirm(`Delete "${item.name}" and its stock history?`)) remove.mutate(item.id);
+    async (item: Item) => {
+      const ok = await confirm({
+        title: `Delete ${item.name}?`,
+        description: "This removes the item and its stock history from every location. It can't be undone.",
+        confirmLabel: "Delete item",
+        destructive: true,
+      });
+      if (ok) remove.mutate(item);
     },
-    [remove],
+    [confirm, remove],
   );
 
   const all = items.data ?? [];
+  const units = all.reduce((sum, i) => sum + i.quantity, 0);
   const totalValue = all.reduce((sum, i) => sum + i.quantity * i.unitCostCents, 0);
-  const lowCount = all.filter((i) => i.quantity <= i.reorderLevel).length;
+  const lowCount = all.filter(needsAttention).length;
+  const filtering = !!search || lowStockOnly || !!locationId;
+
+  const clearFilters = () => {
+    setSearch("");
+    setLowStockOnly(false);
+    setParams({}, { replace: true });
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between">
-        <p className="text-sm text-muted-foreground">
-          {all.length} items · {formatCents(totalValue)} on hand · {lowCount} low stock
-        </p>
-        <Button onClick={() => openDialog({ kind: "create-item" })}>New item</Button>
-      </div>
+    <>
+      <PageHeader
+        title="Inventory"
+        description="Everything you stock, and where it is."
+        actions={
+          <Button onClick={() => openDialog({ kind: "create-item" })}>
+            <Plus /> New item
+          </Button>
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Input className="max-w-xs" placeholder="Search items…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <Select
-          value={locationId ?? ALL}
-          items={[{ value: ALL, label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: l.name }))]}
-          onValueChange={(v) => setParams(!v || v === ALL ? {} : { location: v }, { replace: true })}
-        >
-          <SelectTrigger className="w-48" aria-label="Location filter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All locations</SelectItem>
-            {locations.map((l) => (
-              <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button variant={lowStockOnly ? "default" : "outline"} onClick={() => setLowStockOnly(!lowStockOnly)}>
-          Low stock only
-        </Button>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Items" value={all.length.toLocaleString()} icon={Package} hint="Distinct SKUs" />
+        <StatCard label="Units on hand" value={units.toLocaleString()} icon={Layers} hint={`Across ${locations.length} ${locations.length === 1 ? "location" : "locations"}`} />
+        <StatCard label="Inventory value" value={formatCents(totalValue)} icon={CircleDollarSign} hint="At unit cost" />
+        <StatCard
+          label="Low stock"
+          value={lowCount.toLocaleString()}
+          icon={TriangleAlert}
+          tone={lowCount ? "warning" : "default"}
+          hint={lowCount ? (lowStockOnly ? "Showing only these" : "Low or out of stock. Click to filter") : "Everything is stocked"}
+          onClick={lowCount || lowStockOnly ? () => setLowStockOnly(!lowStockOnly) : undefined}
+          active={lowStockOnly}
+        />
       </div>
 
       {items.error ? (
         <p className="text-destructive">Couldn't load items: {items.error.message}</p>
       ) : items.isLoading ? (
-        <p className="text-muted-foreground">Loading…</p>
+        <div className="space-y-3">
+          <Skeleton className="h-9 w-full max-w-md" />
+          <Skeleton className="h-72 w-full rounded-xl" />
+        </div>
+      ) : !all.length ? (
+        <div className="rounded-xl border border-dashed bg-card">
+          <EmptyState
+            icon={Boxes}
+            title="No items yet"
+            description="Add your first item, then record how many you have and where they're kept."
+            action={
+              <Button onClick={() => openDialog({ kind: "create-item" })}>
+                <Plus /> Add your first item
+              </Button>
+            }
+          />
+        </div>
       ) : (
-        <ItemsTable items={all} locations={locations} locationId={locationId} onDelete={onDelete} />
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="pl-8"
+                placeholder="Search name, SKU, category…"
+                aria-label="Search items"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <Select
+              value={locationId ?? ALL}
+              onValueChange={(v) => setParams(!v || v === ALL ? {} : { location: v }, { replace: true })}
+              items={[{ value: ALL, label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: l.name }))]}
+            >
+              <SelectTrigger className="w-full sm:w-48" aria-label="Location filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All locations</SelectItem>
+                {locations.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {filtering && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X /> Clear filters
+              </Button>
+            )}
+          </div>
+          <ItemsTable items={all} locations={locations} locationId={locationId} onDelete={onDelete} />
+        </div>
       )}
       <Dialogs />
-    </div>
+    </>
   );
 }

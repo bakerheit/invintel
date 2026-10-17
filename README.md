@@ -51,6 +51,7 @@ Open http://localhost:5173 and create an account. At sign-up you either **create
 ## Scripts
 
 - `pnpm dev` run API and web together
+- `API_URL=http://localhost:3002 pnpm --filter @invintel/web dev` point the web dev server at a different API (default `http://localhost:3001`)
 - `pnpm typecheck` typecheck every package
 - `pnpm test` run the API tests (Vitest, needs `docker compose up -d`; uses a throwaway database)
 - `pnpm build` typecheck the API and build the web app
