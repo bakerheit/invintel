@@ -3,125 +3,146 @@ import {
   adjustmentInputSchema,
   itemInputSchema,
   itemUpdateSchema,
+  type Item,
+  type StockMovement,
 } from "@invintel/shared";
-import { desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { ObjectId } from "mongodb";
 import { z } from "zod";
-import type { Db } from "./db.js";
-import { items, stockMovements } from "./schema.js";
+import { createAuth, type AuthEnv, type AuthOptions } from "./auth.js";
+import { isDuplicateKey, type ItemDoc, type MovementDoc, type Store } from "./db.js";
 
-const idParam = z.object({ id: z.coerce.number().int().positive() });
+const idParam = z.object({ id: z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id") });
 
-const isUniqueError = (e: unknown) =>
-  e instanceof Error && "code" in e && e.code === "SQLITE_CONSTRAINT_UNIQUE";
+const toItem = ({ _id, createdAt, updatedAt, ...rest }: ItemDoc): Item => ({
+  id: _id.toHexString(),
+  ...rest,
+  createdAt: createdAt.toISOString(),
+  updatedAt: updatedAt.toISOString(),
+});
 
-export function createApp(db: Db) {
+const toMovement = (m: MovementDoc): StockMovement => ({
+  id: m._id.toHexString(),
+  itemId: m.itemId.toHexString(),
+  delta: m.delta,
+  reason: m.reason,
+  createdAt: m.createdAt.toISOString(),
+});
+
+export function createApp(store: Store, authOptions: AuthOptions) {
   const app = new Hono();
+  const auth = createAuth(store, authOptions);
 
   app.use("*", logger());
-  app.use("/api/*", cors({ origin: (o) => o ?? "*" }));
+  // No CORS: the web app talks to the API same-origin (Vite proxies /api in dev).
 
   app.get("/api/health", (c) => c.json({ ok: true }));
+  app.route("/api/auth", auth.routes);
 
-  app.get("/api/items", (c) => c.json(db.select().from(items).orderBy(items.name).all()));
+  const api = new Hono<AuthEnv>();
+  api.use("*", auth.requireAuth);
 
-  app.get("/api/items/:id", zValidator("param", idParam), (c) => {
-    const { id } = c.req.valid("param");
-    const item = db.select().from(items).where(eq(items.id, id)).get();
-    return item ? c.json(item) : c.json({ error: "Item not found" }, 404);
+  api.get("/items", async (c) => {
+    const docs = await store.items.find().sort({ name: 1 }).toArray();
+    return c.json(docs.map(toItem));
   });
 
-  app.post("/api/items", zValidator("json", itemInputSchema), (c) => {
+  api.get("/items/:id", zValidator("param", idParam), async (c) => {
+    const doc = await store.items.findOne({ _id: new ObjectId(c.req.valid("param").id) });
+    return doc ? c.json(toItem(doc)) : c.json({ error: "Item not found" }, 404);
+  });
+
+  api.post("/items", zValidator("json", itemInputSchema), async (c) => {
     const input = c.req.valid("json");
+    const now = new Date();
+    const doc: ItemDoc = { _id: new ObjectId(), ...input, createdAt: now, updatedAt: now };
     try {
-      const item = db.transaction((tx) => {
-        const created = tx.insert(items).values(input).returning().get();
-        if (created.quantity !== 0) {
-          tx.insert(stockMovements)
-            .values({ itemId: created.id, delta: created.quantity, reason: "Initial stock" })
-            .run();
-        }
-        return created;
-      });
-      return c.json(item, 201);
+      await store.items.insertOne(doc);
     } catch (e) {
-      if (isUniqueError(e)) return c.json({ error: `SKU "${input.sku}" already exists` }, 409);
+      if (isDuplicateKey(e)) return c.json({ error: `SKU "${input.sku}" already exists` }, 409);
       throw e;
     }
+    if (doc.quantity !== 0) {
+      await store.movements.insertOne({
+        _id: new ObjectId(),
+        itemId: doc._id,
+        delta: doc.quantity,
+        reason: "Initial stock",
+        createdAt: now,
+      });
+    }
+    return c.json(toItem(doc), 201);
   });
 
-  app.patch(
-    "/api/items/:id",
+  api.patch(
+    "/items/:id",
     zValidator("param", idParam),
     zValidator("json", itemUpdateSchema),
-    (c) => {
-      const { id } = c.req.valid("param");
-      const { quantity: _ignored, ...patch } = c.req.valid("json");
+    async (c) => {
       // Quantity only changes through stock adjustments so history stays accurate.
+      const { quantity: _ignored, ...patch } = c.req.valid("json");
       try {
-        const updated = db
-          .update(items)
-          .set({ ...patch, updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))` })
-          .where(eq(items.id, id))
-          .returning()
-          .get();
-        return updated ? c.json(updated) : c.json({ error: "Item not found" }, 404);
+        const updated = await store.items.findOneAndUpdate(
+          { _id: new ObjectId(c.req.valid("param").id) },
+          { $set: { ...patch, updatedAt: new Date() } },
+          { returnDocument: "after" },
+        );
+        return updated ? c.json(toItem(updated)) : c.json({ error: "Item not found" }, 404);
       } catch (e) {
-        if (isUniqueError(e)) return c.json({ error: "SKU already exists" }, 409);
+        if (isDuplicateKey(e)) return c.json({ error: "SKU already exists" }, 409);
         throw e;
       }
     },
   );
 
-  app.delete("/api/items/:id", zValidator("param", idParam), (c) => {
-    const { id } = c.req.valid("param");
-    const deleted = db.delete(items).where(eq(items.id, id)).returning({ id: items.id }).get();
-    return deleted ? c.body(null, 204) : c.json({ error: "Item not found" }, 404);
+  api.delete("/items/:id", zValidator("param", idParam), async (c) => {
+    const _id = new ObjectId(c.req.valid("param").id);
+    const { deletedCount } = await store.items.deleteOne({ _id });
+    if (!deletedCount) return c.json({ error: "Item not found" }, 404);
+    await store.movements.deleteMany({ itemId: _id });
+    return c.body(null, 204);
   });
 
-  app.get("/api/items/:id/movements", zValidator("param", idParam), (c) => {
-    const { id } = c.req.valid("param");
-    return c.json(
-      db
-        .select()
-        .from(stockMovements)
-        .where(eq(stockMovements.itemId, id))
-        .orderBy(desc(stockMovements.id))
-        .all(),
-    );
+  api.get("/items/:id/movements", zValidator("param", idParam), async (c) => {
+    const docs = await store.movements
+      .find({ itemId: new ObjectId(c.req.valid("param").id) })
+      .sort({ createdAt: -1, _id: -1 })
+      .toArray();
+    return c.json(docs.map(toMovement));
   });
 
-  app.post(
-    "/api/items/:id/adjust",
+  api.post(
+    "/items/:id/adjust",
     zValidator("param", idParam),
     zValidator("json", adjustmentInputSchema),
-    (c) => {
-      const { id } = c.req.valid("param");
+    async (c) => {
+      const _id = new ObjectId(c.req.valid("param").id);
       const { delta, reason } = c.req.valid("json");
-      const result = db.transaction((tx) => {
-        const item = tx.select().from(items).where(eq(items.id, id)).get();
-        if (!item) return { status: 404 as const, error: "Item not found" };
-        if (item.quantity + delta < 0) {
-          return { status: 422 as const, error: `Only ${item.quantity} in stock` };
-        }
-        const updated = tx
-          .update(items)
-          .set({
-            quantity: item.quantity + delta,
-            updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-          })
-          .where(eq(items.id, id))
-          .returning()
-          .get();
-        tx.insert(stockMovements).values({ itemId: id, delta, reason }).run();
-        return { status: 200 as const, item: updated };
+      // The quantity guard lives in the filter so concurrent removals can't oversell.
+      const updated = await store.items.findOneAndUpdate(
+        delta < 0 ? { _id, quantity: { $gte: -delta } } : { _id },
+        { $inc: { quantity: delta }, $set: { updatedAt: new Date() } },
+        { returnDocument: "after" },
+      );
+      if (!updated) {
+        const existing = await store.items.findOne({ _id }, { projection: { quantity: 1 } });
+        return existing
+          ? c.json({ error: `Only ${existing.quantity} in stock` }, 422)
+          : c.json({ error: "Item not found" }, 404);
+      }
+      await store.movements.insertOne({
+        _id: new ObjectId(),
+        itemId: _id,
+        delta,
+        reason,
+        createdAt: new Date(),
       });
-      if ("error" in result) return c.json({ error: result.error }, result.status);
-      return c.json(result.item);
+      return c.json(toItem(updated));
     },
   );
+
+  app.route("/api", api);
 
   app.onError((err, c) => {
     console.error(err);

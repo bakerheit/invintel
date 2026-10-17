@@ -17,7 +17,7 @@ export const itemUpdateSchema = itemInputSchema.partial();
 export type ItemUpdate = z.infer<typeof itemUpdateSchema>;
 
 export interface Item extends ItemInput {
-  id: number;
+  id: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,9 +29,29 @@ export const adjustmentInputSchema = z.object({
 export type AdjustmentInput = z.infer<typeof adjustmentInputSchema>;
 
 export interface StockMovement {
-  id: number;
-  itemId: number;
+  id: string;
+  itemId: string;
   delta: number;
   reason: string;
   createdAt: string;
+}
+
+export const registerInputSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().toLowerCase().max(254).pipe(z.email()),
+  password: z.string().min(8, "Password must be at least 8 characters").max(128),
+});
+export type RegisterInput = z.infer<typeof registerInputSchema>;
+
+export const loginInputSchema = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email()),
+  password: z.string().min(1).max(128),
+});
+export type LoginInput = z.infer<typeof loginInputSchema>;
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "member";
 }

@@ -4,27 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "build": "tsc --noEmit",
-    "start": "tsx src/index.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/migrate.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.0",
     "@hono/zod-validator": "^0.7.0",
     "@invintel/shared": "workspace:*",
-    "better-sqlite3": "^12.0.0",
-    "drizzle-orm": "^0.44.0",
+    "@node-rs/argon2": "^2.2.2",
     "hono": "^4.9.0",
+    "mongodb": "^7.7.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^24.0.0",
-    "drizzle-kit": "^0.31.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"

@@ -7,15 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { formatCents } from "@/lib/format";
+import { useAuth } from "@/stores/auth";
 import { useUi } from "@/stores/ui";
 
 export default function App() {
   const qc = useQueryClient();
+  const { user, logout } = useAuth();
   const { search, setSearch, lowStockOnly, setLowStockOnly, openDialog } = useUi();
   const { data: items = [], isLoading, error } = useQuery({ queryKey: ["items"], queryFn: api.listItems });
 
   const remove = useMutation({
-    mutationFn: (id: number) => api.deleteItem(id),
+    mutationFn: (id: string) => api.deleteItem(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["items"] }),
   });
 
@@ -38,7 +40,11 @@ export default function App() {
             {items.length} items · {formatCents(totalValue)} on hand · {lowCount} low stock
           </p>
         </div>
-        <Button onClick={() => openDialog({ kind: "create" })}>New item</Button>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">{user?.name}</span>
+          <Button variant="outline" onClick={() => void logout()}>Sign out</Button>
+          <Button onClick={() => openDialog({ kind: "create" })}>New item</Button>
+        </div>
       </header>
 
       <div className="flex items-center gap-3">
