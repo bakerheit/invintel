@@ -1,0 +1,14 @@
+{
+  "name": "invintel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open source inventory management web app by Bakerheit Technologies",
+  "license": "MIT",
+  "packageManager": "pnpm@11.0.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @invintel/api --filter @invintel/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}
