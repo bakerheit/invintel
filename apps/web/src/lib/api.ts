@@ -2,6 +2,7 @@ import type {
   ActivityPage,
   AuditPage,
   AuditVerification,
+  Overview,
   AdjustmentInput,
   Item,
   ItemCreate,
@@ -79,6 +80,8 @@ export const api = {
   renameOrg: (orgId: string, input: OrganizationInput) => request<OrgSummary>(`/orgs/${orgId}`, patch(input)),
   rotateJoinCode: (orgId: string) => request<OrgSummary>(`/orgs/${orgId}/join-code`, post()),
   listMembers: (orgId: string) => request<OrgMember[]>(`/orgs/${orgId}/members`),
+
+  overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
   listLocations: (orgId: string) => request<Location[]>(`/orgs/${orgId}/locations`),
   createLocation: (orgId: string, input: Partial<LocationInput> & Pick<LocationInput, "name">) =>

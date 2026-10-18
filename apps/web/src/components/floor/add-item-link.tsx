@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 export function AddItemLink({ orgId, code }: { orgId: string; code: string }) {
   return (
     <Link
-      to={`/o/${orgId}?newItem=${encodeURIComponent(code)}`}
+      to={`/o/${orgId}/inventory?newItem=${encodeURIComponent(code)}`}
       className={cn(buttonVariants({ variant: "outline" }), "h-14 w-full text-base")}
     >
       <PackagePlus /> Add "{code}" as a new item

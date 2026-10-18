@@ -13,6 +13,7 @@ import { auditActor, recordAudit } from "./audit.js";
 import { createFloorRoutes } from "./floor.js";
 import { createItemRoutes } from "./items.js";
 import { createLocationRoutes } from "./locations.js";
+import { createOverviewRoutes } from "./overview.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
 import {
   createOrganization,
@@ -117,6 +118,7 @@ export function createOrgRoutes(store: Store) {
     return c.json(members);
   });
 
+  scoped.route("/overview", createOverviewRoutes(store));
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));
   scoped.route("/audit", createAuditRoutes(store));

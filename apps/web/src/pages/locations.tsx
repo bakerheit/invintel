@@ -175,7 +175,7 @@ export default function LocationsPage() {
                       <MoreHorizontal />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="min-w-44">
-                      <DropdownMenuItem onClick={() => navigate(`/o/${org.id}?location=${l.id}`)}>
+                      <DropdownMenuItem onClick={() => navigate(`/o/${org.id}/inventory?location=${l.id}`)}>
                         <Eye /> View stock
                       </DropdownMenuItem>
                       {admin && (

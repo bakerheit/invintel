@@ -388,4 +388,41 @@ export function formatAuditValue(field: string, value: unknown): string {
   if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
   const text = String(value);
   return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+// ---------- overview ----------
+
+export type AttentionStatus = "out" | "low";
+
+/** An item that needs reordering or moving: out of stock, or at/under its reorder level. */
+export interface AttentionItem {
+  id: string;
+  sku: string;
+  name: string;
+  quantity: number;
+  reorderLevel: number;
+  status: AttentionStatus;
+}
+
+export interface TypeTotal {
+  type: LocationType;
+  locations: number;
+  units: number;
+  valueCents: number;
+}
+
+/** The "what needs attention" summary on the Overview page. */
+export interface Overview {
+  items: number;
+  locations: number;
+  units: number;
+  valueCents: number;
+  outCount: number;
+  lowCount: number;
+  /** Out of stock first, then lowest relative to the reorder level. Capped at 10. */
+  attention: AttentionItem[];
+  /** Stock in each kind of place, so the plant can see how much is in receiving, at machines, and so on. */
+  byType: TypeTotal[];
+  /** Entries in the last 24 hours. */
+  movements24h: number;
+  /** Stock sitting in receiving locations: arrived but not yet put away. */
+  awaitingPutaway: number;
 }
