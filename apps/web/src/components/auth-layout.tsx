@@ -15,10 +15,10 @@ export function AuthLayout({ title, description, children }: {
 }) {
   return (
     <div className="grid min-h-svh lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-      <aside className="relative hidden flex-col justify-between overflow-hidden bg-[linear-gradient(160deg,oklch(0.6_0.2_350),oklch(0.42_0.2_305))] p-10 text-white lg:flex">
+      <aside className="relative hidden flex-col justify-between overflow-hidden bg-[linear-gradient(160deg,oklch(0.74_0.17_355),oklch(0.56_0.23_345),oklch(0.46_0.2_325))] p-10 text-white lg:flex">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,oklch(1_0_0/0.22),transparent_55%),radial-gradient(circle_at_90%_100%,oklch(0.25_0.12_305/0.45),transparent_60%)]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,oklch(1_0_0/0.22),transparent_55%),radial-gradient(circle_at_90%_100%,oklch(0.3_0.14_340/0.4),transparent_60%)]"
         />
         <Wordmark className="relative [&>div]:bg-white/15 [&>div]:text-white [&>div]:shadow-none" />
         <div className="relative max-w-md space-y-8">
