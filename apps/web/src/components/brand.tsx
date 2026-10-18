@@ -1,4 +1,4 @@
-import { Crown } from "lucide-react";
+import { Boxes } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function LogoMark({ className }: { className?: string }) {
@@ -9,7 +9,7 @@ export function LogoMark({ className }: { className?: string }) {
         className,
       )}
     >
-      <Crown className="size-4.5" />
+      <Boxes className="size-4.5" />
     </div>
   );
 }
@@ -18,7 +18,7 @@ export function Wordmark({ className }: { className?: string }) {
   return (
     <div className={cn("flex items-center gap-2.5", className)}>
       <LogoMark />
-      <span className="text-base font-semibold tracking-tight">Princess</span>
+      <span className="text-base font-semibold tracking-tight">Invintel</span>
     </div>
   );
 }
