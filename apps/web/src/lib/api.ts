@@ -1,4 +1,16 @@
 import type {
+  B2BAckInput,
+  B2BMessage,
+  B2BMessageDetail,
+  CapturedInvoice,
+  CapturedInvoiceUpdate,
+  InvoiceUpload,
+  OrderExchange,
+  PortalOrder,
+  SupplierAnswer,
+  TradingPartner,
+  TradingPartnerInput,
+  TradingPartnerUpdate,
   RecallDrill,
   TraceQuery,
   TraceResult,
@@ -329,4 +341,29 @@ export const api = {
     request<ScrapReport>(`/orgs/${orgId}/production/scrap?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`),
   scrapCsvUrl: (orgId: string, days: number, workCenterId?: string) =>
     `/api/orgs/${orgId}/production/scrap/lines.csv?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`,
+
+  // Business-to-business exchange: partners, messages, supplier orders, captured invoices.
+  b2bBridges: (orgId: string) => request<{ id: string; carries: string[] }[]>(`/orgs/${orgId}/b2b/bridges`),
+  b2bPartners: (orgId: string) => request<TradingPartner[]>(`/orgs/${orgId}/b2b/partners`),
+  createB2bPartner: (orgId: string, input: TradingPartnerInput) => request<TradingPartner>(`/orgs/${orgId}/b2b/partners`, post(input)),
+  updateB2bPartner: (orgId: string, id: string, input: TradingPartnerUpdate) => request<TradingPartner>(`/orgs/${orgId}/b2b/partners/${id}`, patch(input)),
+  b2bMessages: (orgId: string, q: { direction?: string; state?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
+    return request<B2BMessage[]>(`/orgs/${orgId}/b2b/messages?${qs}`);
+  },
+  b2bMessage: (orgId: string, id: string) => request<B2BMessageDetail>(`/orgs/${orgId}/b2b/messages/${id}`),
+  retryB2bMessage: (orgId: string, id: string) => request<B2BMessage>(`/orgs/${orgId}/b2b/messages/${id}/retry`, post({})),
+  ackB2bMessage: (orgId: string, id: string, input: B2BAckInput) => request<B2BMessage>(`/orgs/${orgId}/b2b/messages/${id}/ack`, post(input)),
+  orderExchange: (orgId: string, poId: string) => request<OrderExchange>(`/orgs/${orgId}/b2b/orders/${poId}`),
+  sendOrderToSupplier: (orgId: string, poId: string) => request<B2BMessage>(`/orgs/${orgId}/b2b/orders/${poId}/send`, post({})),
+  orderPreviewUrl: (orgId: string, poId: string) => `/api/orgs/${orgId}/b2b/orders/${poId}/preview.pdf`,
+  capturedInvoices: (orgId: string, status = "captured") => request<CapturedInvoice[]>(`/orgs/${orgId}/b2b/invoices?status=${status}`),
+  updateCapturedInvoice: (orgId: string, id: string, input: CapturedInvoiceUpdate) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/${id}`, patch(input)),
+  discardCapturedInvoice: (orgId: string, id: string, note: string) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/${id}/discard`, post({ note })),
+  uploadInvoice: (orgId: string, input: InvoiceUpload) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/upload`, post(input)),
+  capturedInvoiceInput: (orgId: string, id: string) => request<Record<string, unknown>>(`/orgs/${orgId}/b2b/invoices/${id}/invoice-input`),
+  b2bFileUrl: (orgId: string, id: string) => `/api/orgs/${orgId}/b2b/files/${id}`,
+  // The supplier's page: no session, the token in the link is the key.
+  portalOrder: (token: string) => request<PortalOrder>(`/b2b/portal/${token}`),
+  portalAnswer: (token: string, answer: SupplierAnswer) => request<{ ok: true }>(`/b2b/portal/${token}/answer`, post(answer)),
 };

@@ -21,6 +21,8 @@ import ProductionFloorPage from "./pages/floor/production";
 import ProductionPage from "./pages/production";
 import QualityFloorPage from "./pages/floor/quality";
 import QualityPage from "./pages/quality";
+import ExchangePage from "./pages/exchange";
+import SupplierPortalPage from "./pages/supplier-portal";
 import ReceivePage from "./pages/floor/receive";
 import InventoryPage from "./pages/inventory";
 import ItemDetailPage from "./pages/item-detail";
@@ -77,6 +79,7 @@ createRoot(document.getElementById("root")!).render(
     <Providers>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/b2b/s/:token" element={<SupplierPortalPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route element={<RequireAuth />}>
           <Route path="/" element={<OrgRedirect />} />
@@ -102,6 +105,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="labels" element={<LabelsPage />} />
               <Route path="production" element={<ProductionPage />} />
               <Route path="quality" element={<QualityPage />} />
+              <Route path="exchange" element={<ExchangePage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="floor" element={<FloorLayout />}>
