@@ -376,7 +376,7 @@ export interface B2BMessageDoc {
   docType: import("@invintel/shared").B2BDocType;
   state: import("@invintel/shared").B2BState;
   idempotencyKey: string;
-  correlation: { poId?: string; poNumber?: string; invoiceId?: string; shipmentId?: string; partnerRef?: string };
+  correlation: { poId?: string; poNumber?: string; invoiceId?: string; shipmentId?: string; partnerRef?: string; controlNumber?: string };
   /** The document exactly as carried. Never changed after it is written. */
   raw: { body: string; contentType: string; hash: string; bytes: number };
   providerMessageId?: string;
@@ -418,7 +418,7 @@ export interface CapturedInvoiceDoc {
   status: "captured" | "converted" | "discarded";
   partnerId: ObjectId;
   messageId: ObjectId;
-  source: "email" | "upload" | "json" | "ubl";
+  source: "email" | "upload" | "json" | "ubl" | "x12";
   from: string;
   subject: string;
   invoiceNumber: string;

@@ -1,0 +1,20 @@
+ISA*00*          *00*          *ZZ*NWCORR         *ZZ*SUNRISEPM      *261018*0930*U*00401*000000101*0*T*>~
+GS*PO*NWCORR*SUNRISEPM*20261018*0930*101*X*004010~
+ST*850*0001~
+BEG*00*SA*PO-48213**20261018~
+CUR*BY*USD~
+DTM*002*20261105~
+NTE*GEN*Deliver to the east dock. Call before arrival.~
+N1*BY*Northwind Corrugated Co.~
+N1*SE*Sunrise Paper Mill~
+PO1*1*6*RL*420.00**BP*LINER-T33~
+PID*F****Test liner 33 lb, 60 in roll~
+PO1*2*12.500*KG*82.50**BP*STARCH-25~
+PID*F****Corn starch, 25 kg bag~
+PO1*3*8*EA*95.00**BP*INK-BLK~
+PID*F****Flexo ink, black, 5 gal~
+CTT*3*26.500~
+AMT*TT*4311.25~
+SE*16*0001~
+GE*1*101~
+IEA*1*000000101~

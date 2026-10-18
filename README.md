@@ -281,6 +281,18 @@ Mail goes through `apps/api/src/mail.ts`. With no settings it writes `.eml` file
 
 Code: `b2b-orders.ts`, `order-doc.ts`, `mime.ts`, `mail.ts`, `invoice-capture.ts`, `b2b-capture-routes.ts`; shared types in `packages/shared/src/b2bdocs.ts` and `b2bcapture.ts`. Demo data has a test partner "Midwest Paper Mill" and an uploaded invoice for the demo purchase order.
 
+### X12 EDI (850, 855, 856, 810, 997)
+
+A second bridge on the B2B core (INV-14): `x12`. Orders go out as an **850**; the supplier's **855** (acknowledgment), **856** (ship notice) and **810** (invoice) come back and show up where the email answers do (the order's dialog, the log, Incoming invoices); every document we receive is answered with a **997** (receipt) and every 997 we get is matched to what we sent. One transaction set per interchange, versions 004010 and 005010.
+
+- **Partner setup** (Documents > Partners, bridge "X12 EDI"): our qualifier + id and theirs (ISA05-08, e.g. `ZZ` / `NWCORR`), version, transport, optional secret variable name (so they can post documents to `POST /api/b2b/inbound/:partnerId`), optional extra unit codes (`{"sheet":"SH"}`), receipts on/off. Saved settings are checked.
+- **Test and live are separate.** A test partner only ever sends and accepts ISA15 `T`; a live one only `P`. A document in the wrong mode, from other ids, or addressed to someone else is refused (and nothing is stored).
+- **Strict on the way out.** An order with a unit that has no X12 code, a part number containing `*` `~` `>`, a number that is too long, or a total that does not add up is not sent; the reasons are listed. Names and descriptions are cleaned (reserved characters become spaces; descriptions are cut to 80). Control numbers (ISA13 = GS06) come from an atomic counter per partner and wrap after 999999999.
+- **Strict on the way in.** Envelope counts and control numbers must match (SE/GE/IEA), money has at most two decimals, quantities are plain numbers, units must be known. A document is read completely or refused with every problem listed; nothing is guessed. An inbound 810 becomes a captured invoice (every field marked "read"); it never becomes a payable by itself.
+- **The test partner.** There is no network transport yet (AS2, SFTP or a provider would be one more adapter). Partners on the `loopback` transport get a built-in pretend supplier: in Documents, open a sent order and pick what it does (receipt and accept / accept with changes / reject / refuse as malformed / ship notice / invoice) then "Let it answer". Its documents go through the same checks as anything from outside. Only for test partners.
+- **Code.** `apps/api/src/x12.ts` (envelope writer, strict parser, exact decimal helpers), `x12-maps.ts` (pure mappers to and from the canonical documents), `x12-bridge.ts` (bridge, partner settings, control numbers, what happens on arrival), `x12-loopback.ts` (test partner). Golden files with fictional companies are in `apps/api/src/golden/x12/`: a change to one is a change to what partners receive; `UPDATE_GOLDEN=1 pnpm --filter @invintel/api test x12` rewrites them (read the diff).
+- **Demo.** The demo has "Lakeshore Film & Resin" as an X12 test partner with a placed order: Purchasing > PO-0002 > "Send as X12 (850)", then Documents > that order > "Let it answer".
+
 ## API
 
 Auth (no session needed except `/me`):

@@ -9,14 +9,14 @@ const id = z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id");
 
 /** Everything we might exchange. Bridges say which of these they carry. */
 export const B2B_DOC_TYPES = [
-  "order", "order_change", "order_response", "despatch_advice", "invoice", "remittance", "query", "query_response",
+  "order", "order_change", "order_response", "despatch_advice", "invoice", "remittance", "query", "query_response", "functional_ack",
 ] as const;
 export const b2bDocTypeSchema = z.enum(B2B_DOC_TYPES);
 export type B2BDocType = z.infer<typeof b2bDocTypeSchema>;
 
 export const B2B_DOC_LABELS: Record<B2BDocType, string> = {
   order: "Purchase order", order_change: "Order change", order_response: "Order acknowledgement", despatch_advice: "Ship notice",
-  invoice: "Invoice", remittance: "Payment advice", query: "Question", query_response: "Answer",
+  invoice: "Invoice", remittance: "Payment advice", query: "Question", query_response: "Answer", functional_ack: "Receipt (997)",
 };
 
 /** queued: written, not yet handed to the bridge. sent/delivered: the bridge took it / it arrived (transport level). acknowledged/rejected:
@@ -100,6 +100,8 @@ export const b2bCorrelationSchema = z.object({
   shipmentId: id.optional(),
   /** The other side's reference (their PO, ship notice or invoice number). */
   partnerRef: z.string().trim().max(80).optional(),
+  /** EDI interchange control number (ISA13) of what we sent, so the partner's receipt can be matched to it. */
+  controlNumber: z.string().trim().max(20).optional(),
 });
 export type B2BCorrelation = z.infer<typeof b2bCorrelationSchema>;
 

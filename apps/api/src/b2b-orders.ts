@@ -10,6 +10,9 @@ import { getMailTransport } from "./mail.js";
 import { isEmail } from "./mime.js";
 import { buildCanonicalOrder, renderOrderPdf } from "./order-doc.js";
 import { toOrders } from "./purchasing.js";
+import { sendX12Order, X12_BRIDGE } from "./x12-bridge.js";
+import { answerOf, readX12 } from "./x12-maps.js";
+import { X12_CONTENT_TYPE } from "./x12.js";
 import type { Actor } from "./stock-service.js";
 
 // INV-12: sending a purchase order by email (a PDF and a secure link) and letting the supplier answer on a plain page:
@@ -101,6 +104,11 @@ export async function sendPurchaseOrder(store: Store, orgId: ObjectId, actor: Ac
   const revision = (await store.b2bMessages.countDocuments({ orgId, direction: "out", docType: "order", "correlation.poId": poId.toHexString() })) + 1;
   const [order] = await toOrders(store, [po]);
   const supplier = await store.suppliers.findOne({ _id: po.supplierId });
+  if (partner.bridge === X12_BRIDGE) {
+    // EDI partners get an 850 and no supplier page; their system answers with a 997 and an 855.
+    const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: "", portalUrl: null, revision });
+    return sendX12Order(store, orgId, actor, partner, canonical, poId);
+  }
   const { link, url } = await newLink(store, orgId, partner._id, poId);
   const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: partner.bridgeConfig.to ?? supplier?.email ?? "", portalUrl: url, revision });
   const res = await sendMessage(store, orgId, actor, partner._id, {
@@ -128,6 +136,11 @@ async function answersFor(store: Store, orgId: ObjectId, poId: ObjectId): Promis
   const docs = await store.b2bMessages.find({ orgId, direction: "in", "correlation.poId": poId.toHexString(), docType: { $in: ["order_response", "despatch_advice"] } }).sort({ createdAt: 1 }).toArray();
   return docs.flatMap((d) => {
     try {
+      if (d.raw.contentType === X12_CONTENT_TYPE) {
+        const r = readX12(d.raw.body);
+        const a = r.ok ? answerOf(r.doc) : null;
+        return a ? [{ ...a, at: d.createdAt } as Answer] : [];
+      }
       const j = JSON.parse(d.raw.body);
       return [{ ...j, at: d.createdAt } as Answer];
     } catch {

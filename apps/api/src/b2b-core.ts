@@ -34,11 +34,16 @@ export type InboundResult =
 export interface Bridge {
   /** The name partners refer to in `bridge`. */
   id: string;
+  /** Checks a partner's settings when it is saved; returns a message for the person, or null when fine. */
+  validateConfig?(config: Record<string, string>, mode: "test" | "live"): string | null;
   /** Document types this bridge can carry; sending another type fails before anything is attempted. */
   carries: B2BDocType[];
   send(message: { id: string; docType: B2BDocType; body: string; contentType: string; idempotencyKey: string; correlation: B2BMessageDoc["correlation"] }, partner: TradingPartnerDoc): Promise<SendResult>;
   verifyInbound(req: InboundRequest, partner: TradingPartnerDoc): Promise<InboundResult>;
 }
+
+/** Who does things nobody asked for in the moment (returning a receipt for a document that just arrived). Audit shows it as "Invintel" with no user. */
+export const systemActor = { userId: null, userName: "Invintel" } as unknown as Actor;
 
 const bridges = new Map<string, Bridge>();
 export const registerBridge = (b: Bridge) => { bridges.set(b.id, b); };

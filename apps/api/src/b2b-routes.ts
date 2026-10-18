@@ -11,6 +11,8 @@ import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.j
 import { bridgeIds, getBridge, presentMessages, receiveMessage, recordAck, retryMessage, sendMessage } from "./b2b-core.js";
 import { createCaptureRoutes, createFileRoutes } from "./b2b-capture-routes.js";
 import { orderExchange, previewPurchaseOrder, sendPurchaseOrder } from "./b2b-orders.js";
+import "./x12-bridge.js";
+import { runTestPartner, SCENARIOS } from "./x12-loopback.js";
 import { duplicateField, isDuplicateKey, type Store, type TradingPartnerDoc } from "./db.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
@@ -27,9 +29,14 @@ const toPartner = (p: TradingPartnerDoc): TradingPartner => ({
 export function createB2BRoutes(store: Store) {
   const r = new Hono<OrgEnv>();
 
-  async function check(orgId: ObjectId, p: { bridge?: string; supplierId?: string | null }) {
+  async function check(orgId: ObjectId, p: { bridge?: string; supplierId?: string | null; bridgeConfig?: Record<string, string>; mode?: "test" | "live" }, current?: TradingPartnerDoc | null) {
     if (p.bridge !== undefined && !getBridge(p.bridge)) return { status: 422 as const, error: `There is no bridge called "${p.bridge}". Available: ${bridgeIds().join(", ")}` };
     if (p.supplierId && !(await store.suppliers.findOne({ _id: oid(p.supplierId), orgId }, { projection: { _id: 1 } }))) return { status: 404 as const, error: "Supplier not found" };
+    // A bridge may check its own settings (the X12 bridge wants ids and a version); what is saved is always the merged result.
+    if (p.bridge !== undefined || p.bridgeConfig !== undefined || p.mode !== undefined) {
+      const problem = getBridge(p.bridge ?? current?.bridge ?? "")?.validateConfig?.(p.bridgeConfig ?? current?.bridgeConfig ?? {}, p.mode ?? current?.mode ?? "test");
+      if (problem) return { status: 422 as const, error: problem };
+    }
     return null;
   }
 
@@ -59,7 +66,7 @@ export function createB2BRoutes(store: Store) {
   r.patch("/partners/:id", requireRole("admin"), zValidator("param", idParam), zValidator("json", tradingPartnerUpdateSchema), async (c) => {
     const orgId = c.get("org")._id;
     const patch = c.req.valid("json");
-    const bad = await check(orgId, patch);
+    const bad = await check(orgId, patch, await store.tradingPartners.findOne({ _id: oid(c.req.valid("param").id), orgId }));
     if (bad) return c.json({ error: bad.error }, bad.status);
     const { supplierId, ...rest } = patch;
     let before: TradingPartnerDoc | null;
@@ -147,6 +154,14 @@ export function createB2BRoutes(store: Store) {
     const res = await retryMessage(store, orgId, actorOf(c.get("user")), oid(c.req.valid("param").id));
     if (!res.ok) return c.json({ error: res.error }, res.status);
     return c.json((await presentMessages(store, orgId, [res.message]))[0]);
+  });
+
+  /** The built-in test partner answers an order we sent it (a pretend supplier for demos and tests). */
+  r.post("/messages/:id/test-partner", requireRole("admin"), zValidator("param", idParam), zValidator("json", z.object({ scenario: z.enum(SCENARIOS) })), async (c) => {
+    const orgId = c.get("org")._id;
+    const res = await runTestPartner(store, orgId, actorOf(c.get("user")), oid(c.req.valid("param").id), c.req.valid("json").scenario);
+    if (!res.ok) return c.json({ error: res.error }, res.status);
+    return c.json(await presentMessages(store, orgId, res.replies), 201);
   });
 
   /** Record an answer by hand ("confirmed by phone", or our decision on a document we received). */

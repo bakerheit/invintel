@@ -36,6 +36,11 @@ const STATE_STYLE: Record<string, string> = {
   failed: "bg-warning-soft text-warning",
   received: "bg-secondary text-secondary-foreground",
 };
+const SCENARIOS: [string, string][] = [
+  ["acknowledge", "Receipt and accept the order"], ["change", "Receipt and accept with changes"], ["reject", "Receipt and reject the order"],
+  ["syntax_error", "Refuse the document (malformed)"], ["ship", "Send a ship notice (856)"], ["invoice", "Send an invoice (810)"],
+];
+
 const StateBadge = ({ state }: { state: string }) => <Badge variant="secondary" className={cn("capitalize", STATE_STYLE[state])}>{state}</Badge>;
 
 // ---------- partners ----------
@@ -52,9 +57,22 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
   const [cc, setCc] = useState(partner?.bridgeConfig.cc ?? "");
   const [secretEnv, setSecretEnv] = useState(partner?.bridgeConfig.secretEnv ?? "");
   const [mode, setMode] = useState<"test" | "live">(partner?.mode ?? "test");
+  const c = partner?.bridgeConfig ?? {};
+  const [ourQual, setOurQual] = useState(c.ourQual ?? "ZZ");
+  const [ourId, setOurId] = useState(c.ourId ?? "");
+  const [theirQual, setTheirQual] = useState(c.theirQual ?? "ZZ");
+  const [theirId, setTheirId] = useState(c.theirId ?? "");
+  const [version, setVersion] = useState(c.version ?? "004010");
+  const [transport, setTransport] = useState(c.transport ?? "loopback");
+  const [uomMap, setUomMap] = useState(c.uomMap ?? "");
+  const [ack997, setAck997] = useState(c.ack997 !== "off");
   const save = useMutation({
     mutationFn: () => {
-      const bridgeConfig: Record<string, string> = bridge === "email" ? { to, ...(cc ? { cc } : {}) } : bridge === "invoice-inbox" ? { secretEnv } : {};
+      const bridgeConfig: Record<string, string> =
+        bridge === "email" ? { to, ...(cc ? { cc } : {}) }
+        : bridge === "invoice-inbox" ? { secretEnv }
+        : bridge === "x12" ? { ourQual, ourId, theirQual, theirId, version, ...(transport ? { transport } : {}), ...(secretEnv ? { secretEnv } : {}), ...(uomMap.trim() ? { uomMap: uomMap.trim() } : {}), ...(ack997 ? {} : { ack997: "off" }) }
+        : {};
       const input = { name, kind, bridge, bridgeConfig, mode, supplierId: supplierId || null };
       return partner ? api.updateB2bPartner(orgId, partner.id, input) : api.createB2bPartner(orgId, input);
     },
@@ -78,7 +96,7 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
       </Field>
       <Field label="How documents travel">
         <select className={selectClass} value={bridge} onChange={(e) => setBridge(e.target.value)}>
-          {bridges.data?.map((b) => <option key={b.id} value={b.id}>{b.id === "email" ? "Email (PDF and a confirmation link)" : b.id === "invoice-inbox" ? "Invoice inbox (receives invoices)" : b.id === "loopback" ? "Loopback (testing, nothing leaves)" : b.id}</option>)}
+          {bridges.data?.map((b) => <option key={b.id} value={b.id}>{b.id === "email" ? "Email (PDF and a confirmation link)" : b.id === "invoice-inbox" ? "Invoice inbox (receives invoices)" : b.id === "loopback" ? "Loopback (testing, nothing leaves)" : b.id === "x12" ? "X12 EDI (850, 855, 856, 810, 997)" : b.id}</option>)}
         </select>
       </Field>
       {bridge === "email" && (
@@ -89,6 +107,25 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
       )}
       {bridge === "invoice-inbox" && (
         <Field label="Secret variable name" hint="The name of the server setting that holds the shared secret (never the secret itself)." className="sm:col-span-2"><Input value={secretEnv} onChange={(e) => setSecretEnv(e.target.value)} placeholder="ACME_INBOX_SECRET" /></Field>
+      )}
+      {bridge === "x12" && (
+        <>
+          <Field label="Our id (qualifier + id)" hint="How the partner knows us, e.g. ZZ and NWCORR.">
+            <span className="flex gap-1"><Input className="w-16" value={ourQual} onChange={(e) => setOurQual(e.target.value)} maxLength={2} aria-label="Our qualifier" /><Input value={ourId} onChange={(e) => setOurId(e.target.value)} maxLength={15} aria-label="Our id" /></span>
+          </Field>
+          <Field label="Their id (qualifier + id)" hint="How we know them, e.g. ZZ and SUNRISEPM.">
+            <span className="flex gap-1"><Input className="w-16" value={theirQual} onChange={(e) => setTheirQual(e.target.value)} maxLength={2} aria-label="Their qualifier" /><Input value={theirId} onChange={(e) => setTheirId(e.target.value)} maxLength={15} aria-label="Their id" /></span>
+          </Field>
+          <Field label="X12 version">
+            <select className={selectClass} value={version} onChange={(e) => setVersion(e.target.value)}><option value="004010">004010</option><option value="005010">005010</option></select>
+          </Field>
+          <Field label="Transport" hint="There is no network transport yet; the built-in test partner answers for you.">
+            <select className={selectClass} value={transport} onChange={(e) => setTransport(e.target.value)}><option value="loopback">Test partner (nothing leaves)</option><option value="">None set up yet</option></select>
+          </Field>
+          <Field label="Secret variable name (optional)" hint="Needed for the partner to post documents to us. The name of the server setting, never the secret."><Input value={secretEnv} onChange={(e) => setSecretEnv(e.target.value)} placeholder="SUNRISE_X12_SECRET" /></Field>
+          <Field label="Extra unit codes (optional)" hint='JSON, e.g. {"sheet":"SH"}. Orders with a unit that has no code are not sent.'><Input value={uomMap} onChange={(e) => setUomMap(e.target.value)} placeholder='{"sheet":"SH"}' /></Field>
+          <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" checked={ack997} onChange={(e) => setAck997(e.target.checked)} /> Send a receipt (997) for every document they send us</label>
+        </>
       )}
       <Field label="Mode" hint="Test partners are marked TEST in what they receive. Switch to live when you are ready.">
         <select className={selectClass} value={mode} onChange={(e) => setMode(e.target.value as "test" | "live")}>
@@ -130,7 +167,8 @@ function Partners({ orgId, admin }: { orgId: string; admin: boolean }) {
               {partners.data?.map((p) => (
                 <tr key={p.id}>
                   <td className="p-2"><span className="font-medium">{p.name}</span><span className="block text-xs text-muted-foreground"><span className="capitalize">{p.kind}</span>{p.bridgeConfig.to ? ` · ${p.bridgeConfig.to}` : ""}</span>
-                    {p.bridge === "invoice-inbox" && <span className="block break-all font-mono text-xs text-muted-foreground">POST {window.location.origin}/api/b2b/inbound/{p.id}</span>}
+                    {(p.bridge === "invoice-inbox" || (p.bridge === "x12" && p.bridgeConfig.secretEnv)) && <span className="block break-all font-mono text-xs text-muted-foreground">POST {window.location.origin}/api/b2b/inbound/{p.id}</span>}
+                    {p.bridge === "x12" && <span className="block text-xs text-muted-foreground">{p.bridgeConfig.ourQual}/{p.bridgeConfig.ourId} to {p.bridgeConfig.theirQual}/{p.bridgeConfig.theirId} · {p.bridgeConfig.version ?? "004010"}{p.bridgeConfig.transport ? ` · ${p.bridgeConfig.transport === "loopback" ? "test partner" : p.bridgeConfig.transport}` : " · no transport yet"}</span>}
                   </td>
                   <td className="p-2">{p.bridge}</td>
                   <td className="p-2"><Badge variant="secondary" className={p.mode === "live" ? "bg-success-soft text-success" : "bg-warning-soft text-warning"}>{p.mode}</Badge></td>
@@ -157,6 +195,15 @@ function MessageDetail({ orgId, m, admin }: { orgId: string; m: B2BMessage; admi
     onSuccess: () => { toast.success("Answer recorded"); void invalidateOrg(qc, orgId); },
     onError: (e) => toast.error(errMsg(e)),
   });
+  const partners = useQuery({ queryKey: orgKey(orgId, "b2b", "partners"), queryFn: () => api.b2bPartners(orgId) });
+  const partner = partners.data?.find((p) => p.id === m.partnerId);
+  const canPretend = admin && m.direction === "out" && m.docType === "order" && partner?.bridge === "x12" && partner.mode === "test" && partner.bridgeConfig.transport === "loopback" && m.state !== "failed" && m.state !== "queued";
+  const [scenario, setScenario] = useState("acknowledge");
+  const pretend = useMutation({
+    mutationFn: () => api.testPartnerAnswers(orgId, m.id, scenario),
+    onSuccess: (r) => { toast.success(`The test partner sent ${r.length} document${r.length === 1 ? "" : "s"}`); void invalidateOrg(qc, orgId); },
+    onError: (e) => toast.error(errMsg(e)),
+  });
   const lastFail = [...m.attempts].reverse().find((a) => !a.ok);
   return (
     <div className="space-y-3 bg-muted/30 p-4 text-sm">
@@ -174,6 +221,15 @@ function MessageDetail({ orgId, m, admin }: { orgId: string; m: B2BMessage; admi
               <Button size="sm" variant="outline" onClick={() => ack.mutate("rejected")}>Record as rejected</Button>
             </>
           )}
+        </div>
+      )}
+      {canPretend && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-background p-2">
+          <span className="text-xs text-muted-foreground">Test partner:</span>
+          <select aria-label="What the test partner does" className={cn(selectClass, "w-auto")} value={scenario} onChange={(e) => setScenario(e.target.value)}>
+            {SCENARIOS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+          </select>
+          <Button size="sm" onClick={() => pretend.mutate()} disabled={pretend.isPending}>Let it answer</Button>
         </div>
       )}
       {admin && detail.data?.body && <pre className="max-h-64 overflow-auto rounded-md border bg-background p-2 text-xs">{detail.data.body.length > 4000 ? `${detail.data.body.slice(0, 4000)}\n… (${detail.data.body.length.toLocaleString()} characters)` : detail.data.body}</pre>}
@@ -207,7 +263,7 @@ function Messages({ orgId, admin }: { orgId: string; admin: boolean }) {
                     <td className="p-2">{m.direction === "out" ? "Sent" : "Received"}: {B2B_DOC_LABELS[m.docType]}{m.correlation.poNumber ? ` ${m.correlation.poNumber}` : ""}</td>
                     <td className="p-2"><StateBadge state={m.state} /></td>
                   </tr>
-                  {open === m.id && <tr><td colSpan={4} className="p-0"><MessageDetail orgId={orgId} m={m} admin={admin} /></td></tr>}
+                  {open === m.id && <tr><td colSpan={4} className="max-w-0 p-0"><MessageDetail orgId={orgId} m={m} admin={admin} /></td></tr>}
                 </Fragment>
               ))}
             </tbody>

@@ -374,6 +374,7 @@ export const api = {
   },
   b2bMessage: (orgId: string, id: string) => request<B2BMessageDetail>(`/orgs/${orgId}/b2b/messages/${id}`),
   retryB2bMessage: (orgId: string, id: string) => request<B2BMessage>(`/orgs/${orgId}/b2b/messages/${id}/retry`, post({})),
+  testPartnerAnswers: (orgId: string, id: string, scenario: string) => request<B2BMessage[]>(`/orgs/${orgId}/b2b/messages/${id}/test-partner`, post({ scenario })),
   ackB2bMessage: (orgId: string, id: string, input: B2BAckInput) => request<B2BMessage>(`/orgs/${orgId}/b2b/messages/${id}/ack`, post(input)),
   orderExchange: (orgId: string, poId: string) => request<OrderExchange>(`/orgs/${orgId}/b2b/orders/${poId}`),
   sendOrderToSupplier: (orgId: string, poId: string) => request<B2BMessage>(`/orgs/${orgId}/b2b/orders/${poId}/send`, post({})),

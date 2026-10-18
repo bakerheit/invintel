@@ -6,6 +6,9 @@ import { auditActor, recordAudit } from "./audit.js";
 import { onInbound, registerBridge, storeInbound, type Bridge, type Failure } from "./b2b-core.js";
 import type { B2BMessageDoc, CapturedInvoiceDoc, Store, TradingPartnerDoc } from "./db.js";
 import { toOrders } from "./purchasing.js";
+import { setupOf } from "./x12-bridge.js";
+import { readX12 } from "./x12-maps.js";
+import { X12_CONTENT_TYPE } from "./x12.js";
 
 // INV-12: invoice capture. An invoice arrives (email forwarded by a mail service, a file uploaded at the desk) and is read
 // as far as it can be read safely: structured files (UBL XML, JSON) are read exactly; free text is searched for the
@@ -226,8 +229,30 @@ async function keepFiles(store: Store, orgId: ObjectId, messageId: ObjectId, fil
   return ids;
 }
 
+/** An 810 that arrived over the X12 bridge: every field is read exactly from the document, so nothing is marked as a guess. */
+async function captureX12Invoice(ctx: { store: Store; orgId: ObjectId; partner: TradingPartnerDoc; message: B2BMessageDoc }) {
+  const { store, orgId, partner, message } = ctx;
+  const s = setupOf(partner);
+  const r = readX12(message.raw.body, s.ok ? { uomMap: s.setup.uomMap } : undefined);
+  if (!r.ok || r.doc.kind !== "invoice") return;
+  const inv = r.doc.doc;
+  const now = new Date();
+  const doc: CapturedInvoiceDoc = {
+    _id: new ObjectId(), orgId, status: "captured", partnerId: partner._id, messageId: message._id, source: "x12", from: partner.name.slice(0, 300), subject: `X12 810 ${r.interchange.control}`,
+    invoiceNumber: inv.invoiceNumber, invoiceDate: inv.invoiceDate, dueDate: inv.dueDate, poNumber: inv.poNumber, totalCents: inv.totalCents, taxCents: inv.taxCents, currency: inv.currency,
+    lines: inv.lines.map((l) => ({ description: l.name || l.sku, quantity: l.quantity, unitPriceCents: l.unitPriceCents, lineTotalCents: l.lineTotalCents })),
+    confidence: { invoiceNumber: "read", invoiceDate: "read", dueDate: inv.dueDate ? "read" : "missing", poNumber: inv.poNumber ? "read" : "missing", totalCents: "read" }, fileIds: [], note: "", createdAt: now, updatedAt: now,
+  };
+  await store.capturedInvoices.insertOne(doc);
+  await recordAudit(store, {
+    orgId, actor: { id: null, name: partner.name }, action: "b2b.invoice_captured", entity: { type: "captured_invoice", id: doc._id.toHexString(), label: doc.invoiceNumber },
+    summary: `Captured an invoice from ${partner.name} (${doc.invoiceNumber}): read from an X12 810`, snapshot: { source: "x12", confidence: doc.confidence, mode: partner.mode },
+  });
+}
+
 export async function captureInvoice(ctx: { store: Store; orgId: ObjectId; partner: TradingPartnerDoc; message: B2BMessageDoc }) {
   const { store, orgId, partner, message } = ctx;
+  if (message.raw.contentType === X12_CONTENT_TYPE) return captureX12Invoice(ctx);
   let parsed: z.infer<typeof emailInSchema>;
   try { parsed = emailInSchema.parse(JSON.parse(message.raw.body)); } catch { return; }
   const files = filesOf(parsed);

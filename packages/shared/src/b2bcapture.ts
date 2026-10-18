@@ -72,7 +72,7 @@ export interface CapturedInvoice {
   status: CaptureStatus;
   partnerId: string;
   partnerName: string;
-  source: "email" | "upload" | "json" | "ubl";
+  source: "email" | "upload" | "json" | "ubl" | "x12";
   messageId: string;
   from: string;
   subject: string;

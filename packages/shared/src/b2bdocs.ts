@@ -83,3 +83,71 @@ export interface OrderExchange {
   note: string;
   portalUrl: string | null;
 }
+
+// ---------- the other canonical documents (INV-14: X12 maps to and from these) ----------
+
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const qty = z.string().regex(/^\d+(\.\d+)?$/);
+
+/** The supplier's answer to an order (X12 855). "changed" means accepted, but not as ordered. */
+export const canonicalOrderResponseSchema = z.object({
+  kind: z.literal("order_response"),
+  version: z.literal(1),
+  poNumber: z.string().min(1).max(40),
+  status: z.enum(["accepted", "changed", "rejected"]),
+  /** The date of the order being answered, and the date of this answer. */
+  poDate: day,
+  issuedAt: day,
+  note: z.string().max(500).default(""),
+  lines: z
+    .array(z.object({ lineNo: z.number().int().min(1), sku: z.string().max(64), status: z.enum(["accepted", "changed", "rejected"]), orderedQuantity: qty, /** What the supplier will deliver; "0" when the line is rejected. */ quantity: qty, unit: z.string().max(16), promisedDate: day.nullable() }))
+    .max(100),
+});
+export type CanonicalOrderResponse = z.infer<typeof canonicalOrderResponseSchema>;
+
+/** A ship notice (X12 856): what is on its way against an order. */
+export const canonicalShipNoticeSchema = z.object({
+  kind: z.literal("despatch_advice"),
+  version: z.literal(1),
+  shipmentNo: z.string().min(1).max(40),
+  poNumber: z.string().min(1).max(40),
+  shipDate: day,
+  carrier: z.string().max(60).default(""),
+  trackingNumber: z.string().max(80).default(""),
+  lines: z.array(z.object({ lineNo: z.number().int().min(1), sku: z.string().max(64), quantity: qty, unit: z.string().max(16) })).min(1).max(100),
+});
+export type CanonicalShipNotice = z.infer<typeof canonicalShipNoticeSchema>;
+
+/** A supplier invoice (X12 810). Amounts in cents; the total includes tax. */
+export const canonicalInvoiceSchema = z.object({
+  kind: z.literal("invoice"),
+  version: z.literal(1),
+  invoiceNumber: z.string().min(1).max(40),
+  invoiceDate: day,
+  dueDate: day.nullable(),
+  poNumber: z.string().max(40).default(""),
+  currency: z.string().length(3).default("USD"),
+  lines: z
+    .array(z.object({ lineNo: z.number().int().min(1), sku: z.string().max(64), name: z.string().max(200), quantity: qty, unit: z.string().max(16), unitPriceCents: z.number().int().min(0), lineTotalCents: z.number().int().min(0) }))
+    .min(1)
+    .max(200),
+  taxCents: z.number().int().min(0).default(0),
+  totalCents: z.number().int().min(0),
+});
+export type CanonicalInvoice = z.infer<typeof canonicalInvoiceSchema>;
+
+/** A receipt for a document, at the syntax level (X12 997): the other side could, or could not, read what we sent. */
+export const canonicalFunctionalAckSchema = z.object({
+  kind: z.literal("functional_ack"),
+  version: z.literal(1),
+  /** The group and set being acknowledged, and their control numbers. */
+  groupCode: z.string().max(2),
+  groupControl: z.string().max(9),
+  setId: z.string().max(3),
+  setControl: z.string().max(9),
+  status: z.enum(["accepted", "accepted_with_errors", "rejected"]),
+  /** X12 syntax error codes (AK5 02-06: "4" = segment count doesn't match) and what they mean. */
+  errorCodes: z.array(z.string().regex(/^[0-9A-Z]$/)).max(5).default([]),
+  errors: z.array(z.string().max(200)).max(20).default([]),
+});
+export type CanonicalFunctionalAck = z.infer<typeof canonicalFunctionalAckSchema>;

@@ -154,6 +154,19 @@ await call(`${base}/b2b/invoices/upload`, {
   contentBase64: Buffer.from(JSON.stringify({ invoiceNumber: "MWP-20418", issueDate: new Date().toISOString().slice(0, 10), poNumber, total: "3280.00", lines: [{ description: "Test liner 33 lb, 60 in roll", quantity: "6", unitPrice: "420.00" }, { description: "Flexo ink, black, 5 gal", quantity: "8", unitPrice: "95.00" }] })).toString("base64"),
 });
 
+// EDI: Lakeshore Film & Resin takes orders as X12 (a test partner on the built-in test transport: nothing leaves this machine).
+// Open its order, "Send as X12 (850)", then Documents > the sent order > "Let it answer" to play the supplier's side.
+const ediSupplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Lakeshore Film & Resin", contact: "Dee Park" });
+await call(`${base}/b2b/partners`, {
+  name: "Lakeshore Film & Resin", kind: "supplier", supplierId: ediSupplier.id, bridge: "x12", mode: "test",
+  bridgeConfig: { ourQual: "ZZ", ourId: "DEMOCORRUG", theirQual: "ZZ", theirId: "LAKESHORE", version: "004010", transport: "loopback" },
+});
+const ediPo = await call<{ id: string }>(`${base}/purchasing/orders`, {
+  supplierId: ediSupplier.id, expectedDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10), note: "Dock 2, call before arrival",
+  lines: [{ itemId: inkB, quantity: 10, unitCostCents: 9500 }],
+});
+await call(`${base}/purchasing/orders/${ediPo.id}/place`, {});
+
 // Exchange: a second organization on the same server (a paper supplier) is connected to the demo plant, so you can play both
 // sides: switch organizations in the sidebar. The plant has a placed order for the supplier waiting to be sent from the order's dialog.
 const sunrise = await call<{ id: string }>("/api/orgs", { name: "Sunrise Paper Co." });
