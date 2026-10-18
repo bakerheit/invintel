@@ -16,6 +16,13 @@ import type {
   AuditPage,
   AuditVerification,
   ImportInput,
+  PoReceiveInput,
+  PoReceiveResult,
+  PurchaseOrder,
+  PurchaseOrderInput,
+  ReorderSuggestion,
+  Supplier,
+  SupplierInput,
   ImportResult,
   Overview,
   AdjustmentInput,
@@ -109,6 +116,17 @@ export const api = {
     if (res.ok || (res.status === 422 && Array.isArray(data.rows))) return data as ImportResult;
     throw new Error(typeof data.error === "string" ? data.error : "Import failed");
   },
+  listSuppliers: (orgId: string) => request<Supplier[]>(`/orgs/${orgId}/purchasing/suppliers`),
+  createSupplier: (orgId: string, input: SupplierInput) => request<Supplier>(`/orgs/${orgId}/purchasing/suppliers`, post(input)),
+  suggestions: (orgId: string) => request<ReorderSuggestion[]>(`/orgs/${orgId}/purchasing/suggestions`),
+  listOrders: (orgId: string) => request<PurchaseOrder[]>(`/orgs/${orgId}/purchasing/orders`),
+  createOrder: (orgId: string, input: PurchaseOrderInput) => request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders`, post(input)),
+  orderFromSuggestions: (orgId: string, input: { supplierId: string; itemIds: string[] }) =>
+    request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/from-suggestions`, post(input)),
+  orderAction: (orgId: string, id: string, action: "place" | "cancel" | "close") =>
+    request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/${id}/${action}`, post({})),
+  receiveOrder: (orgId: string, id: string, input: PoReceiveInput) =>
+    request<PoReceiveResult>(`/orgs/${orgId}/purchasing/orders/${id}/receive`, post(input)),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
