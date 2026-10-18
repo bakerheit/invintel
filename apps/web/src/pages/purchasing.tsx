@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { PoExchange } from "@/components/po-exchange";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -203,6 +204,7 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
             </label>
           </div>
         )}
+        <PoExchange order={order} />
         <DialogFooter className="sm:justify-between">
           <div className="flex gap-2">
             {admin && (order.status === "draft" || order.status === "ordered") && <Button variant="ghost" className="text-destructive" onClick={() => void ask("cancel")}>Cancel order</Button>}

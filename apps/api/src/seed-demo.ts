@@ -145,6 +145,26 @@ await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, sc
 await call(`${prod}/work-orders/${wo3.id}/output`, { good: 44, scrap: 6, scrapReason: "Damaged", toLocationId: fg });
 await call(`${prod}/work-orders/${wo3.id}/action`, { action: "complete" });
 
+// Exchange: a second organization on the same server (a paper supplier) is connected to the demo plant, so you can play both
+// sides: switch organizations in the sidebar. The plant has a placed order for the supplier waiting to be sent from the order's dialog.
+const sunrise = await call<{ id: string }>("/api/orgs", { name: "Sunrise Paper Co." });
+const sBase = `/api/orgs/${sunrise.id}`;
+const sMain = (await call<{ id: string }[]>(`${sBase}/locations`))[0]!.id;
+for (const [sku, name, qty, cost] of [["LINER-KR42", "Kraft liner 42 lb, 60 in roll", 60, 31000], ["MED-26", "Corrugating medium 26 lb, 60 in roll", 25, 26000]] as const) {
+  await call(`${sBase}/items`, { sku, name, unitCostCents: cost, reorderLevel: 10, initialStock: { locationId: sMain, quantity: qty } });
+}
+const theirInvitation = await call<unknown>(`${sBase}/exchange/invitation`);
+await call(`${base}/exchange/connect`, { invitation: theirInvitation, kind: "supplier" });
+const sunriseSupplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Sunrise Paper Co.", contact: "Sol Reyes" });
+const sunrisePo = await call<{ id: string }>(`${base}/purchasing/orders`, {
+  supplierId: sunriseSupplier.id, expectedDate: new Date(Date.now() + 9 * 86_400_000).toISOString().slice(0, 10),
+  lines: [{ itemId: kraft, quantity: 12, unitCostCents: 48000 }, { itemId: med, quantity: 6, unitCostCents: 39000 }],
+});
+await call(`${base}/purchasing/orders/${sunrisePo.id}/place`, {});
+// The supplier lets the plant ask about stock and order status (off by default for every partner).
+const theirPartners = await call<{ id: string }[]>(`${sBase}/exchange/partners`);
+await call(`${sBase}/exchange/partners/${theirPartners[0]!.id}/permissions`, { shareStock: true, shareStockQuantities: true, shareOrderStatus: true }, "PATCH");
+
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();
 process.exit(0);

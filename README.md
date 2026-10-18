@@ -96,6 +96,12 @@ API under `/api/orgs/:orgId/alerts`: `GET /`, `GET /digest`, `GET|PUT /settings`
 
 The sidebar (and the frame around the page) uses the same gradient as the sign-in page. The account menu (bottom of the sidebar) has a **Colour** choice: Pink (default), Ocean, Forest, Sunset, Grape and Graphite. A colour recolours the sidebar gradient, buttons and highlights; the main area stays a neutral dark (or white in light mode). The choice is remembered per browser. To add a colour, add an entry to `PALETTES` in `apps/web/src/lib/theme.tsx` and a matching `:root[data-palette="..."]` pair at the bottom of `apps/web/src/index.css`.
 
+### Exchange (trading with other Invintel businesses)
+
+**Exchange** (sidebar) lets two Invintel businesses trade signed documents directly: purchase orders, the supplier's answer (accept with a promised date, or reject), ship notices with tracking, and questions ("do you have this item?", "where is my order?"). Each organization has an exchange id and an Ed25519 signing key; you connect by pasting a partner's invitation and checking its fingerprint with them. A partner may only ask what you have switched on for them (nothing by default), and answers never include your cost. Messages are signed, can't be replayed, and go through the B2B message log (INV-12) with acknowledgements and an audit trail. Partners on the same server are delivered to in process; others over HTTPS at `<their address>/api/exchange/inbox` (set your public address on the Exchange page). Set `EXCHANGE_KEY_SECRET` to store private keys sealed.
+
+API under `/api/orgs/:orgId/exchange`: `identity`, `invitation`, `connect`, `partners`, `partners/:id/permissions`, `purchase-orders/:id/send`, `purchase-orders/:id/timeline`, `orders`, `orders/:id/respond|ship`, `ask`, `answers`; deliveries arrive at the unauthenticated `POST /api/exchange/inbox`, where the signature is what is checked.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:

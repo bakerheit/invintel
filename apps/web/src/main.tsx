@@ -40,6 +40,7 @@ import TraceReportPage from "./pages/reports/trace";
 import ScrapReportPage from "./pages/reports/scrap";
 import DowntimeFloorPage from "./pages/floor/downtime";
 import AlertsPage from "./pages/alerts";
+import ExchangePage from "./pages/exchange";
 import PurchasingPage from "./pages/purchasing";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
@@ -88,6 +89,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="inventory/:itemId" element={<ItemDetailPage />} />
               <Route path="counts" element={<CountsPage />} />
               <Route path="alerts" element={<AlertsPage />} />
+              <Route path="exchange" element={<ExchangePage />} />
               <Route path="approvals" element={<ApprovalsPage />} />
               <Route path="reports" element={<ReportsHome />} />
               <Route path="reports/aging" element={<AgingReportPage />} />
