@@ -315,7 +315,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order", "supplier", "purchase_order"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order", "supplier", "purchase_order", "count"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -333,6 +333,9 @@ export const AUDIT_ACTIONS = [
   "member.role_changed",
   "member.removed",
   "member.left",
+  "count.started",
+  "count.posted",
+  "count.cancelled",
   "supplier.created",
   "supplier.updated",
   "purchase_order.created",
@@ -561,3 +564,4 @@ export interface UnitsPosted {
 }
 export * from "./production.js";
 export * from "./purchasing.js";
+export * from "./counts.js";

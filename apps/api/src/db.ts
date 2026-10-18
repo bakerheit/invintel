@@ -210,6 +210,19 @@ export interface PurchaseOrderDoc {
   updatedAt: Date;
 }
 
+export interface CountDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  status: "open" | "posted" | "cancelled";
+  locationId: ObjectId;
+  note: string;
+  startedBy: { id: ObjectId; name: string };
+  startedAt: Date;
+  postedAt?: Date;
+  lines: { itemId: ObjectId; counted: number; expectedAtPost?: number }[];
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -228,6 +241,7 @@ export interface Store {
   workOrders: Collection<WorkOrderDoc>;
   suppliers: Collection<SupplierDoc>;
   purchaseOrders: Collection<PurchaseOrderDoc>;
+  counts: Collection<CountDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -260,6 +274,7 @@ export async function connect(
     workOrders: db.collection("work_orders"),
     suppliers: db.collection("suppliers"),
     purchaseOrders: db.collection("purchase_orders"),
+    counts: db.collection("counts"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -311,6 +326,9 @@ export async function connect(
     store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
+    store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    // One open count per location: two people counting the same shelf into different sheets is how counts go wrong.
+    store.counts.createIndex({ orgId: 1, locationId: 1 }, { unique: true, partialFilterExpression: { status: "open" } }),
     store.movements.createIndex({ purchaseOrderId: 1 }, { sparse: true }),
   ]);
   return store;
