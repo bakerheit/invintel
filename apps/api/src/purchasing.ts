@@ -299,6 +299,12 @@ export function createPurchasingRoutes(store: Store) {
       if (seen.has(l.itemId)) return c.json({ error: "List each item once" }, 400);
       seen.add(l.itemId);
     }
+    // Check everything first: lines are posted one by one, so a failure halfway would leave a part-received
+    // order that a retry then receives twice.
+    if (!(await store.locations.findOne({ _id: oid(input.locationId), orgId }, { projection: { _id: 1 } }))) return c.json({ error: "Location not found" }, 404);
+    if ((await store.items.countDocuments({ orgId, _id: { $in: input.lines.map((l) => oid(l.itemId)) } })) !== input.lines.length) {
+      return c.json({ error: "One of those items has been deleted. Nothing was received." }, 404);
+    }
     const [before] = await toOrders(store, [doc]);
     const actor = actorOf(c.get("user"));
     const movementIds: ObjectId[] = [];

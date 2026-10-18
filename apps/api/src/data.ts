@@ -29,12 +29,18 @@ const ALIASES: Record<string, string> = {
 };
 const norm = (h: string) => h.trim().toLowerCase().replace(/[_\-]+/g, " ").replace(/\s+/g, " ");
 
+/** Dollars and cents text to cents, by string math (1.005 * 100 is 100.49999999999999 in floating point). */
 const toCents = (raw: string): number | null => {
   const t = raw.replace(/[$,\s]/g, "");
   if (t === "") return 0;
-  if (!/^\d+(\.\d{1,4})?$/.test(t)) return null;
-  return Math.round(Number(t) * 100);
+  const m = /^(\d+)(?:\.(\d{1,4}))?$/.exec(t);
+  if (!m) return null;
+  const frac = (m[2] ?? "").padEnd(4, "0"); // ten-thousandths, rounded half up to a cent
+  return Number(m[1]) * 100 + Math.floor((Number(frac) + 50) / 100);
 };
+
+/** Export puts an apostrophe in front of text a spreadsheet would run as a formula (= + - @). Take it off again. */
+const unguard = (s: string) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s);
 
 export function createDataRoutes(store: Store) {
   const r = new Hono<OrgEnv>();
@@ -78,12 +84,14 @@ export function createDataRoutes(store: Store) {
     if (table.length - 1 > MAX_ROWS) return fail(`Import at most ${MAX_ROWS} rows at a time.`);
 
     const cols = new Map<string, number>();
+    // "description" is the product name in a file with no name column, but a column of its own when there is one (our own export).
+    const hasName = table[0]!.some((h) => ["name", "item", "item name"].includes(norm(h)));
     table[0]!.forEach((h, i) => {
-      const key = ALIASES[norm(h)];
+      const key = norm(h) === "description" && hasName ? "description" : ALIASES[norm(h)];
       if (key && !cols.has(key)) cols.set(key, i);
     });
     if (!cols.has("sku") || !cols.has("name")) return fail("Needs a SKU column and a name column in the first row.");
-    const cell = (row: string[], key: string) => (cols.has(key) ? (row[cols.get(key)!] ?? "").trim() : "");
+    const cell = (row: string[], key: string) => (cols.has(key) ? unguard((row[cols.get(key)!] ?? "").trim()) : "");
 
     const locations = await loadLocations(store, orgId);
     const idx = indexLocations(locations);
