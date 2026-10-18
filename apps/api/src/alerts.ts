@@ -20,7 +20,7 @@ export const alertSettingsOf = (org: Pick<OrgDoc, "alertSettings">): AlertSettin
 export async function computeAlerts(store: Store, org: OrgDoc, now = new Date()): Promise<Omit<Alert, "state" | "by" | "at" | "snoozedUntil">[]> {
   const orgId = org._id;
   const settings = alertSettingsOf(org);
-  const mods = { purchasing: true, production: true, ...org.modules };
+  const mods = { purchasing: true, production: true, sales: true, ...org.modules };
   const base = `/o/${orgId.toHexString()}`;
   const out: Omit<Alert, "state" | "by" | "at" | "snoozedUntil">[] = [];
 

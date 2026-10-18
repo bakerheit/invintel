@@ -100,7 +100,16 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         header: filtering ? "Qty here" : "Qty",
         accessorFn: (i) => (filtering ? stockIn(i, idSet) : i.quantity),
         meta: { align: "right" } satisfies Meta,
-        cell: ({ row, getValue }) => <span className="font-medium tabular-nums">{formatQty(getValue<number>(), row.original)}</span>,
+        cell: ({ row, getValue }) => (
+          <div className="text-right">
+            <span className="font-medium tabular-nums">{formatQty(getValue<number>(), row.original)}</span>
+            {!filtering && (row.original.reserved ?? 0) > 0 && (
+              <div className={cn("text-xs tabular-nums", (row.original.available ?? 0) < 0 ? "text-warning" : "text-muted-foreground")}>
+                {formatQty(row.original.reserved ?? 0, row.original, { unit: false })} promised · {formatQty(row.original.available ?? 0, row.original, { unit: false })} free
+              </div>
+            )}
+          </div>
+        ),
       },
       {
         id: "status",

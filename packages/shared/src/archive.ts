@@ -12,6 +12,7 @@ export const ARCHIVE_COLLECTIONS = {
   movements: "Ledger entries",
   suppliers: "Suppliers",
   purchaseOrders: "Purchase orders",
+  salesOrders: "Sales orders",
   workCenters: "Work centers",
   boms: "Recipes (BOMs)",
   workOrders: "Work orders",

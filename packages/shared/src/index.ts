@@ -32,10 +32,10 @@ export const registrationOrganizationSchema = z.discriminatedUnion("mode", [
 export type RegistrationOrganization = z.infer<typeof registrationOrganizationSchema>;
 
 /** Parts of the app an organization can switch off, so a small shop only sees what it uses. Everything is on by default. */
-export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean() });
+export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean(), sales: z.boolean() });
 export type OrgModules = z.infer<typeof orgModulesSchema>;
 export const orgModulesUpdateSchema = orgModulesSchema.partial().refine((m) => Object.keys(m).length > 0, "Nothing to change");
-export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true };
+export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true, sales: true };
 
 export interface OrgSummary {
   id: string;
@@ -191,6 +191,10 @@ export interface Item extends ItemInput {
   quantity: number;
   /** Only locations that hold stock. */
   stock: StockLevel[];
+  /** Promised to customers on confirmed sales orders and not yet shipped (INV-15). Absent on older responses. */
+  reserved?: number;
+  /** What can still be promised: on hand, minus what sits on quality hold, minus reserved. Negative means over-promised. */
+  available?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -215,7 +219,7 @@ export const transferInputSchema = z
   });
 export type TransferInput = z.infer<typeof transferInputSchema>;
 
-export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap"]);
+export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap", "ship"]);
 export type MovementType = z.infer<typeof movementTypeSchema>;
 export const MOVEMENT_TYPES = movementTypeSchema.options;
 
@@ -337,7 +341,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "trading_partner", "b2b_message", "captured_invoice", "count", "approval", "alert"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "sales_order", "trading_partner", "b2b_message", "captured_invoice", "count", "approval", "alert"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -397,6 +401,12 @@ export const AUDIT_ACTIONS = [
   "purchase_order.received",
   "purchase_order.cancelled",
   "purchase_order.closed",
+  "sales_order.created",
+  "sales_order.updated",
+  "sales_order.confirmed",
+  "sales_order.shipped",
+  "sales_order.cancelled",
+  "sales_order.closed",
   "stock.received",
   "stock.adjusted",
   "stock.moved",
@@ -722,3 +732,4 @@ export * from "./alerts.js";
 export * from "./units.js";
 export * from "./archive.js";
 export * from "./exchange.js";
+export * from "./sales.js";

@@ -1,4 +1,9 @@
 import type {
+  PickLine,
+  SalesOrder,
+  SalesOrderInput,
+  SoShipInput,
+  SoShipResult,
   B2BAckInput,
   B2BMessage,
   B2BMessageDetail,
@@ -246,8 +251,16 @@ export const api = {
     request<{ partner: ExPartner; connectedBack: boolean }>(`/orgs/${orgId}/exchange/connect`, post({ invitation, kind })),
   exPermissions: (orgId: string, id: string, p: ExchangePermissions) => request<ExPartner>(`/orgs/${orgId}/exchange/partners/${id}/permissions`, patch(p)),
   exOrders: (orgId: string) => request<ExIncomingOrder[]>(`/orgs/${orgId}/exchange/orders`),
-  exRespond: (orgId: string, id: string, v: { status: "accepted" | "rejected" | "changed"; promisedDate: string | null; note: string }) =>
-    request<{ state: string }>(`/orgs/${orgId}/exchange/orders/${id}/respond`, post(v)),
+  exRespond: (orgId: string, id: string, v: { status: "accepted" | "rejected" | "changed"; promisedDate: string | null; note: string; backorder?: boolean }) =>
+    request<{ state?: string; approvalRequired?: true; approval?: ApprovalRequest; salesOrder?: { id: string; number: string } }>(`/orgs/${orgId}/exchange/orders/${id}/respond`, post(v)),
+  salesOrders: (orgId: string) => request<SalesOrder[]>(`/orgs/${orgId}/sales/orders`),
+  createSalesOrder: (orgId: string, input: SalesOrderInput) => request<SalesOrder>(`/orgs/${orgId}/sales/orders`, post(input)),
+  confirmSalesOrder: (orgId: string, id: string, allowShortage: boolean) => request<SalesOrder | ApprovalRequired>(`/orgs/${orgId}/sales/orders/${id}/confirm`, post({ allowShortage })),
+  cancelSalesOrder: (orgId: string, id: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/cancel`, post({})),
+  closeSalesOrder: (orgId: string, id: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/close`, post({})),
+  salesPick: (orgId: string, id: string) => request<PickLine[]>(`/orgs/${orgId}/sales/orders/${id}/pick`),
+  shipSalesOrder: (orgId: string, id: string, input: SoShipInput) => request<SoShipResult>(`/orgs/${orgId}/sales/orders/${id}/ship`, post(input)),
+  resendShipNotice: (orgId: string, id: string, number: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/shipments/${encodeURIComponent(number)}/notice`, post({})),
   exShip: (orgId: string, id: string, v: { carrier: string; tracking: string }) => request<{ state: string }>(`/orgs/${orgId}/exchange/orders/${id}/ship`, post(v)),
   exAsk: (orgId: string, partnerId: string, question: QueryBody) => request<{ messageId: string }>(`/orgs/${orgId}/exchange/ask`, post({ partnerId, question })),
   exAnswers: (orgId: string) => request<ExAnswer[]>(`/orgs/${orgId}/exchange/answers`),
@@ -393,6 +406,6 @@ export const api = {
 };
 
 export interface ExPartner { id: string; name: string; kind: "supplier" | "customer"; enabled: boolean; mode: string; exchangeId: string; fingerprint: string; baseUrl: string; permissions: ExchangePermissions }
-export interface ExIncomingOrder { messageId: string; partner: string; receivedAt: string; order: OrderBody | null; response: { status: string; promisedDate: string | null } | null; shipped: boolean }
+export interface ExIncomingOrder { messageId: string; partner: string; receivedAt: string; order: OrderBody | null; response: { status: string; promisedDate: string | null } | null; shipped: boolean; salesOrder?: { id: string; number: string; state: string } | null }
 export interface ExAnswer { messageId: string; partner: string; askedAt: string; question: QueryBody; state: string; answer: QueryResponseBody | null }
 export interface ExTimelineItem { messageId: string; at: string; direction: "in" | "out"; docType: string; state: string; partner: string; summary: Record<string, unknown> | null; acks: { level: string; result: string; detail: string }[] }

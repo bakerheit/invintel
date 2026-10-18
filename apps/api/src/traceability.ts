@@ -28,6 +28,7 @@ class Trace {
   wos = new Set<string>();
   pos = new Set<string>();
   suppliers = new Set<string>();
+  customers = new Set<string>();
   inferred = false;
   notes: string[] = [];
   private items = new Map<string, { sku: string; name: string }>();
@@ -89,16 +90,30 @@ class Trace {
     return this.store.movements.find({ orgId: this.orgId, workOrderId: woId, type: { $in: types as never[] }, reversedBy: { $exists: false } }).sort({ createdAt: 1 }).toArray();
   }
 
+  /** Where a labelled unit went to a customer (shipments that haven't been undone), with the customer's name. */
+  async shipmentsOf(u: StockUnitDoc) {
+    const moves = await this.store.movements.find({ orgId: this.orgId, unitId: u._id, type: "ship", salesOrderId: { $exists: true }, reversedBy: { $exists: false } }).sort({ createdAt: 1 }).toArray();
+    const out: { id: string; order: string; customer: string; ref: string; at: Date; quantity: number }[] = [];
+    for (const m of moves) {
+      const so = await this.store.salesOrders.findOne({ _id: m.salesOrderId!, orgId: this.orgId }, { projection: { number: 1, customerName: 1, customerRef: 1 } });
+      if (so) out.push({ id: m._id.toHexString(), order: so.number, customer: so.customerName || "a customer", ref: so.customerRef, at: m.createdAt, quantity: -m.delta });
+    }
+    return out;
+  }
+
   async addUnitRow(u: StockUnitDoc, via: string) {
     const k = `u:${u._id.toHexString()}`;
     if (this.affected.has(k)) return;
     const it = await this.item(u.itemId);
-    this.affected.set(k, { kind: "unit", code: u.code, itemSku: it.sku, itemName: it.name, lot: u.lot, quantity: u.status === "consumed" ? 0 : u.quantity, status: u.status, location: this.path(u.locationId), via });
+    const shipped = u.status === "consumed" ? await this.shipmentsOf(u) : [];
+    this.affected.set(k, { kind: "unit", code: u.code, itemSku: it.sku, itemName: it.name, lot: u.lot, quantity: u.status === "consumed" ? 0 : u.quantity, status: shipped.length ? "shipped" : u.status, location: shipped.length ? `Shipped to ${shipped[shipped.length - 1]!.customer}` : this.path(u.locationId), via });
   }
 
   async unitNode(u: StockUnitDoc, via: string): Promise<TraceNode | null> {
     const it = await this.item(u.itemId);
-    const n = this.node("unit", u._id.toHexString(), `${u.code}: ${it.name}`, `${u.lot ? `lot ${u.lot} · ` : ""}${u.status === "consumed" ? "used up" : `${u.quantity.toLocaleString("en-US")} left, ${u.status === "quarantined" ? "on quality hold, " : ""}at ${this.path(u.locationId)}`}`);
+    const shipped = u.status === "consumed" ? await this.shipmentsOf(u) : [];
+    const gone = shipped.length ? `shipped to ${shipped.map((s) => s.customer).join(", ")}` : "used up";
+    const n = this.node("unit", u._id.toHexString(), `${u.code}: ${it.name}`, `${u.lot ? `lot ${u.lot} · ` : ""}${u.status === "consumed" ? gone : `${u.quantity.toLocaleString("en-US")} left, ${u.status === "quarantined" ? "on quality hold, " : ""}at ${this.path(u.locationId)}`}`);
     if (n) await this.addUnitRow(u, via);
     return n;
   }
@@ -128,6 +143,12 @@ class Trace {
       if (!w) continue;
       const child = await this.forwardWo(w, depth + 1);
       if (child) node.children.push(child);
+    }
+    // And on to a customer: a labelled roll or pallet that was shipped (INV-15).
+    for (const s of await this.shipmentsOf(u)) {
+      this.customers.add(s.customer);
+      const out = this.node("shipment", s.id, `Shipped to ${s.customer}`, `${s.order}${s.ref ? `, their order ${s.ref}` : ""} · ${s.at.toISOString().slice(0, 10)} · ${s.quantity.toLocaleString("en-US")} of ${u.code}`);
+      if (out) node.children.push(out);
     }
     return node;
   }
@@ -317,6 +338,7 @@ async function runTrace(store: Store, orgId: ObjectId, q: ReturnType<typeof trac
       workOrders: [...tr.wos].sort(),
       purchaseOrders: [...tr.pos].sort(),
       suppliers: [...tr.suppliers].sort(),
+      customers: [...tr.customers].sort(),
       locations: [...byLoc].map(([path, v]) => ({ path, ...v })).sort((a, b) => b.quantity - a.quantity),
       hasInferred: tr.inferred,
     },

@@ -8,7 +8,9 @@ import { isSoleApprover, rulesOf, toApproval } from "./approvals-core.js";
 import type { ApprovalDoc, Store } from "./db.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
+import { loadIncomingOrder, sendOrderResponse } from "./exchange.js";
 import { placeOrderDirect } from "./purchasing.js";
+import { confirmOrderDirect } from "./sales-core.js";
 import { postAdjustment } from "./stock-service.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -28,7 +30,7 @@ export function createApprovalRoutes(store: Store) {
     const org = c.get("org");
     const rules = c.req.valid("json").rules;
     await store.orgs.updateOne({ _id: org._id }, { $set: { approvalRules: rules } });
-    const text = rules.length ? rules.map((x) => `${x.kind === "adjustment" ? "adjustments" : "purchase orders"} from $${(x.thresholdCents / 100).toFixed(2)} (${x.appliesTo === "members" ? "members" : "everyone"})`).join(", ") : "none";
+    const text = rules.length ? rules.map((x) => `${x.kind === "adjustment" ? "adjustments" : x.kind === "sales_order" ? "sales orders" : "purchase orders"} from $${(x.thresholdCents / 100).toFixed(2)} (${x.appliesTo === "members" ? "members" : "everyone"})`).join(", ") : "none";
     await recordAudit(store, {
       orgId: org._id, actor: auditActor(c.get("user")), action: "approval.rules_changed", entity: { type: "organization", id: org._id.toHexString(), label: org.name },
       summary: `Changed approval rules: ${text}`, changes: [{ field: "approvalRules", from: rulesOf(org), to: rules }],
@@ -86,6 +88,16 @@ export function createApprovalRoutes(store: Store) {
       const p = doc.payload;
       const res = await postAdjustment(store, org._id, asker, { itemId: p.itemId!, locationId: p.locationId!, delta: p.delta!, reason: `${p.reason ?? ""} (approved by ${me.name}, ${doc.number})`.trim(), type: "adjust" });
       if (!res.ok) failure = res.error;
+    } else if (doc.kind === "sales_order") {
+      const p = doc.payload;
+      const res = await confirmOrderDirect(store, org._id, { id: doc.requestedBy.id, name: doc.requestedBy.name }, p.orderId!, { allowShortage: p.allowShortage, via: `approved by ${me.name}, ${doc.number}` });
+      if (!res.ok) failure = res.error;
+      else if (p.respond) {
+        // The order came from a customer: now that the stock is promised, tell them.
+        const got = await loadIncomingOrder(store, org._id, p.respond.messageId.toHexString());
+        const sent = got ? await sendOrderResponse(store, org._id, asker, got, p.respond) : null;
+        if (!sent || !sent.ok) failure = `The stock is reserved, but the answer to the customer could not be sent${sent && !sent.ok ? `: ${sent.error}` : ""}`;
+      }
     } else {
       const res = await placeOrderDirect(store, org._id, doc.payload.orderId!, { id: doc.requestedBy.id.toHexString(), name: doc.requestedBy.name }, `approved by ${me.name}, ${doc.number}`);
       if (!res.ok) failure = res.error;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Things that can need a second person's OK. */
-export const APPROVAL_KINDS = ["adjustment", "purchase_order"] as const;
+export const APPROVAL_KINDS = ["adjustment", "purchase_order", "sales_order"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const approvalRuleSchema = z.object({
@@ -40,7 +40,7 @@ export interface ApprovalRequest {
   /** Why an approved request couldn't be carried out (e.g. the stock was gone by then). */
   failure: string | null;
   /** The thing it is about: a link target for the screen. */
-  subject: { type: "item" | "purchase_order"; id: string; label: string };
+  subject: { type: "item" | "purchase_order" | "sales_order"; id: string; label: string };
   /** Whether the current user may approve or reject it right now. */
   canDecide: boolean;
 }

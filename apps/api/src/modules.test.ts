@@ -27,12 +27,12 @@ describe("organization modules", () => {
   it("are all on by default, admins switch them, members can't, and it is audited", async () => {
     const owner = await signUp({ mode: "create", name: "Acme" });
     const member = await signUp({ mode: "join", joinCode: owner.org.joinCode });
-    expect(owner.org.modules).toEqual({ purchasing: true, production: true });
+    expect(owner.org.modules).toEqual({ purchasing: true, production: true, sales: true });
     const url = `/api/orgs/${owner.org.id}/modules`;
     expect((await patch(member.cookie, url, { production: false })).status).toBe(403);
     expect((await patch(owner.cookie, url, {})).status).toBe(400);
     const res = await patch(owner.cookie, url, { production: false });
-    expect((await res.json()).modules).toEqual({ purchasing: true, production: false });
+    expect((await res.json()).modules).toEqual({ purchasing: true, production: false, sales: true });
     // The member sees the change, and the other organization isn't touched.
     const list = await (await app.request("/api/orgs", { headers: { cookie: member.cookie } })).json();
     expect(list[0].modules.production).toBe(false);

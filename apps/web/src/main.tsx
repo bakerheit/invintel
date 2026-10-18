@@ -44,6 +44,7 @@ import ScrapReportPage from "./pages/reports/scrap";
 import DowntimeFloorPage from "./pages/floor/downtime";
 import AlertsPage from "./pages/alerts";
 import PurchasingPage from "./pages/purchasing";
+import SalesPage from "./pages/sales";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
 import { useAuth } from "./stores/auth";
@@ -101,6 +102,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="reports/trace" element={<TraceReportPage />} />
               <Route path="reports/scrap" element={<ScrapReportPage />} />
               <Route path="purchasing" element={<PurchasingPage />} />
+              <Route path="sales" element={<SalesPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />

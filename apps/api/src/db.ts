@@ -24,7 +24,7 @@ export interface OrgDoc {
   joinCode: string;
   createdBy: ObjectId;
   /** Absent means everything is on. */
-  modules?: Partial<{ purchasing: boolean; production: boolean }>;
+  modules?: Partial<{ purchasing: boolean; production: boolean; sales: boolean }>;
   /** Absent means nothing needs a second person. */
   /** Downtime: the pick-list and the hours a machine is meant to run each day. Defaults apply when absent. */
   /** Pick-lists for scrap and quality-hold reasons. Defaults apply when absent. */
@@ -33,7 +33,7 @@ export interface OrgDoc {
   downtimeReasons?: string[];
   scheduledHoursPerDay?: number;
   alertSettings?: { daysOfSupply: number; machineDownMinutes: number };
-  approvalRules?: { kind: "adjustment" | "purchase_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
+  approvalRules?: { kind: "adjustment" | "purchase_order" | "sales_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
 
@@ -152,7 +152,39 @@ export interface MovementDoc {
   reversedBy?: ObjectId;
   /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
   purchaseOrderId?: ObjectId;
+  /** Shipments made against a sales order carry it, so what has gone out can be read back from the ledger. */
+  salesOrderId?: ObjectId;
   createdAt: Date;
+}
+
+/** A customer's order (INV-15). What has shipped is read from the ledger (movements with salesOrderId), never stored here. */
+export interface SalesOrderDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** SO-0001, in order per organization. */
+  number: string;
+  /** draft: being written. confirmed: stock reserved. closed: ended early (unshipped rest released). cancelled: ended before anything shipped. */
+  state: "draft" | "confirmed" | "closed" | "cancelled";
+  customerPartnerId: ObjectId | null;
+  customerName: string;
+  customerRef: string;
+  source: "manual" | "exchange";
+  /** For an exchange order: the incoming message it was made from (one order per message). */
+  messageId?: ObjectId;
+  requestedDate: string | null;
+  note: string;
+  /** Each item at most once; quantities are stored whole numbers in the item's own unit. */
+  lines: { itemId: ObjectId; quantity: number; unitPriceCents: number }[];
+  /** Taken while a shipment is being posted, so two people can't ship the same thing twice. */
+  shippingUntil?: Date;
+  /** Set while a confirmation is being checked against stock, so nothing is shipped, cancelled or closed in that moment. Expires on its own. */
+  confirmingUntil?: Date;
+  /** One entry per shipment, for history. Quantities that count come from the ledger. */
+  shipments: { number: string; at: Date; by: { id: ObjectId | null; name: string }; carrier: string; trackingNumber: string; movementIds: ObjectId[]; lines: { itemId: ObjectId; quantity: number }[]; notice: "sent" | "failed" | null }[];
+  confirmedAt?: Date;
+  createdBy: { id: ObjectId | null; name: string };
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export const movementType = (m: MovementDoc): MovementType =>
@@ -265,13 +297,19 @@ export interface ApprovalDoc {
   _id: ObjectId;
   orgId: ObjectId;
   number: string;
-  kind: "adjustment" | "purchase_order";
+  kind: "adjustment" | "purchase_order" | "sales_order";
   status: "pending" | "approved" | "rejected" | "cancelled" | "failed";
   summary: string;
   valueCents: number;
   /** What to do when approved. Kept as plain ids and numbers. */
-  payload: { itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId };
-  subject: { type: "item" | "purchase_order"; id: string; label: string };
+  payload: {
+    itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId;
+    /** A sales order accepted from an incoming Exchange order: the answer to send once it is approved and the stock reserved. */
+    respond?: { messageId: ObjectId; status: "accepted" | "changed"; promisedDate: string | null; note: string };
+    /** Carry the confirmation out even if stock is short (a back-order), because the approver was told. */
+    allowShortage?: boolean;
+  };
+  subject: { type: "item" | "purchase_order" | "sales_order"; id: string; label: string };
   requestedBy: { id: ObjectId; name: string };
   requestedAt: Date;
   decidedBy?: { id: ObjectId; name: string };
@@ -467,6 +505,7 @@ export interface Store {
   workOrders: Collection<WorkOrderDoc>;
   suppliers: Collection<SupplierDoc>;
   purchaseOrders: Collection<PurchaseOrderDoc>;
+  salesOrders: Collection<SalesOrderDoc>;
   counts: Collection<CountDoc>;
   approvals: Collection<ApprovalDoc>;
   downtime: Collection<DowntimeDoc>;
@@ -512,6 +551,7 @@ export async function connect(
     workOrders: db.collection("work_orders"),
     suppliers: db.collection("suppliers"),
     purchaseOrders: db.collection("purchase_orders"),
+    salesOrders: db.collection("sales_orders"),
     counts: db.collection("counts"),
     approvals: db.collection("approvals"),
     downtime: db.collection("downtime"),
@@ -596,6 +636,11 @@ export async function connect(
     store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
+    store.salesOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.salesOrders.createIndex({ orgId: 1, state: 1 }),
+    // One sales order per incoming order message, so accepting twice can't reserve twice.
+    store.salesOrders.createIndex({ orgId: 1, messageId: 1 }, { unique: true, partialFilterExpression: { messageId: { $exists: true } } }),
+    store.movements.createIndex({ salesOrderId: 1 }, { sparse: true }),
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, at: -1 }),

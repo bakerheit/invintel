@@ -16,6 +16,7 @@ import { fingerprint, generateKeyPair, openKey, sealKey, signPayload, verifyPayl
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { loadItems } from "./item-queries.js";
 import { toOrders } from "./purchasing.js";
+import { answerWithSales } from "./sales-exchange.js";
 
 const BRIDGE_ID = "invintel";
 const secret = () => process.env.EXCHANGE_KEY_SECRET || undefined;
@@ -173,7 +174,8 @@ const answerStock = async (store: Store, orgId: ObjectId, partner: TradingPartne
   const items = await loadItems(store, orgId);
   const item = items.find((i) => i.sku.toLowerCase() === sku.toLowerCase());
   if (!item) return { kind: "stock", ok: false, reason: "We don't carry that item." };
-  const qty = item.stock.reduce((s, x) => s + x.quantity, 0);
+  // What a partner is told is what can still be promised: not what sits on quality hold, not what is reserved for orders (INV-15).
+  const qty = Math.max(0, item.stock.reduce((s, x) => s + x.quantity, 0) - (item.onHold ?? 0) - (item.reserved ?? 0));
   const uom = uomOf(item);
   const availability = qty <= 0 ? "out" : item.reorderLevel > 0 && qty <= item.reorderLevel ? "low" : "in_stock";
   return { kind: "stock", ok: true, stock: { sku: item.sku, description: item.name, availability, ...(perms.shareStockQuantities ? { quantity: storedToNumber(qty, uom.decimals), unit: uom.unit } : {}) } };
@@ -232,9 +234,53 @@ export function registerInvintelExchange(store: Store) {
 const connectSchema = z.object({ invitation: exchangeInvitationSchema, kind: z.enum(["supplier", "customer"]) });
 const permissionsSchema = z.object({ shareStock: z.boolean(), shareStockQuantities: z.boolean(), shareOrderStatus: z.boolean() });
 const askSchema = z.object({ partnerId: objectIdSchema, question: queryBodySchema });
-const respondSchema = z.object({ status: z.enum(["accepted", "rejected", "changed"]), promisedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), note: z.string().trim().max(1000).default("") });
+const respondSchema = z.object({ status: z.enum(["accepted", "rejected", "changed"]), promisedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), note: z.string().trim().max(1000).default(""), /** Accept even if there isn't enough stock available to promise (a back-order). */ backorder: z.boolean().default(false) });
 const shipSchema = z.object({ shippedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), carrier: z.string().trim().max(80).default(""), tracking: z.string().trim().max(120).default("") });
 const sendPoSchema = z.object({ partnerId: objectIdSchema });
+
+
+// ---------- answering and shipping an incoming order (also used by Sales) ----------
+
+export type IncomingOrder = { m: B2BMessageDoc; order: z.infer<typeof orderBodySchema> };
+
+export async function loadIncomingOrder(store: Store, orgId: ObjectId, id: string): Promise<IncomingOrder | null> {
+  const m = await store.b2bMessages.findOne({ _id: oid(id), orgId, direction: "in", docType: "order" });
+  if (!m) return null;
+  const order = orderBodySchema.safeParse(docOf(m));
+  return order.success ? { m, order: order.data } : null;
+}
+
+type Asker = { userId: ObjectId; userName: string };
+
+/** Sends our answer to a customer's order. The same answer twice is the same message. */
+export async function sendOrderResponse(store: Store, orgId: ObjectId, actor: Asker, got: IncomingOrder, input: { status: "accepted" | "rejected" | "changed"; promisedDate: string | null; note: string }) {
+  const body = orderResponseBodySchema.parse({ poNumber: got.order.poNumber, status: input.status, promisedDate: input.promisedDate, note: input.note, lines: got.order.lines.map((l) => ({ sku: l.sku, quantity: input.status === "rejected" ? 0 : l.quantity, status: input.status })) });
+  const res = await sendMessage(store, orgId, actor, got.m.partnerId, { docType: "order_response", body: JSON.stringify(body), contentType: "application/json", correlation: { poNumber: got.order.poNumber, partnerRef: got.order.poNumber }, idempotencyKey: `resp-${got.m._id.toHexString()}-${input.status}-${input.promisedDate ?? ""}` });
+  if (!res.ok) return res;
+  if (res.created) await recordAck(store, orgId, got.m._id, { level: "business", result: input.status === "rejected" ? "rejected" : "accepted", detail: `We answered: ${input.status}` }).catch(() => undefined);
+  await recordAudit(store, { orgId, actor: { id: actor.userId, name: actor.userName }, action: "exchange.order_answered", entity: { type: "b2b_message", id: got.m._id.toHexString(), label: got.order.poNumber }, summary: `Answered ${got.order.poNumber}: ${input.status}${input.promisedDate ? `, promised ${input.promisedDate}` : ""}` });
+  return res;
+}
+
+/**
+ * Sends the ship notice for an incoming order. By default it covers the whole order once; Sales passes what a shipment really
+ * contained, its shipment number, and a key of its own so a part shipment and the rest are separate notices.
+ */
+export async function sendShipNotice(
+  store: Store, orgId: ObjectId, actor: Asker, got: IncomingOrder,
+  input: { shippedDate?: string; carrier?: string; tracking?: string; shipmentNumber?: string; lines?: { sku: string; quantity: number }[]; key?: string },
+) {
+  const body = despatchBodySchema.parse({
+    poNumber: got.order.poNumber, shipmentNumber: input.shipmentNumber ?? `SH-${got.order.poNumber}`, shippedDate: input.shippedDate ?? new Date().toISOString().slice(0, 10),
+    carrier: input.carrier ?? "", tracking: input.tracking ?? "", lines: input.lines ?? got.order.lines.map((l) => ({ sku: l.sku, quantity: l.quantity })),
+  });
+  const res = await sendMessage(store, orgId, actor, got.m.partnerId, { docType: "despatch_advice", body: JSON.stringify(body), contentType: "application/json", correlation: { poNumber: got.order.poNumber, partnerRef: got.order.poNumber }, idempotencyKey: input.key ?? `ship-${got.m._id.toHexString()}` });
+  if (!res.ok) return res;
+  if (res.created) await recordAudit(store, { orgId, actor: { id: actor.userId, name: actor.userName }, action: "exchange.order_shipped", entity: { type: "b2b_message", id: got.m._id.toHexString(), label: got.order.poNumber }, summary: `Sent ship notice for ${got.order.poNumber}${input.tracking ? ` (tracking ${input.tracking})` : ""}` });
+  return res;
+}
+
+const salesOn = (org: Pick<OrgDoc, "modules">) => org.modules?.sales !== false;
 
 export function createExchangeRoutes(store: Store) {
   const r = new Hono<OrgEnv>();
@@ -330,44 +376,47 @@ export function createExchangeRoutes(store: Store) {
     const incoming = await store.b2bMessages.find({ orgId, direction: "in", docType: "order" }).sort({ createdAt: -1 }).limit(100).toArray();
     const partners = new Map((await store.tradingPartners.find({ orgId }).toArray()).map((p) => [p._id.toHexString(), p]));
     const out = await store.b2bMessages.find({ orgId, direction: "out", docType: { $in: ["order_response", "despatch_advice"] } }).toArray();
+    const sales = new Map((await store.salesOrders.find({ orgId, messageId: { $in: incoming.map((m) => m._id) } }, { projection: { number: 1, state: 1, messageId: 1 } }).toArray()).map((s) => [s.messageId!.toHexString(), s]));
     return c.json(incoming.map((m) => {
       const body = orderBodySchema.safeParse(docOf(m));
       const answers = out.filter((o) => o.partnerId.equals(m.partnerId) && o.correlation.poNumber === m.correlation.poNumber);
       const resp = answers.filter((o) => o.docType === "order_response").map((o) => docOf(o) as { status: string; promisedDate: string | null }).pop();
-      return { messageId: m._id.toHexString(), partner: partners.get(m.partnerId.toHexString())?.name ?? "Deleted partner", receivedAt: m.createdAt.toISOString(), order: body.success ? body.data : null, response: resp ?? null, shipped: answers.some((o) => o.docType === "despatch_advice") };
+      return { messageId: m._id.toHexString(), partner: partners.get(m.partnerId.toHexString())?.name ?? "Deleted partner", receivedAt: m.createdAt.toISOString(), order: body.success ? body.data : null, response: resp ?? null, shipped: answers.some((o) => o.docType === "despatch_advice"), salesOrder: sales.get(m._id.toHexString()) ? { id: sales.get(m._id.toHexString())!._id.toHexString(), number: sales.get(m._id.toHexString())!.number, state: sales.get(m._id.toHexString())!.state } : null };
     }));
   });
 
-  const loadIncoming = async (orgId: ObjectId, id: string) => {
-    const m = await store.b2bMessages.findOne({ _id: oid(id), orgId, direction: "in", docType: "order" });
-    if (!m) return null;
-    const order = orderBodySchema.safeParse(docOf(m));
-    return order.success ? { m, order: order.data } : null;
-  };
+  const loadIncoming = (orgId: ObjectId, id: string) => loadIncomingOrder(store, orgId, id);
 
   r.post("/orders/:id/respond", requireRole("admin"), zValidator("param", idParam), zValidator("json", respondSchema), async (c) => {
-    const orgId = c.get("org")._id;
+    const org = c.get("org");
+    const orgId = org._id;
     const got = await loadIncoming(orgId, c.req.valid("param").id);
     if (!got) return c.json({ error: "Order not found" }, 404);
     const input = c.req.valid("json");
-    const body = orderResponseBodySchema.parse({ poNumber: got.order.poNumber, status: input.status, promisedDate: input.promisedDate, note: input.note, lines: got.order.lines.map((l) => ({ sku: l.sku, quantity: input.status === "rejected" ? 0 : l.quantity, status: input.status })) });
-    const res = await sendMessage(store, orgId, asActor(c.get("user")), got.m.partnerId, { docType: "order_response", body: JSON.stringify(body), contentType: "application/json", correlation: { poNumber: got.order.poNumber, partnerRef: got.order.poNumber }, idempotencyKey: `resp-${got.m._id.toHexString()}-${input.status}-${input.promisedDate ?? ""}` });
+    let salesOrder: { id: string; number: string } | null = null;
+    if (salesOn(org)) {
+      // Accepting a customer's order means promising stock: it becomes a sales order that reserves it (INV-15).
+      const sales = await answerWithSales(store, org, { ...c.get("user"), role: c.get("role") }, got, input);
+      if (sales.kind === "approval") return c.json({ approvalRequired: true, approval: sales.approval, salesOrder: sales.salesOrder }, 202);
+      if (sales.kind === "refused") return c.json({ error: sales.error, ...(sales.shortages ? { shortages: sales.shortages } : {}), ...(sales.salesOrder ? { salesOrder: sales.salesOrder } : {}) }, sales.status);
+      salesOrder = sales.salesOrder;
+    }
+    const res = await sendOrderResponse(store, orgId, asActor(c.get("user")), got, input);
     if (!res.ok) return c.json({ error: res.error }, res.status);
-    if (res.created) await recordAck(store, orgId, got.m._id, { level: "business", result: input.status === "rejected" ? "rejected" : "accepted", detail: `We answered: ${input.status}` }).catch(() => undefined);
-    await recordAudit(store, { orgId, actor: auditActor(c.get("user")), action: "exchange.order_answered", entity: { type: "b2b_message", id: got.m._id.toHexString(), label: got.order.poNumber }, summary: `Answered ${got.order.poNumber}: ${input.status}${input.promisedDate ? `, promised ${input.promisedDate}` : ""}` });
-    return c.json({ messageId: res.message._id.toHexString(), state: res.message.state }, 201);
+    return c.json({ messageId: res.message._id.toHexString(), state: res.message.state, ...(salesOrder ? { salesOrder } : {}) }, 201);
   });
 
   r.post("/orders/:id/ship", zValidator("param", idParam), zValidator("json", shipSchema), async (c) => {
-    const orgId = c.get("org")._id;
+    const org = c.get("org");
+    const orgId = org._id;
     const got = await loadIncoming(orgId, c.req.valid("param").id);
     if (!got) return c.json({ error: "Order not found" }, 404);
+    // An order we are tracking as a sales order ships from Sales: that takes the stock out and sends this notice, so it can't be sent on its own.
+    const so = await store.salesOrders.findOne({ orgId, messageId: got.m._id }, { projection: { number: 1, state: 1 } });
+    if (so && so.state !== "cancelled") return c.json({ error: `Ship ${so.number} from Sales: that takes the stock out through the ledger and sends the ship notice.`, salesOrder: so.number }, 409);
     const input = c.req.valid("json");
-    const shipment = `SH-${got.order.poNumber}`;
-    const body = despatchBodySchema.parse({ poNumber: got.order.poNumber, shipmentNumber: shipment, shippedDate: input.shippedDate ?? new Date().toISOString().slice(0, 10), carrier: input.carrier, tracking: input.tracking, lines: got.order.lines.map((l) => ({ sku: l.sku, quantity: l.quantity })) });
-    const res = await sendMessage(store, orgId, asActor(c.get("user")), got.m.partnerId, { docType: "despatch_advice", body: JSON.stringify(body), contentType: "application/json", correlation: { poNumber: got.order.poNumber, partnerRef: got.order.poNumber }, idempotencyKey: `ship-${got.m._id.toHexString()}` });
+    const res = await sendShipNotice(store, orgId, asActor(c.get("user")), got, { shippedDate: input.shippedDate, carrier: input.carrier, tracking: input.tracking });
     if (!res.ok) return c.json({ error: res.error }, res.status);
-    await recordAudit(store, { orgId, actor: auditActor(c.get("user")), action: "exchange.order_shipped", entity: { type: "b2b_message", id: got.m._id.toHexString(), label: got.order.poNumber }, summary: `Sent ship notice for ${got.order.poNumber}${input.tracking ? ` (tracking ${input.tracking})` : ""}` });
     return c.json({ messageId: res.message._id.toHexString(), state: res.message.state, alreadySent: !res.created }, res.created ? 201 : 200);
   });
 

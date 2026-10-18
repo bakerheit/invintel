@@ -75,7 +75,7 @@ describe("Invintel-to-Invintel exchange", () => {
   });
 
   it("sends a purchase order, gets the supplier's answer and ship notice back, and keeps the whole story on the order", async () => {
-    const { buyer, seller, sellerMember, b, s, po, partnerAtBuyer } = await setup();
+    const { buyer, seller, sellerMember, b, s, po, partnerAtBuyer, mainS } = await setup();
     // A draft can't be sent; a placed order can, once.
     const sent = await call(buyer.cookie, `${b}/exchange/purchase-orders/${po.id}/send`, { partnerId: partnerAtBuyer });
     expect(sent.status).toBe(201);
@@ -93,8 +93,18 @@ describe("Invintel-to-Invintel exchange", () => {
     expect((await call(sellerMember.cookie, `${s}/exchange/orders/${mid}/respond`, { status: "accepted" })).status).toBe(403);
     const answered = await call(seller.cookie, `${s}/exchange/orders/${mid}/respond`, { status: "accepted", promisedDate: "2026-11-20", note: "Ships Friday" });
     expect(answered.status).toBe(201);
-    const ship = await call(sellerMember.cookie, `${s}/exchange/orders/${mid}/ship`, { carrier: "UPS Freight", tracking: "1Z999" });
+    // Accepting made a sales order that reserves the stock (INV-15); shipping it takes the stock out and sends the notice.
+    const accepted = (await call(seller.cookie, `${s}/exchange/orders`)).body[0];
+    expect(answered.body.salesOrder).toMatchObject({ number: "SO-0001" });
+    expect(accepted.salesOrder).toMatchObject({ number: "SO-0001", state: "confirmed" });
+    const direct = await call(sellerMember.cookie, `${s}/exchange/orders/${mid}/ship`, { carrier: "UPS Freight", tracking: "1Z999" });
+    expect(direct.status).toBe(409); // a ship notice on its own would leave the stock in the books
+    const itemS = (await call(seller.cookie, `${s}/items`)).body[0];
+    expect(itemS).toMatchObject({ quantity: 40, reserved: 10, available: 30 });
+    const ship = await call(sellerMember.cookie, `${s}/sales/orders/${accepted.salesOrder.id}/ship`, { carrier: "UPS Freight", trackingNumber: "1Z999", lines: [{ itemId: itemS.id, quantity: 10, locationId: mainS }] });
     expect(ship.status).toBe(201);
+    expect(ship.body.notice).toBe("sent");
+    expect((await call(seller.cookie, `${s}/items`)).body[0]).toMatchObject({ quantity: 30, reserved: 0, available: 30 });
     expect((await call(seller.cookie, `${s}/exchange/orders`)).body[0]).toMatchObject({ response: { status: "accepted", promisedDate: "2026-11-20" }, shipped: true });
 
     // The buyer's order message is acknowledged by the business answer, and the order's timeline shows all three documents.
@@ -107,7 +117,7 @@ describe("Invintel-to-Invintel exchange", () => {
   });
 
   it("answers questions only as far as the partner has been allowed, and never reveals cost", async () => {
-    const { buyer, seller, b, s, po, partnerAtBuyer, partnerAtSeller } = await setup();
+    const { buyer, seller, b, s, po, partnerAtBuyer, partnerAtSeller, mainS } = await setup();
     const ask = async (q: unknown) => {
       const r = await call(buyer.cookie, `${b}/exchange/ask`, { partnerId: partnerAtBuyer, question: q });
       expect(r.status).toBe(201);
@@ -135,7 +145,9 @@ describe("Invintel-to-Invintel exchange", () => {
     const mid = (await call(seller.cookie, `${s}/exchange/orders`)).body[0].messageId as string;
     await call(seller.cookie, `${s}/exchange/orders/${mid}/respond`, { status: "accepted", promisedDate: "2026-11-20" });
     expect((await ask({ kind: "order_status", poNumber: po.number }))!.order).toMatchObject({ status: "accepted", promisedDate: "2026-11-20" });
-    await call(seller.cookie, `${s}/exchange/orders/${mid}/ship`, {});
+    const soId = (await call(seller.cookie, `${s}/exchange/orders`)).body[0].salesOrder.id as string;
+    const itemS = (await call(seller.cookie, `${s}/items`)).body[0];
+    await call(seller.cookie, `${s}/sales/orders/${soId}/ship`, { lines: [{ itemId: itemS.id, quantity: 10, locationId: mainS }] });
     expect((await ask({ kind: "order_status", poNumber: po.number }))!.order).toMatchObject({ status: "shipped", shipped: true });
   });
 

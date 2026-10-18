@@ -85,6 +85,9 @@ export default function ItemDetailPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           ["On hand", formatQty(item.quantity, item)],
+          ...((item.reserved ?? 0) > 0 || (item.available ?? item.quantity) !== item.quantity
+            ? [[`Available${(item.reserved ?? 0) > 0 ? ` (${formatQty(item.reserved ?? 0, item, { unit: false })} promised)` : " (not on hold)"}`, formatQty(item.available ?? item.quantity, item)]]
+            : []),
           ["Value", formatCents(lineValueCents(item.quantity, item.unitCostCents, item.decimals))],
           [item.unit === "ea" ? "Unit cost" : `Cost per ${item.unit}`, formatCents(item.unitCostCents)],
           ["Reorder at", item.reorderLevel > 0 ? formatQty(item.reorderLevel, item) : "Not tracked"],

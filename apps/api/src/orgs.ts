@@ -32,6 +32,7 @@ import { createTraceabilityRoutes } from "./traceability.js";
 import { createScrapReportRoutes } from "./scrap-report.js";
 import { createReportRoutes } from "./reports.js";
 import { createPurchasingRoutes } from "./purchasing.js";
+import { createSalesRoutes } from "./sales.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
 import {
   createOrganization,
@@ -166,7 +167,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/data", createDataRoutes(store));
   scoped.route("/members", createMemberRoutes(store));
   // A switched-off module refuses its API too, so "off" means off for scripts as well as the menu.
-  for (const module of ["purchasing", "production"] as const) {
+  for (const module of ["purchasing", "production", "sales"] as const) {
     scoped.use(`/${module}/*`, async (c, next) => {
       if ({ ...DEFAULT_MODULES, ...c.get("org").modules }[module] === false) {
         return c.json({ error: `${module[0]!.toUpperCase()}${module.slice(1)} is switched off for this organization` }, 403);
@@ -180,6 +181,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/b2b", createB2BRoutes(store));
   scoped.route("/traceability", createTraceabilityRoutes(store));
   scoped.route("/purchasing", createPurchasingRoutes(store));
+  scoped.route("/sales", createSalesRoutes(store));
   scoped.route("/overview", createOverviewRoutes(store));
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));

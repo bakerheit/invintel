@@ -2,6 +2,7 @@ import type { ExchangePermissions } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Handshake, Link2, Send, Truck, X } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type ExAnswer, type ExIncomingOrder, type ExPartner } from "@/lib/api";
 import { formatCents, formatRelative } from "@/lib/format";
-import { isAdmin, orgKey, useCurrentOrg } from "@/lib/org";
+import { invalidateOrg, isAdmin, orgKey, useCurrentOrg } from "@/lib/org";
 
 const copyText = async (text: string, what: string) => {
   try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); } catch { toast.error("Couldn't copy. Select it and copy by hand."); }
@@ -120,8 +121,18 @@ function IncomingOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const [date, setDate] = useState("");
   const [tracking, setTracking] = useState("");
-  const done = async (msg: string) => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-orders") }); toast.success(msg); setOpen(null); };
-  const respond = useMutation({ mutationFn: (v: { id: string; status: "accepted" | "rejected" | "changed" }) => api.exRespond(orgId, v.id, { status: v.status, promisedDate: date || null, note: "" }), onSuccess: (_r, v) => done(`Answered: ${v.status}`), onError: (e: Error) => toast.error(e.message) });
+  const done = async (msg: string) => { await invalidateOrg(qc, orgId); toast.success(msg); setOpen(null); };
+  // Accepting a customer's order promises stock: it becomes a sales order that reserves it. If that can't be done the answer isn't sent.
+  const [problem, setProblem] = useState<{ id: string; text: string } | null>(null);
+  const respond = useMutation({
+    mutationFn: (v: { id: string; status: "accepted" | "rejected" | "changed"; backorder?: boolean }) => api.exRespond(orgId, v.id, { status: v.status, promisedDate: date || null, note: "", backorder: v.backorder }),
+    onSuccess: (r, v) => {
+      setProblem(null);
+      if (r.approvalRequired) { void qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-orders") }); toast.success(`${r.approval?.number ?? "A request"} sent for approval. ${r.salesOrder?.number ?? "The order"} is reserved and the customer is told when an admin approves.`); setOpen(null); return; }
+      return done(r.salesOrder && v.status !== "rejected" ? `Answered: ${v.status}. ${r.salesOrder.number} reserves the stock.` : `Answered: ${v.status}`);
+    },
+    onError: (e: Error, v) => { if (v.status !== "rejected") setProblem({ id: v.id, text: e.message }); else toast.error(e.message); },
+  });
   const ship = useMutation({ mutationFn: (id: string) => api.exShip(orgId, id, { carrier: "", tracking }), onSuccess: () => done("Ship notice sent"), onError: (e: Error) => toast.error(e.message) });
   const list = orders.data ?? [];
   return (
@@ -136,14 +147,22 @@ function IncomingOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
                   <span className="font-mono font-medium">{o.order?.poNumber ?? "?"}</span><span>from {o.partner}</span><span className="text-xs text-muted-foreground">{formatRelative(o.receivedAt)}</span>
                   <span className="ml-auto flex gap-1.5">
                     {o.response && <Badge variant="secondary" className={o.response.status === "rejected" ? "bg-destructive/10 text-destructive" : "bg-success-soft text-success"}>{o.response.status}{o.response.promisedDate ? ` for ${o.response.promisedDate}` : ""}</Badge>}
+                    {o.salesOrder && <Link to={`/o/${orgId}/sales`} className="inline-flex"><Badge variant="secondary" className="bg-accent text-accent-foreground">{o.salesOrder.number}{o.salesOrder.state === "confirmed" ? " · stock reserved" : o.salesOrder.state === "draft" ? " · not reserved yet" : ` · ${o.salesOrder.state}`}</Badge></Link>}
                     {o.shipped && <Badge variant="secondary">shipped</Badge>}
                   </span>
                 </div>
                 {o.order && <p className="text-xs text-muted-foreground">{o.order.lines.map((l) => `${l.quantity} ${l.unit} ${l.sku}${l.unitPriceCents ? ` @ ${formatCents(l.unitPriceCents)}` : ""}`).join(", ")}{o.order.requestedDate ? `. Wanted by ${o.order.requestedDate}.` : ""}</p>}
+                {problem?.id === o.messageId && (
+                  <div role="alert" className="space-y-2 rounded-lg border border-warning/40 bg-warning-soft p-3 text-warning">
+                    <p>{problem.text}</p>
+                    {admin && problem.text.includes("Not enough available") && <Button size="sm" variant="outline" onClick={() => respond.mutate({ id: o.messageId, status: "accepted", backorder: true })} disabled={respond.isPending}>Accept anyway (back-order)</Button>}
+                  </div>
+                )}
                 {open === o.messageId ? (
                   <div className="flex flex-wrap items-center gap-2">
                     {!o.response && admin && <><Input aria-label="Promised date" type="date" className="h-8 w-40" value={date} onChange={(e) => setDate(e.target.value)} /><Button size="sm" onClick={() => respond.mutate({ id: o.messageId, status: "accepted" })}><Check /> Accept</Button><Button size="sm" variant="outline" onClick={() => respond.mutate({ id: o.messageId, status: "rejected" })}><X /> Reject</Button></>}
-                    {o.response && !o.shipped && <><Input aria-label="Tracking number" className="h-8 w-48" placeholder="Tracking number (optional)" value={tracking} onChange={(e) => setTracking(e.target.value)} /><Button size="sm" onClick={() => ship.mutate(o.messageId)}><Truck /> Send ship notice</Button></>}
+                    {o.response && !o.shipped && o.salesOrder && o.salesOrder.state !== "cancelled" && <Link to={`/o/${orgId}/sales`} className="inline-flex h-8 items-center gap-1 rounded-md border px-2.5 text-sm font-medium hover:bg-muted"><Truck className="size-4" /> Ship from Sales ({o.salesOrder.number})</Link>}
+                    {o.response && !o.shipped && !(o.salesOrder && o.salesOrder.state !== "cancelled") && <><Input aria-label="Tracking number" className="h-8 w-48" placeholder="Tracking number (optional)" value={tracking} onChange={(e) => setTracking(e.target.value)} /><Button size="sm" onClick={() => ship.mutate(o.messageId)}><Truck /> Send ship notice</Button></>}
                     <Button size="sm" variant="ghost" onClick={() => setOpen(null)}>Close</Button>
                   </div>
                 ) : (!o.shipped && (admin || o.response)) && <Button size="sm" variant="outline" onClick={() => setOpen(o.messageId)}>{o.response ? "Ship" : "Answer"}</Button>}
