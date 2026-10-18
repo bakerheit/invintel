@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * items with decimals take "12.5"; items with other units (cases, reels) get a unit picker and
  * show what the typed amount comes to.
  */
-export function QtyInput({ entry, id, className, inputClassName, "aria-label": ariaLabel, required, autoFocus, onKeyDown }: {
+export function QtyInput({ entry, id, className, inputClassName, "aria-label": ariaLabel, required, autoFocus, onKeyDown, onBlur }: {
   entry: QtyEntry;
   id?: string;
   className?: string;
@@ -17,6 +17,7 @@ export function QtyInput({ entry, id, className, inputClassName, "aria-label": a
   required?: boolean;
   autoFocus?: boolean;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onBlur?: () => void;
 }) {
   const { uom, altUnits, entryUnit } = entry;
   const hasAlt = altUnits.length > 0;
@@ -34,6 +35,7 @@ export function QtyInput({ entry, id, className, inputClassName, "aria-label": a
             onChange={(e) => entry.setText(e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={onKeyDown}
+            onBlur={onBlur}
             required={required}
             autoFocus={autoFocus}
             aria-label={ariaLabel}

@@ -110,16 +110,26 @@ API under `/api/orgs/:orgId/purchasing`: `GET/POST /suppliers`, `PATCH /supplier
 
 ### Import and export
 
-**Inventory > Export** downloads every item as CSV, one row per item and location (`sku, name, category, description, reorder_level, unit_cost, barcodes, location, quantity`). Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet can't run them as formulas.
+**Inventory > Export** downloads every item as CSV, one row per item and location (`sku, name, category, description, reorder_level, unit_cost, barcodes, location, quantity, unit, decimals`; quantities are written as people read them, `12.500`). Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet can't run them as formulas.
 
 **Inventory > Import** (admins) takes a CSV and shows a preview before anything is written: new items, stock lines, rows skipped and problems per line. Rules:
 
-- Needs a SKU and a name column. Common header names work (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...). Optional: category, notes, reorder level, unit cost (`$12.50` is fine), barcodes (separate with `|`), location (its code, full path or unique name) and quantity.
+- Needs a SKU and a name column. Common header names work (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...). Optional: category, notes, reorder level, unit cost (`$12.50` is fine), barcodes (separate with `|`), location (its code, full path or unique name), quantity, and `unit` and `decimals` for a new item that is not counted in whole each (quantity and reorder level are then read with that many decimals; `1.2345` for a 3-decimal item is an error, never rounded).
 - It only **creates**: an existing SKU is never changed, so importing the same file twice can't double anything. Repeat a SKU on another line to put stock in a second location.
 - Opening stock goes through the ledger as receipts ("Imported from CSV"), and each new item is in the audit log.
 - One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 1000 rows per file, about 2 MB. Unit costs are rounded to the cent.
 
 API: `GET /data/items.csv`, `POST /data/items/import` with `{ csv, dryRun }`.
+
+### Units of measure
+
+Every item says what it is counted in. Set **Unit** and **Decimal places** in the item form (presets for kg, g, lb, m, m², L, ft, or any text up to 16 characters), and optionally **Also bought or counted in**: `1 bag = 25 kg`. Receiving and counting then take `12.5` for a 3-decimal kg item, and the unit picker next to a quantity box converts bags to kilograms as you type (`2 bag = 50.000 kg`) and refuses anything that wouldn't come out as a whole number of the smallest unit.
+
+- **Storage doesn't change.** The API, the ledger, the audit log and every total still deal in whole numbers: a count of the item's smallest unit. 12.5 kg with 3 decimals is stored as `12500`. Items with 0 decimals (everything that existed before) read exactly as they did. No floating point is used anywhere: text is parsed and printed digit by digit and conversions use BigInt.
+- **Shared helpers** in `packages/shared/src/units.ts`: `formatQty(stored, item)`, `parseQty(text, decimals)`, `toStored`, `convertQty(text, factor, decimals)`, `lineValueCents(stored, unitCostCents, decimals)`, `uomOf(item)`. Anything that shows a quantity should go through `formatQty`; anything that multiplies a quantity by a cost through `lineValueCents`.
+- **Unit cost means the price of one display unit** (one kg). Value = quantity x cost / 10^decimals, rounded to the cent. Overview, aging, ABC counting, count variance, approvals and purchase order totals all use `lineValueCents`.
+- **Decimal places lock** once an item has any stock, ledger history, rolls, purchase order lines, recipes, work orders, counts or waiting approvals (the server answers 409). Renaming the unit or editing "also counted in" is always allowed. To change the decimals of an item with history, create a new item.
+- **Totals across items** ("Units on hand", location totals, net count change) add display units, so 12.5 kg counts as 12.5, not 12,500. They mix units by nature; they are for scale, not accounting.
 
 ### Rolls and pallets (unit tracking)
 

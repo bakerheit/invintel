@@ -57,7 +57,7 @@ export function createCountRoutes(store: Store) {
       summary: {
         counted: lines.length, matched: lines.filter((l) => l.variance === 0).length,
         over: lines.filter((l) => l.variance > 0).length, under: lines.filter((l) => l.variance < 0).length,
-        netUnits: lines.reduce((s, l) => s + l.variance, 0), netCents: lines.reduce((s, l) => s + l.varianceCents, 0),
+        netUnits: Math.round(lines.reduce((s, l) => s + l.variance / 10 ** l.uom.decimals, 0) * 100) / 100, netCents: lines.reduce((s, l) => s + l.varianceCents, 0),
       },
     };
   }
@@ -157,10 +157,12 @@ export function createCountRoutes(store: Store) {
       else failures.push(`${view.lines.find((l) => l.itemId === t.itemId)?.itemName ?? t.itemId}: ${res.error}`);
     }
     await store.counts.updateOne({ _id }, { $set: { lines } });
-    const net = todo.reduce((s, t) => s + t.delta, 0);
+    // Net is shown in display units (12.5 kg is 12.5), so a kg item doesn't swamp the total.
+    const decimalsOf = new Map<string, number>([...view.lines, ...view.uncounted].map((l) => [l.itemId, l.uom.decimals]));
+    const net = Math.round(todo.reduce((s, t) => s + t.delta / 10 ** (decimalsOf.get(t.itemId) ?? 0), 0) * 100) / 100;
     await recordAudit(store, {
       orgId, actor: auditActor(c.get("user")), action: "count.posted", entity: { type: "count", id: _id.toHexString(), label: claimed.number },
-      summary: `Posted ${claimed.number} at ${location?.name ?? "a location"}: ${todo.length} ${todo.length === 1 ? "difference" : "differences"}, net ${net > 0 ? "+" : ""}${net.toLocaleString("en-US")} units${failures.length ? `, ${failures.length} failed` : ""}`,
+      summary: `Posted ${claimed.number} at ${location?.name ?? "a location"}: ${todo.length} ${todo.length === 1 ? "difference" : "differences"}, net ${net > 0 ? "+" : ""}${net.toLocaleString("en-US", { maximumFractionDigits: 2 })} units${failures.length ? `, ${failures.length} failed` : ""}`,
       refs: { movementIds, countId: _id.toHexString() },
     });
     const out = await present((await store.counts.findOne({ _id }))!);

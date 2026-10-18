@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_QTY } from "./units.js";
+import { MAX_QTY, type Uom } from "./units.js";
 
 const id = z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id");
 
@@ -64,6 +64,8 @@ export interface PurchaseOrderLine {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   unitCostCents: number;
   /** From the ledger: receipts against this order that haven't been reversed. */
@@ -106,6 +108,8 @@ export interface ReorderSuggestion {
   itemId: string;
   sku: string;
   name: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   reorderLevel: number;
   /** Already on open purchase orders and not yet received. */

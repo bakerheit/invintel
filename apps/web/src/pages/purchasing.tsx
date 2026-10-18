@@ -1,4 +1,4 @@
-import type { PoStatus, PurchaseOrder, Supplier } from "@invintel/shared";
+import { formatQty, qtyErrorMessage, type PoStatus, type PurchaseOrder, type Supplier } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Mail, PackageCheck, Phone, Plus, ShoppingCart, Trash2, Truck } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { qtyText, readQtyEntry } from "@/lib/qty";
 import { api } from "@/lib/api";
 import { centsToDollars, dollarsToCents, formatCents } from "@/lib/format";
 import { invalidateOrg, isAdmin, orgKey, useCurrentOrg, useLocations } from "@/lib/org";
@@ -77,13 +78,19 @@ function OrderDialog({ open, onOpenChange, suppliers }: { open: boolean; onOpenC
   const create = useMutation({
     mutationFn: () => api.createOrder(orgId, {
       supplierId, expectedDate: date || null,
-      lines: lines.map((l) => ({ itemId: l.itemId, quantity: Number(l.quantity), unitCostCents: dollarsToCents(l.cost) })),
+      lines: lines.map((l) => ({ itemId: l.itemId, quantity: readLine(l).stored, unitCostCents: dollarsToCents(l.cost) })),
     }),
     onSuccess: async (o) => { await invalidateOrg(qc, orgId); toast.success(`Created ${o.number} as a draft`); onOpenChange(false); setLines([{ itemId: "", quantity: "", cost: "" }]); },
     onError: (e: Error) => setError(e.message),
   });
+  const itemUnit = (id: string) => { const u = items.data?.find((x) => x.id === id)?.unit; return u && u !== "ea" ? ` (${u})` : ""; };
   const set = (i: number, patch: Partial<Draft>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const ready = supplierId && lines.every((l) => l.itemId && Number(l.quantity) > 0);
+  // Quantities are typed in the item's own unit and sent as the whole number the API stores.
+  const readLine = (l: Draft) => {
+    const r = readQtyEntry(l.quantity, { uom: items.data?.find((x) => x.id === l.itemId) ?? {} });
+    return r.ok ? { ok: true as const, stored: r.stored } : { ok: false as const, stored: 0, reason: r.reason };
+  };
+  const ready = supplierId && lines.every((l) => l.itemId && readLine(l).ok && readLine(l).stored > 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -102,7 +109,7 @@ function OrderDialog({ open, onOpenChange, suppliers }: { open: boolean; onOpenC
                   <SelectTrigger aria-label={`Item for line ${i + 1}`} className="w-full"><SelectValue placeholder="Choose an item" /></SelectTrigger>
                   <SelectContent>{(items.data ?? []).map((x) => <SelectItem key={x.id} value={x.id} disabled={lines.some((o, j) => j !== i && o.itemId === x.id)}>{x.name} ({x.sku})</SelectItem>)}</SelectContent>
                 </Select>
-                <Input aria-label="Quantity" type="number" min={1} placeholder="Qty" value={l.quantity} onChange={(e) => set(i, { quantity: e.target.value })} />
+                <Input aria-label="Quantity" inputMode="decimal" placeholder={`Qty${itemUnit(l.itemId)}`} value={l.quantity} onChange={(e) => set(i, { quantity: e.target.value })} aria-invalid={l.quantity.trim() !== "" && !readLine(l).ok ? true : undefined} title={l.quantity.trim() !== "" && !readLine(l).ok ? qtyErrorMessage((readLine(l) as { reason: Parameters<typeof qtyErrorMessage>[0] }).reason, items.data?.find((x) => x.id === l.itemId)) : undefined} />
                 <Input aria-label="Unit cost" type="number" min={0} step="0.01" placeholder="Cost" value={l.cost} onChange={(e) => set(i, { cost: e.target.value })} />
                 <Button type="button" variant="ghost" size="icon-sm" aria-label="Remove line" disabled={lines.length === 1} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}><Trash2 /></Button>
               </div>
@@ -124,7 +131,7 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
   const { data: locations = [] } = useLocations(orgId);
   const receivingFirst = [...locations].sort((a, b) => Number(b.type === "receiving") - Number(a.type === "receiving"));
   const [locationId, setLocationId] = useState("");
-  const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries(order.lines.map((l) => [l.itemId, String(Math.max(0, l.quantity - l.received))])));
+  const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries(order.lines.map((l) => [l.itemId, qtyText(Math.max(0, l.quantity - l.received), l.uom)])));
   const where = locationId || receivingFirst[0]?.id || "";
   const done = async (msg: string) => { await invalidateOrg(qc, orgId); toast.success(msg); };
   const act = useMutation({
@@ -135,17 +142,21 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  // What is typed in "Receive now", as the whole number the API stores (0 if blank or not a valid quantity).
+  const readReceive = (l: PurchaseOrder["lines"][number]) => readQtyEntry(qty[l.itemId] ?? "", { uom: l.uom });
+  const receiveQty = (l: PurchaseOrder["lines"][number]) => { const r = readReceive(l); return r.ok ? r.stored : 0; };
   const receive = useMutation({
-    mutationFn: () => api.receiveOrder(orgId, order.id, { locationId: where, lines: order.lines.map((l) => ({ itemId: l.itemId, quantity: Number(qty[l.itemId] || 0) })).filter((l) => l.quantity > 0) }),
+    mutationFn: () => api.receiveOrder(orgId, order.id, { locationId: where, lines: order.lines.map((l) => ({ itemId: l.itemId, quantity: receiveQty(l) })).filter((l) => l.quantity > 0) }),
     onSuccess: async (r) => {
-      await done(r.overReceived.length ? `Received. ${r.overReceived.map((o) => `${o.itemName} is ${o.over} over`).join(", ")}` : `Received against ${r.order.number}`);
+      await done(r.overReceived.length ? `Received. ${r.overReceived.map((o) => `${o.itemName} is ${formatQty(o.over, order.lines.find((l) => l.itemId === o.itemId)?.uom)} over`).join(", ")}` : `Received against ${r.order.number}`);
       onClose();
     },
     onError: (e: Error) => toast.error(e.message),
   });
   const open = order.status === "ordered" || order.status === "partial";
   const admin = isAdmin(role);
-  const anyQty = order.lines.some((l) => Number(qty[l.itemId] || 0) > 0);
+  const badQty = order.lines.some((l) => (qty[l.itemId] ?? "").trim() !== "" && !readReceive(l).ok);
+  const anyQty = !badQty && order.lines.some((l) => receiveQty(l) > 0);
   const ask = async (a: "cancel" | "close") => {
     if (await confirm(a === "cancel"
       ? { title: `Cancel ${order.number}?`, description: "Nothing has been received, so no stock changes.", confirmLabel: "Cancel order", destructive: true }
@@ -166,14 +177,14 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
               {order.lines.map((l) => (
                 <tr key={l.itemId}>
                   <td className="p-2"><div className="font-medium">{l.itemName}</div><div className="font-mono text-xs text-muted-foreground">{l.itemSku}</div></td>
-                  <td className="p-2 text-right tabular-nums">{l.quantity.toLocaleString()}</td>
-                  <td className={cn("p-2 text-right tabular-nums", l.received > l.quantity && "text-warning", l.received >= l.quantity && "font-medium")}>{l.received.toLocaleString()}</td>
+                  <td className="p-2 text-right tabular-nums">{formatQty(l.quantity, l.uom)}</td>
+                  <td className={cn("p-2 text-right tabular-nums", l.received > l.quantity && "text-warning", l.received >= l.quantity && "font-medium")}>{formatQty(l.received, l.uom, { unit: false })}</td>
                   <td className="p-2 text-right tabular-nums">{formatCents(l.unitCostCents)}</td>
-                  {open && <td className="p-2"><Input aria-label={`Receive ${l.itemName}`} className="h-8 text-right" type="number" min={0} value={qty[l.itemId] ?? ""} onChange={(e) => setQty((q) => ({ ...q, [l.itemId]: e.target.value }))} /></td>}
+                  {open && <td className="p-2"><Input aria-label={`Receive ${l.itemName}`} className="h-8 text-right" inputMode="decimal" aria-invalid={(qty[l.itemId] ?? "").trim() !== "" && !readReceive(l).ok ? true : undefined} value={qty[l.itemId] ?? ""} onChange={(e) => setQty((q) => ({ ...q, [l.itemId]: e.target.value }))} /></td>}
                 </tr>
               ))}
             </tbody>
-            <tfoot><tr className="border-t bg-muted/30 font-medium"><td className="p-2">Total</td><td className="p-2 text-right tabular-nums">{order.orderedUnits.toLocaleString()}</td><td className="p-2 text-right tabular-nums">{order.receivedUnits.toLocaleString()}</td><td className="p-2 text-right tabular-nums">{formatCents(order.totalCents)}</td>{open && <td />}</tr></tfoot>
+            <tfoot><tr className="border-t bg-muted/30 font-medium"><td className="p-2">Total</td><td className="p-2 text-right tabular-nums">{order.lines.every((l) => l.uom.decimals === 0) ? order.orderedUnits.toLocaleString() : ""}</td><td className="p-2 text-right tabular-nums">{order.lines.every((l) => l.uom.decimals === 0) ? order.receivedUnits.toLocaleString() : ""}</td><td className="p-2 text-right tabular-nums">{formatCents(order.totalCents)}</td>{open && <td />}</tr></tfoot>
           </table>
         </div>
         {open && (
@@ -223,8 +234,8 @@ function Suggestions({ suppliers }: { suppliers: Supplier[] }) {
             <li key={r.itemId} className="flex items-center gap-3 py-2 text-sm">
               <input type="checkbox" className="size-4" aria-label={`Include ${r.name}`} checked={!skip.has(r.itemId)}
                 onChange={(e) => setSkip((s) => { const n = new Set(s); if (e.target.checked) n.delete(r.itemId); else n.add(r.itemId); return n; })} />
-              <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.name}</p><p className="truncate text-xs text-muted-foreground">{r.sku} · {r.quantity} on hand, reorder at {r.reorderLevel}{r.onOrder ? `, ${r.onOrder} already on order` : ""}</p></div>
-              <span className="shrink-0 tabular-nums font-medium">+{r.suggestedQuantity.toLocaleString()}</span>
+              <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.name}</p><p className="truncate text-xs text-muted-foreground">{r.sku} · {formatQty(r.quantity, r.uom)} on hand, reorder at {formatQty(r.reorderLevel, r.uom, { unit: false })}{r.onOrder ? `, ${formatQty(r.onOrder, r.uom, { unit: false })} already on order` : ""}</p></div>
+              <span className="shrink-0 tabular-nums font-medium">+{formatQty(r.suggestedQuantity, r.uom)}</span>
             </li>
           ))}
         </ul>
@@ -272,7 +283,7 @@ export default function PurchasingPage() {
                 <li key={o.id}>
                   <button type="button" onClick={() => setSelected(o.id)} className="flex w-full items-center gap-3 py-3 text-left text-sm hover:bg-muted/40">
                     <span className="w-20 shrink-0 font-mono font-medium">{o.number}</span>
-                    <span className="min-w-0 flex-1"><span className="block truncate font-medium">{o.supplierName}</span><span className="block truncate text-xs text-muted-foreground">{o.receivedUnits.toLocaleString()} of {o.orderedUnits.toLocaleString()} units{o.expectedDate ? ` · due ${o.expectedDate}` : ""}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate font-medium">{o.supplierName}</span><span className="block truncate text-xs text-muted-foreground">{o.lines.every((l) => l.uom.decimals === 0) ? `${o.receivedUnits.toLocaleString()} of ${o.orderedUnits.toLocaleString()} units` : `${o.lines.length} ${o.lines.length === 1 ? "line" : "lines"}`}{o.expectedDate ? ` · due ${o.expectedDate}` : ""}</span></span>
                     <span className="hidden shrink-0 tabular-nums sm:block">{formatCents(o.totalCents)}</span>
                     <StatusPill status={o.status} short={o.closedShort} />
                   </button>
