@@ -1,7 +1,7 @@
 import type { Bom, WorkCenter, WorkOrder, WorkOrderStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardList, Cog, Factory, Gauge, Plus, Trash2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -171,8 +171,8 @@ function WorkOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
             </TableHeader>
             <TableBody>
               {rows.map((o) => (
-                <>
-                  <TableRow key={o.id} className="cursor-pointer" onClick={() => setOpen(open === o.id ? null : o.id)}>
+                <Fragment key={o.id}>
+                  <TableRow className="cursor-pointer" onClick={() => setOpen(open === o.id ? null : o.id)}>
                     <TableCell className="font-medium">{o.number}</TableCell>
                     <TableCell>{o.outputItemName} <span className="text-xs text-muted-foreground">BOM v{o.bomVersion}</span></TableCell>
                     <TableCell>{o.workCenterName}</TableCell>
@@ -189,7 +189,7 @@ function WorkOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
                       <TableCell colSpan={6} className="p-0"><VariancePanel orgId={orgId} id={o.id} /></TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>

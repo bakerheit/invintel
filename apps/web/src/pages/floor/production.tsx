@@ -66,6 +66,7 @@ export default function ProductionFloorPage() {
   const [remnant, setRemnant] = useState(0);
   const [toId, setToId] = useState("");
   const [picking, setPicking] = useState<"from" | "to" | null>(null);
+  const [pickTitle, setPickTitle] = useState("Pick a place"); // stays put while the dialog animates closed
   const pathOf = (id: string) => locations.find((l) => l.id === id)?.path ?? "";
 
   const reset = () => {
@@ -174,7 +175,7 @@ export default function ProductionFloorPage() {
   const placeButton = (which: "from" | "to", value: string, label: string) => (
     <div className="space-y-2">
       <p className="text-base font-medium">{label}</p>
-      <Button type="button" variant="outline" className="h-16 w-full justify-start text-lg" onClick={() => setPicking(which)}>
+      <Button type="button" variant="outline" className="h-16 w-full justify-start text-lg" onClick={() => { setPickTitle(which === "from" ? "Take from" : "Send to"); setPicking(which); }}>
         {value ? pathOf(value) : "Pick a place"}
       </Button>
     </div>
@@ -216,7 +217,7 @@ export default function ProductionFloorPage() {
               {materialPicker}
               {placeButton("from", fromId, "Taking it from")}
               <Count label="How many?" value={qty} onChange={setQty} />
-              <Button className="h-16 text-xl" disabled={busy || !itemId || !fromId || qty < 1} onClick={() =>
+              <Button className="h-16 w-full text-xl" disabled={busy || !itemId || !fromId || qty < 1} onClick={() =>
                 void run(`Loaded ${qty.toLocaleString()}`, `${order.requirements.find((r) => r.itemId === itemId)?.itemName} → ${order.workCenterName}`, () =>
                   api.loadMaterial(orgId, order.id, { itemId, fromLocationId: fromId, quantity: qty }))}>
                 Load it
@@ -236,7 +237,7 @@ export default function ProductionFloorPage() {
                   {remnant > 0 && placeButton("to", toId, "Leftover goes to")}
                 </>
               )}
-              <Button className="h-16 text-xl" disabled={busy || !itemId || qty + scrap + remnant < 1 || (remnant > 0 && !toId)} onClick={() =>
+              <Button className="h-16 w-full text-xl" disabled={busy || !itemId || qty + scrap + remnant < 1 || (remnant > 0 && !toId)} onClick={() =>
                 void run("Usage reported", `Used ${qty}, scrap ${scrap}, leftover ${remnant}`, () =>
                   api.reportUsage(orgId, order.id, { itemId, used: qty, scrap, remnant, ...(remnant > 0 ? { remnantLocationId: toId } : {}) }))}>
                 Save usage
@@ -249,7 +250,7 @@ export default function ProductionFloorPage() {
               <Count label={`Good ${order.outputItemName}`} value={qty} onChange={setQty} />
               <Count label="Scrapped" value={scrap} onChange={setScrap} />
               {placeButton("to", toId, "Good ones go to")}
-              <Button className="h-16 text-xl" disabled={busy || qty + scrap < 1 || !toId} onClick={() =>
+              <Button className="h-16 w-full text-xl" disabled={busy || qty + scrap < 1 || !toId} onClick={() =>
                 void run(`Output reported`, `${qty} good, ${scrap} scrap → ${pathOf(toId)}`, () =>
                   api.reportOutput(orgId, order.id, { good: qty, scrap, toLocationId: toId }))}>
                 Save output
@@ -266,7 +267,7 @@ export default function ProductionFloorPage() {
         open={picking !== null}
         onOpenChange={(o) => !o && setPicking(null)}
         locations={locations}
-        title={picking === "from" ? "Take from" : "Send to"}
+        title={pickTitle}
         onPick={(l) => {
           if (picking === "from") setFromId(l.id);
           else setToId(l.id);
