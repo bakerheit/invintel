@@ -18,6 +18,11 @@ import type {
   WorkOrderInput,
   WorkOrderVariance,
   ActivityPage,
+  AdjustUnitInput,
+  MoveUnitInput,
+  ReceiveUnitsInput,
+  UnitsPage,
+  UnitsPosted,
   AuditPage,
   AuditVerification,
   ImportInput,
@@ -183,6 +188,18 @@ export const api = {
     return request<AuditPage>(`/orgs/${orgId}/audit?${qs}`);
   },
   verifyAudit: (orgId: string) => request<AuditVerification>(`/orgs/${orgId}/audit/verify`),
+
+  listUnits: (orgId: string, params: { itemId?: string; locationId?: string; status?: string; q?: string; ids?: string; before?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") qs.set(k, String(v));
+    return request<UnitsPage>(`/orgs/${orgId}/units?${qs}`);
+  },
+  receiveUnits: (orgId: string, input: Partial<ReceiveUnitsInput> & Pick<ReceiveUnitsInput, "itemId" | "locationId" | "quantity">) =>
+    request<UnitsPosted>(`/orgs/${orgId}/units`, post(input)),
+  moveUnit: (orgId: string, id: string, input: Partial<MoveUnitInput> & Pick<MoveUnitInput, "toLocationId">) =>
+    request<UnitsPosted>(`/orgs/${orgId}/units/${id}/move`, post(input)),
+  adjustUnit: (orgId: string, id: string, input: Partial<AdjustUnitInput> & Pick<AdjustUnitInput, "delta">) =>
+    request<UnitsPosted>(`/orgs/${orgId}/units/${id}/adjust`, post(input)),
 
   lookup: (orgId: string, code: string) =>
     request<LookupResult>(`/orgs/${orgId}/lookup?code=${encodeURIComponent(code)}`),

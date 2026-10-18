@@ -1,6 +1,6 @@
 import type { OrgModules, OrgSummary } from "@invintel/shared";
 import type { LucideIcon } from "lucide-react";
-import { Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
+import { Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -200,6 +200,15 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
           <SidebarGroupLabel>Tools</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={pathname.startsWith(`/o/${org.id}/labels`)}
+                  render={<Link to={`/o/${org.id}/labels`} onClick={() => setOpenMobile(false)} />}
+                >
+                  <Printer />
+                  <span>Labels</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton render={<Link to={`/o/${org.id}/floor`} onClick={() => setOpenMobile(false)} />}>
                   <ScanLine />

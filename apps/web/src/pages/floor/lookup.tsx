@@ -1,17 +1,20 @@
-import type { LookupResult } from "@invintel/shared";
-import { useQuery } from "@tanstack/react-query";
+import type { LookupResult, StockUnit } from "@invintel/shared";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight, PackagePlus } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Link } from "react-router";
 import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
+import { UnitCard } from "@/components/floor/unit-move";
+import { QtyStepper } from "@/components/floor/qty-stepper";
 import { ScanInput } from "@/components/floor/scan-input";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { feedback } from "@/lib/feedback";
 import { LOCATION_TYPE_META, withDescendants } from "@/lib/locations";
-import { orgKey, useCurrentOrg, useLocations } from "@/lib/org";
+import { invalidateOrg, orgKey, useCurrentOrg, useLocations } from "@/lib/org";
 import { cn } from "@/lib/utils";
 
 /** Look up: scan anything and see what it is and where the stock is. Read-only. */
@@ -84,6 +87,10 @@ export default function LookupPage() {
         </div>
       )}
 
+      {result?.kind === "unit" && (
+        <UnitLookup unit={result.unit} onChange={(u) => setResult({ kind: "unit", unit: u })} onAgain={again} />
+      )}
+
       {result?.kind === "location" && (
         <div className="space-y-4">
           <div className="rounded-xl border bg-card p-4">
@@ -134,5 +141,54 @@ function LocationContents({ locationId, ids, items, loading }: {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A scanned roll or pallet: what it is, where it is, and a quick way to record using some of it. */
+function UnitLookup({ unit, onChange, onAgain }: { unit: StockUnit; onChange: (u: StockUnit) => void; onAgain: () => void }) {
+  const { id: orgId } = useCurrentOrg();
+  const qc = useQueryClient();
+  const [take, setTake] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const record = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { units } = await api.adjustUnit(orgId, unit.id, { delta: -take, reason: "Used" });
+      feedback("ok");
+      toast.success(`Took ${take.toLocaleString()} from ${unit.code}`);
+      onChange(units[0]!);
+      setTake(1);
+      void invalidateOrg(qc, orgId);
+    } catch (e) {
+      feedback("error");
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const usable = unit.status !== "consumed";
+  return (
+    <div className="space-y-4">
+      <UnitCard unit={unit} />
+      {usable && (
+        <div className="space-y-3 rounded-xl border bg-card p-4">
+          <QtyStepper value={take} onChange={setTake} max={unit.quantity} label="Used some of it?" />
+          <Button className="h-14 w-full text-lg" onClick={() => void record()} disabled={busy}>Take {take.toLocaleString()} from this one</Button>
+          {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-medium text-destructive">{error}</p>}
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-2">
+        {usable && (
+          <Link to={`/o/${orgId}/floor/move?code=${encodeURIComponent(unit.code)}`} className={cn(buttonVariants({ variant: "outline" }), "h-16 text-lg")}>
+            <ArrowLeftRight /> Move this one
+          </Link>
+        )}
+        <Button className="h-16 w-full text-xl" onClick={onAgain}>Scan another</Button>
+      </div>
+    </div>
   );
 }

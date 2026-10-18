@@ -6,6 +6,7 @@ import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
+import { UnitReceive } from "@/components/floor/unit-receive";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { QtyStepper } from "@/components/floor/qty-stepper";
 import { ResultPanel } from "@/components/floor/result-panel";
@@ -142,7 +143,8 @@ export default function ReceivePage() {
 
       {step === "item" && <ScanInput label="Scan what arrived" onScan={onItem} disabled={busy} error={error} errorAction={unknown ? <AddItemLink orgId={orgId} code={unknown} /> : undefined} />}
 
-      {step === "details" && item && (
+      {step === "details" && item && item.tracking === "unit" && <UnitReceive item={item} onReset={reset} />}
+      {step === "details" && item && item.tracking !== "unit" && (
         <div className="space-y-6">
           <ItemSummary item={item} locations={locations} />
           <QtyStepper value={qty} onChange={setQty} label="How many arrived?" />

@@ -1,4 +1,4 @@
-import type { Item, Location, PostedDocument } from "@invintel/shared";
+import type { Item, Location, PostedDocument, StockUnit } from "@invintel/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -6,6 +6,7 @@ import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
+import { UnitMove, UnitPick } from "@/components/floor/unit-move";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { QtyStepper } from "@/components/floor/qty-stepper";
 import { ResultPanel } from "@/components/floor/result-panel";
@@ -33,6 +34,8 @@ export default function MovePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState<string | null>(null);
+  const [unit, setUnit] = useState<StockUnit | null>(null);
+  const [pickFrom, setPickFrom] = useState<Item | null>(null);
   const [picking, setPicking] = useState(false);
   const [done, setDone] = useState<{ doc: PostedDocument; to: Location; from: Location; qty: number } | null>(null);
 
@@ -53,7 +56,17 @@ export default function MovePage() {
     setBusy(true);
     setError(null);
     try {
-      const r = await resolveItem(orgId, code);
+      const found = await api.lookup(orgId, code);
+      // A roll or pallet label moves that one unit. A unit-tracked item asks which unit.
+      if (found.kind === "unit") {
+        setUnit(found.unit);
+        return;
+      }
+      if (found.kind === "item" && found.item.tracking === "unit") {
+        setPickFrom(found.item);
+        return;
+      }
+      const r = await resolveItem(orgId, code, found);
       setUnknown(r.ok ? null : (r.unknownCode ?? null));
       if (!r.ok) {
         feedback("error");
@@ -142,6 +155,23 @@ export default function MovePage() {
       setBusy(false);
     }
   };
+
+  if (unit) {
+    return (
+      <>
+        <h1 className="text-3xl font-semibold tracking-tight">Move</h1>
+        <UnitMove unit={unit} onReset={() => { setUnit(null); setPickFrom(null); }} />
+      </>
+    );
+  }
+  if (pickFrom) {
+    return (
+      <>
+        <h1 className="text-3xl font-semibold tracking-tight">Move</h1>
+        <UnitPick item={pickFrom} onPick={setUnit} onBack={() => setPickFrom(null)} />
+      </>
+    );
+  }
 
   return (
     <>
