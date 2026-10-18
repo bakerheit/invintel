@@ -14,7 +14,7 @@ export function StatCard({ label, value, icon: Icon, hint, tone = "default", onC
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm text-muted-foreground">{label}</span>
+        <span className="min-w-0 text-sm leading-tight text-muted-foreground">{label}</span>
         <span
           className={cn(
             "flex size-8 shrink-0 items-center justify-center rounded-lg",
