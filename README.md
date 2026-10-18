@@ -33,12 +33,16 @@ Open http://localhost:5173 and create an account. At sign-up you either **create
 
 - A user can belong to several organizations and switch between them from the header. "Create or join another…" adds more.
 - Everything is scoped to an organization: items, locations, stock and history live under `/api/orgs/:orgId/…`. Non-members get a 404, and the same SKU can exist in two organizations.
-- Roles: **owner** (whoever created it), **admin**, **member**. Joining by code makes you a member. Admins and owners can add, rename and delete locations, see and rotate the join code, and rename the organization. Members can manage inventory and read everything else. (There's no UI yet to promote members to admin.)
+- Roles: **owner** (whoever created it), **admin**, **member**. Joining by code makes you a member. Admins and owners can add, rename and delete locations, see and rotate the join code, and rename the organization. Members can manage inventory and read everything else. The owner can make a member an admin (and back) from Settings > Members, admins can remove members, the owner can remove admins, and anyone can leave. The owner can't be demoted or removed, and ownership isn't transferable yet.
 - Every new organization starts with one location called "Main".
 - Stock is tracked per item per location. An item's quantity is the sum across locations. You can adjust stock at a location, move stock between locations, and filter the inventory table by location.
 - A location can't be deleted while it still holds stock.
 - Join codes are 8 characters (no look-alike letters), shown as `ABCD-EFGH`. Rotating one invalidates the old code. Wrong guesses are rate limited.
 - Stock history records who made each change.
+
+### Overview
+
+The landing page (`/o/:orgId`) answers "what needs attention?": items out of stock or at their reorder level, units still sitting in receiving (waiting to be put away), stock by kind of place (receiving, storage, at the machines, finished goods...), and the latest ledger entries. It comes from one call, `GET /api/orgs/:orgId/overview`. The item list moved to `/o/:orgId/inventory`.
 
 ### Ledger, locations and floor mode
 
@@ -139,6 +143,7 @@ Under `/api/orgs/:orgId` (members only):
 
 | Method | Path | |
 | ------ | ---- | - |
+| GET    | `/overview` | totals, items needing attention, stock by kind of location |
 | GET    | `/locations` | locations with item and unit counts |
 | POST   | `/locations` | create (admin): `name`, `type`, `parentId`, `code`, `description` |
 | PATCH  | `/locations/:id` | edit (admin) |

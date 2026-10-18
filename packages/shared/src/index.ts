@@ -426,3 +426,9 @@ export interface Overview {
   /** Stock sitting in receiving locations: arrived but not yet put away. */
   awaitingPutaway: number;
 }
+
+// ---------- member management ----------
+
+/** Owners can't be demoted or created here: an organization has exactly the owner it was started with. */
+export const memberRoleInputSchema = z.object({ role: z.enum(["admin", "member"]) });
+export type MemberRoleInput = z.infer<typeof memberRoleInputSchema>;

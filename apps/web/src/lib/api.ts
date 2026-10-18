@@ -80,6 +80,10 @@ export const api = {
   renameOrg: (orgId: string, input: OrganizationInput) => request<OrgSummary>(`/orgs/${orgId}`, patch(input)),
   rotateJoinCode: (orgId: string) => request<OrgSummary>(`/orgs/${orgId}/join-code`, post()),
   listMembers: (orgId: string) => request<OrgMember[]>(`/orgs/${orgId}/members`),
+  setMemberRole: (orgId: string, userId: string, role: "admin" | "member") =>
+    request<{ userId: string; role: string }>(`/orgs/${orgId}/members/${userId}`, patch({ role })),
+  removeMember: (orgId: string, userId: string) =>
+    request<void>(`/orgs/${orgId}/members/${userId}`, { method: "DELETE" }),
 
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 

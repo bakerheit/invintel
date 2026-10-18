@@ -1,7 +1,8 @@
+import type { OrgMember, OrgSummary } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Plus, RefreshCw } from "lucide-react";
+import { Check, Copy, KeyRound, LogOut, MoreHorizontal, Plus, RefreshCw, ShieldCheck, ShieldOff, UserMinus } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { PageHeader } from "@/components/page-header";
@@ -9,10 +10,12 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { useAuth } from "@/stores/auth";
 import { formatJoinCode, isAdmin, orgKey, orgsKey, useCurrentOrg } from "@/lib/org";
 import { cn } from "@/lib/utils";
 
@@ -109,6 +112,72 @@ function JoinCodeCard({ orgId, joinCode }: { orgId: string; joinCode: string }) 
   );
 }
 
+function MemberMenu({ org, member, me }: { org: OrgSummary; member: OrgMember; me: string }) {
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const navigate = useNavigate();
+  const self = member.userId === me;
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: orgKey(org.id, "members") }), qc.invalidateQueries({ queryKey: orgsKey })]);
+  const setRole = useMutation({
+    mutationFn: (role: "admin" | "member") => api.setMemberRole(org.id, member.userId, role),
+    onSuccess: async (_d, role) => {
+      await refresh();
+      toast.success(`${member.name} is now ${role === "admin" ? "an admin" : "a member"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.removeMember(org.id, member.userId),
+    onSuccess: async () => {
+      if (self) {
+        await qc.invalidateQueries({ queryKey: orgsKey });
+        navigate("/", { replace: true });
+        return;
+      }
+      await refresh();
+      toast.success(`${member.name} was removed`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Mirrors the API: only the owner changes roles; admins remove members; the owner can't be touched.
+  const canRole = org.role === "owner" && member.role !== "owner";
+  const canRemove = member.role !== "owner" && (self || ROLE_RANK_OF[org.role] > ROLE_RANK_OF[member.role]);
+  if (!canRole && !canRemove) return null;
+
+  const confirmRemove = async () => {
+    const ok = await confirm(
+      self
+        ? { title: `Leave ${org.name}?`, description: "You'll lose access to its inventory. An admin can invite you back with the join code.", confirmLabel: "Leave", destructive: true }
+        : { title: `Remove ${member.name}?`, description: "They lose access straight away. What they recorded stays in the history.", confirmLabel: "Remove", destructive: true },
+    );
+    if (ok) remove.mutate();
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={`Actions for ${member.name}`} />}>
+        <MoreHorizontal />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {canRole && (member.role === "member" ? (
+          <DropdownMenuItem onClick={() => setRole.mutate("admin")}><ShieldCheck /> Make admin</DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={() => setRole.mutate("member")}><ShieldOff /> Make member</DropdownMenuItem>
+        ))}
+        {canRole && canRemove && <DropdownMenuSeparator />}
+        {canRemove && (
+          <DropdownMenuItem variant="destructive" onClick={() => void confirmRemove()}>
+            {self ? <LogOut /> : <UserMinus />} {self ? "Leave organization" : "Remove from organization"}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const ROLE_RANK_OF = { member: 1, admin: 2, owner: 3 } as const;
+
 const ROLE_STYLE = {
   owner: "bg-accent text-accent-foreground",
   admin: "bg-accent text-accent-foreground",
@@ -118,6 +187,7 @@ const ROLE_STYLE = {
 export default function SettingsPage() {
   const org = useCurrentOrg();
   const admin = isAdmin(org.role);
+  const me = useAuth((s) => s.user?.id ?? "");
   const members = useQuery({ queryKey: orgKey(org.id, "members"), queryFn: () => api.listMembers(org.id) });
 
   return (
@@ -168,6 +238,7 @@ export default function SettingsPage() {
                     <p className="truncate text-xs text-muted-foreground">{m.email}</p>
                   </div>
                   <Badge variant="secondary" className={cn("capitalize", ROLE_STYLE[m.role])}>{m.role}</Badge>
+                  <MemberMenu org={org} member={m} me={me} />
                 </div>
               ))}
             </CardContent>
