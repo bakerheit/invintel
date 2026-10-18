@@ -11,6 +11,12 @@ import type {
   TradingPartner,
   TradingPartnerInput,
   TradingPartnerUpdate,
+  ExchangeIdentity,
+  ExchangeInvitation,
+  ExchangePermissions,
+  OrderBody,
+  QueryBody,
+  QueryResponseBody,
   RecallDrill,
   TraceQuery,
   TraceResult,
@@ -232,6 +238,21 @@ export const api = {
   saveAlertSettings: (orgId: string, s: AlertSettings) => request<AlertSettings>(`/orgs/${orgId}/alerts/settings`, { method: "PUT", body: body(s) }),
   alertAction: (orgId: string, action: "acknowledge" | "reopen" | { snooze: number }, key: string) =>
     typeof action === "string" ? request<Alert>(`/orgs/${orgId}/alerts/${action}`, post({ key })) : request<Alert>(`/orgs/${orgId}/alerts/snooze`, post({ key, days: action.snooze })),
+  exIdentity: (orgId: string) => request<ExchangeIdentity>(`/orgs/${orgId}/exchange/identity`),
+  exInvitation: (orgId: string) => request<ExchangeInvitation>(`/orgs/${orgId}/exchange/invitation`),
+  exSetAddress: (orgId: string, baseUrl: string) => request<ExchangeIdentity>(`/orgs/${orgId}/exchange/identity`, { method: "PUT", body: body({ baseUrl }) }),
+  exPartners: (orgId: string) => request<ExPartner[]>(`/orgs/${orgId}/exchange/partners`),
+  exConnect: (orgId: string, invitation: unknown, kind: "supplier" | "customer") =>
+    request<{ partner: ExPartner; connectedBack: boolean }>(`/orgs/${orgId}/exchange/connect`, post({ invitation, kind })),
+  exPermissions: (orgId: string, id: string, p: ExchangePermissions) => request<ExPartner>(`/orgs/${orgId}/exchange/partners/${id}/permissions`, patch(p)),
+  exOrders: (orgId: string) => request<ExIncomingOrder[]>(`/orgs/${orgId}/exchange/orders`),
+  exRespond: (orgId: string, id: string, v: { status: "accepted" | "rejected" | "changed"; promisedDate: string | null; note: string }) =>
+    request<{ state: string }>(`/orgs/${orgId}/exchange/orders/${id}/respond`, post(v)),
+  exShip: (orgId: string, id: string, v: { carrier: string; tracking: string }) => request<{ state: string }>(`/orgs/${orgId}/exchange/orders/${id}/ship`, post(v)),
+  exAsk: (orgId: string, partnerId: string, question: QueryBody) => request<{ messageId: string }>(`/orgs/${orgId}/exchange/ask`, post({ partnerId, question })),
+  exAnswers: (orgId: string) => request<ExAnswer[]>(`/orgs/${orgId}/exchange/answers`),
+  exSendPo: (orgId: string, poId: string, partnerId: string) => request<{ state: string; alreadySent: boolean }>(`/orgs/${orgId}/exchange/purchase-orders/${poId}/send`, post({ partnerId })),
+  exTimeline: (orgId: string, poId: string) => request<ExTimelineItem[]>(`/orgs/${orgId}/exchange/purchase-orders/${poId}/timeline`),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
@@ -367,3 +388,8 @@ export const api = {
   portalOrder: (token: string) => request<PortalOrder>(`/b2b/portal/${token}`),
   portalAnswer: (token: string, answer: SupplierAnswer) => request<{ ok: true }>(`/b2b/portal/${token}/answer`, post(answer)),
 };
+
+export interface ExPartner { id: string; name: string; kind: "supplier" | "customer"; enabled: boolean; mode: string; exchangeId: string; fingerprint: string; baseUrl: string; permissions: ExchangePermissions }
+export interface ExIncomingOrder { messageId: string; partner: string; receivedAt: string; order: OrderBody | null; response: { status: string; promisedDate: string | null } | null; shipped: boolean }
+export interface ExAnswer { messageId: string; partner: string; askedAt: string; question: QueryBody; state: string; answer: QueryResponseBody | null }
+export interface ExTimelineItem { messageId: string; at: string; direction: "in" | "out"; docType: string; state: string; partner: string; summary: Record<string, unknown> | null; acks: { level: string; result: string; detail: string }[] }

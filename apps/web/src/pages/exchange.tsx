@@ -1,353 +1,213 @@
-import { B2B_DOC_LABELS, type B2BMessage, type CapturedInvoice, type TradingPartner } from "@invintel/shared";
+import type { ExchangePermissions } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Handshake, Inbox, Mail, Plus, Upload } from "lucide-react";
-import { Fragment, useState, type ReactNode } from "react";
+import { Check, Copy, Handshake, Link2, Send, Truck, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
-import { formatCents, formatDateTime } from "@/lib/format";
-import { invalidateOrg, isAdmin, orgKey, useCurrentOrg } from "@/lib/org";
-import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api, type ExAnswer, type ExIncomingOrder, type ExPartner } from "@/lib/api";
+import { formatCents, formatRelative } from "@/lib/format";
+import { isAdmin, orgKey, useCurrentOrg } from "@/lib/org";
 
-const selectClass =
-  "h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-const errMsg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
-
-function Field({ label, children, className, hint }: { label: string; children: ReactNode; className?: string; hint?: string }) {
-  return (
-    <label className={cn("grid gap-1 text-sm", className)}>
-      <span className="font-medium">{label}</span>
-      {children}
-      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
-    </label>
-  );
-}
-
-const STATE_STYLE: Record<string, string> = {
-  queued: "bg-secondary text-secondary-foreground",
-  sent: "bg-accent text-accent-foreground",
-  delivered: "bg-accent text-accent-foreground",
-  acknowledged: "bg-success-soft text-success",
-  rejected: "bg-destructive/10 text-destructive dark:bg-destructive/20",
-  failed: "bg-warning-soft text-warning",
-  received: "bg-secondary text-secondary-foreground",
+const copyText = async (text: string, what: string) => {
+  try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); } catch { toast.error("Couldn't copy. Select it and copy by hand."); }
 };
-const StateBadge = ({ state }: { state: string }) => <Badge variant="secondary" className={cn("capitalize", STATE_STYLE[state])}>{state}</Badge>;
 
-// ---------- partners ----------
-
-function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: TradingPartner; onDone: () => void }) {
+function Identity({ orgId, admin }: { orgId: string; admin: boolean }) {
   const qc = useQueryClient();
-  const bridges = useQuery({ queryKey: orgKey(orgId, "b2b", "bridges"), queryFn: () => api.b2bBridges(orgId) });
-  const suppliers = useQuery({ queryKey: orgKey(orgId, "suppliers"), queryFn: () => api.listSuppliers(orgId) });
-  const [name, setName] = useState(partner?.name ?? "");
-  const [kind, setKind] = useState<"supplier" | "customer">(partner?.kind ?? "supplier");
-  const [bridge, setBridge] = useState(partner?.bridge ?? "email");
-  const [supplierId, setSupplierId] = useState(partner?.supplierId ?? "");
-  const [to, setTo] = useState(partner?.bridgeConfig.to ?? "");
-  const [cc, setCc] = useState(partner?.bridgeConfig.cc ?? "");
-  const [secretEnv, setSecretEnv] = useState(partner?.bridgeConfig.secretEnv ?? "");
-  const [mode, setMode] = useState<"test" | "live">(partner?.mode ?? "test");
+  const id = useQuery({ queryKey: orgKey(orgId, "ex-identity"), queryFn: () => api.exIdentity(orgId) });
+  const inv = useQuery({ queryKey: orgKey(orgId, "ex-invitation"), queryFn: () => api.exInvitation(orgId) });
+  const [addr, setAddr] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: () => {
-      const bridgeConfig: Record<string, string> = bridge === "email" ? { to, ...(cc ? { cc } : {}) } : bridge === "invoice-inbox" ? { secretEnv } : {};
-      const input = { name, kind, bridge, bridgeConfig, mode, supplierId: supplierId || null };
-      return partner ? api.updateB2bPartner(orgId, partner.id, input) : api.createB2bPartner(orgId, input);
-    },
-    onSuccess: () => { toast.success(partner ? "Partner saved" : "Partner added"); void invalidateOrg(qc, orgId); onDone(); },
-    onError: (e) => toast.error(errMsg(e)),
+    mutationFn: () => api.exSetAddress(orgId, addr ?? ""),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-identity") }); await qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-invitation") }); setAddr(null); toast.success("Address saved"); },
+    onError: (e: Error) => toast.error(e.message),
   });
+  if (!id.data || !inv.data) return <Skeleton className="h-40 rounded-xl" />;
   return (
-    <form className="grid gap-3 rounded-lg border p-4 sm:grid-cols-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
-      <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} maxLength={100} /></Field>
-      <Field label="They are a">
-        <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as "supplier" | "customer")}>
-          <option value="supplier">Supplier (we send them orders)</option>
-          <option value="customer">Customer</option>
-        </select>
-      </Field>
-      <Field label="Supplier record" hint="Links orders for this supplier to this partner.">
-        <select className={selectClass} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-          <option value="">None</option>
-          {suppliers.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </Field>
-      <Field label="How documents travel">
-        <select className={selectClass} value={bridge} onChange={(e) => setBridge(e.target.value)}>
-          {bridges.data?.map((b) => <option key={b.id} value={b.id}>{b.id === "email" ? "Email (PDF and a confirmation link)" : b.id === "invoice-inbox" ? "Invoice inbox (receives invoices)" : b.id === "loopback" ? "Loopback (testing, nothing leaves)" : b.id}</option>)}
-        </select>
-      </Field>
-      {bridge === "email" && (
-        <>
-          <Field label="Send orders to" hint="One or more addresses, comma separated."><Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="orders@supplier.example" /></Field>
-          <Field label="Copy to (optional)"><Input value={cc} onChange={(e) => setCc(e.target.value)} /></Field>
-        </>
-      )}
-      {bridge === "invoice-inbox" && (
-        <Field label="Secret variable name" hint="The name of the server setting that holds the shared secret (never the secret itself)." className="sm:col-span-2"><Input value={secretEnv} onChange={(e) => setSecretEnv(e.target.value)} placeholder="ACME_INBOX_SECRET" /></Field>
-      )}
-      <Field label="Mode" hint="Test partners are marked TEST in what they receive. Switch to live when you are ready.">
-        <select className={selectClass} value={mode} onChange={(e) => setMode(e.target.value as "test" | "live")}>
-          <option value="test">Test</option>
-          <option value="live">Live</option>
-        </select>
-      </Field>
-      <div className="flex items-end gap-2 sm:col-span-3">
-        <Button type="submit" disabled={save.isPending || !name.trim()}>{partner ? "Save" : "Add partner"}</Button>
-        <Button type="button" variant="ghost" onClick={onDone}>Cancel</Button>
-      </div>
-    </form>
-  );
-}
-
-function Partners({ orgId, admin }: { orgId: string; admin: boolean }) {
-  const qc = useQueryClient();
-  const partners = useQuery({ queryKey: orgKey(orgId, "b2b", "partners"), queryFn: () => api.b2bPartners(orgId) });
-  const [form, setForm] = useState<TradingPartner | "new" | null>(null);
-  const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateB2bPartner(orgId, id, { enabled }),
-    onSuccess: () => void invalidateOrg(qc, orgId),
-    onError: (e) => toast.error(errMsg(e)),
-  });
-  return (
-    <div className="space-y-4">
-      {admin && (form ? (
-        <PartnerForm key={form === "new" ? "new" : form.id} orgId={orgId} partner={form === "new" ? undefined : form} onDone={() => setForm(null)} />
-      ) : (
-        <div><Button onClick={() => setForm("new")}><Plus /> Add trading partner</Button></div>
-      ))}
-      {partners.data?.length === 0 ? (
-        <EmptyState icon={Handshake} title="No trading partners yet" description="A trading partner is a business you exchange documents with: send a supplier your orders by email, or receive their invoices." />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs text-muted-foreground"><tr><th className="p-2">Partner</th><th className="p-2">Via</th><th className="p-2">Mode</th><th className="p-2">Status</th>{admin && <th className="p-2" />}</tr></thead>
-            <tbody className="divide-y">
-              {partners.data?.map((p) => (
-                <tr key={p.id}>
-                  <td className="p-2"><span className="font-medium">{p.name}</span><span className="block text-xs capitalize text-muted-foreground">{p.kind}{p.bridgeConfig.to ? ` · ${p.bridgeConfig.to}` : ""}</span>
-                    {p.bridge === "invoice-inbox" && <span className="block break-all font-mono text-xs text-muted-foreground">POST {window.location.origin}/api/b2b/inbound/{p.id}</span>}
-                  </td>
-                  <td className="p-2">{p.bridge}</td>
-                  <td className="p-2"><Badge variant="secondary" className={p.mode === "live" ? "bg-success-soft text-success" : "bg-warning-soft text-warning"}>{p.mode}</Badge></td>
-                  <td className="p-2"><Badge variant="secondary">{p.enabled ? "On" : "Off"}</Badge></td>
-                  {admin && <td className="space-x-2 p-2 text-right"><Button size="sm" variant="ghost" onClick={() => setForm(p)}>Edit</Button><Button size="sm" variant="outline" onClick={() => toggle.mutate({ id: p.id, enabled: !p.enabled })}>{p.enabled ? "Switch off" : "Switch on"}</Button></td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------- messages ----------
-
-function MessageDetail({ orgId, m, admin }: { orgId: string; m: B2BMessage; admin: boolean }) {
-  const qc = useQueryClient();
-  const detail = useQuery({ queryKey: orgKey(orgId, "b2b", "message", m.id), queryFn: () => api.b2bMessage(orgId, m.id) });
-  const retry = useMutation({ mutationFn: () => api.retryB2bMessage(orgId, m.id), onSuccess: () => { toast.success("Sent again"); void invalidateOrg(qc, orgId); }, onError: (e) => toast.error(errMsg(e)) });
-  const ack = useMutation({
-    mutationFn: (result: "accepted" | "rejected") => api.ackB2bMessage(orgId, m.id, { level: "business", result, detail: "Recorded by hand" }),
-    onSuccess: () => { toast.success("Answer recorded"); void invalidateOrg(qc, orgId); },
-    onError: (e) => toast.error(errMsg(e)),
-  });
-  const lastFail = [...m.attempts].reverse().find((a) => !a.ok);
-  return (
-    <div className="space-y-3 bg-muted/30 p-4 text-sm">
-      <p className="text-xs text-muted-foreground">Key {m.idempotencyKey} · {m.rawBytes.toLocaleString()} bytes · fingerprint {m.rawHash.slice(0, 12)}…{m.providerMessageId ? ` · reference ${m.providerMessageId}` : ""}</p>
-      {m.attempts.length > 0 && (
-        <ul className="space-y-0.5">{m.attempts.map((a, i) => <li key={i}>{formatDateTime(a.at)}: {a.ok ? "handed over" : `failed: ${a.error}${a.retryable ? " (can be retried)" : ""}`}</li>)}</ul>
-      )}
-      {m.acks.length > 0 && <ul className="space-y-0.5">{m.acks.map((a, i) => <li key={i}>{formatDateTime(a.at)}: {a.level} answer: {a.result}{a.detail ? ` (${a.detail})` : ""}</li>)}</ul>}
-      {admin && (
-        <div className="flex flex-wrap gap-2">
-          {m.state === "failed" && lastFail?.retryable && <Button size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}>Try again</Button>}
-          {(m.state === "sent" || m.state === "delivered" || m.state === "received") && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => ack.mutate("accepted")}>Record as accepted</Button>
-              <Button size="sm" variant="outline" onClick={() => ack.mutate("rejected")}>Record as rejected</Button>
-            </>
+    <Card>
+      <CardHeader><CardTitle>Your exchange identity</CardTitle></CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-muted-foreground">Other Invintel businesses add you with your invitation. It holds your public key, not a secret. When someone gives you theirs, check the fingerprint with them by phone or in person.</p>
+        <div className="grid gap-1 sm:grid-cols-[8rem_1fr]"><span className="text-muted-foreground">Exchange id</span><code className="font-mono">{id.data.exchangeId}</code><span className="text-muted-foreground">Fingerprint</span><code className="font-mono">{id.data.fingerprint}</code></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void copyText(JSON.stringify(inv.data), "Invitation")}><Copy /> Copy my invitation</Button>
+          {admin && (
+            <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+              <Input aria-label="Public address of this server" className="h-8 w-72" placeholder="https://invintel.mycompany.com (only if partners are on other servers)" value={addr ?? id.data.baseUrl} onChange={(e) => setAddr(e.target.value)} />
+              <Button size="sm" type="submit" disabled={addr === null || save.isPending}>Save address</Button>
+            </form>
           )}
         </div>
-      )}
-      {admin && detail.data?.body && <pre className="max-h-64 overflow-auto rounded-md border bg-background p-2 text-xs">{detail.data.body.length > 4000 ? `${detail.data.body.slice(0, 4000)}\n… (${detail.data.body.length.toLocaleString()} characters)` : detail.data.body}</pre>}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function Messages({ orgId, admin }: { orgId: string; admin: boolean }) {
-  const [direction, setDirection] = useState("");
-  const [state, setState] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
-  const msgs = useQuery({ queryKey: orgKey(orgId, "b2b", "messages", direction, state), queryFn: () => api.b2bMessages(orgId, { direction, state }) });
+function Connect({ orgId }: { orgId: string }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState<"supplier" | "customer">("supplier");
+  const connect = useMutation({
+    mutationFn: () => api.exConnect(orgId, JSON.parse(text), kind),
+    onSuccess: async (r) => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-partners") }); setText(""); toast.success(`Connected ${r.partner.name}. Fingerprint ${r.partner.fingerprint}. Check it with them.`); },
+    onError: (e: Error) => toast.error(e instanceof SyntaxError ? "That isn't an invitation. Paste the whole thing they sent." : e.message),
+  });
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        <select aria-label="Direction" className={cn(selectClass, "w-40")} value={direction} onChange={(e) => setDirection(e.target.value)}><option value="">Sent and received</option><option value="out">Sent</option><option value="in">Received</option></select>
-        <select aria-label="State" className={cn(selectClass, "w-40")} value={state} onChange={(e) => setState(e.target.value)}><option value="">Any state</option>{["queued", "sent", "delivered", "acknowledged", "rejected", "failed", "received"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
-      </div>
-      {msgs.data?.length === 0 ? (
-        <EmptyState icon={Mail} title="No documents yet" description="Orders you send to a supplier and documents they send back show up here, with every attempt and answer." />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs text-muted-foreground"><tr><th className="p-2">When</th><th className="p-2">Partner</th><th className="p-2">Document</th><th className="p-2">State</th></tr></thead>
-            <tbody className="divide-y">
-              {msgs.data?.map((m) => (
-                <Fragment key={m.id}>
-                  <tr className="cursor-pointer hover:bg-muted/40" onClick={() => setOpen(open === m.id ? null : m.id)}>
-                    <td className="whitespace-nowrap p-2">{formatDateTime(m.createdAt)}</td>
-                    <td className="p-2">{m.partnerName}</td>
-                    <td className="p-2">{m.direction === "out" ? "Sent" : "Received"}: {B2B_DOC_LABELS[m.docType]}{m.correlation.poNumber ? ` ${m.correlation.poNumber}` : ""}</td>
-                    <td className="p-2"><StateBadge state={m.state} /></td>
-                  </tr>
-                  {open === m.id && <tr><td colSpan={4} className="p-0"><MessageDetail orgId={orgId} m={m} admin={admin} /></td></tr>}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+    <Card>
+      <CardHeader><CardTitle>Connect to a business</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <label htmlFor="ex-invite" className="text-sm font-medium">Paste their invitation</label>
+        <textarea id="ex-invite" rows={3} className="w-full rounded-md border bg-background p-2 font-mono text-xs" placeholder='{"protocol":"invintel-exchange/1", ...}' value={text} onChange={(e) => setText(e.target.value)} />
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span>They are my</span>
+          {(["supplier", "customer"] as const).map((k) => (
+            <label key={k} className="flex items-center gap-1.5"><input type="radio" name="ex-kind" checked={kind === k} onChange={() => setKind(k)} /> {k}</label>
+          ))}
+          <Button size="sm" disabled={!text.trim() || connect.isPending} onClick={() => connect.mutate()}><Link2 /> Connect</Button>
         </div>
-      )}
-    </div>
+        <p className="text-xs text-muted-foreground">A supplier is someone you send purchase orders to. A customer sends orders to you.</p>
+      </CardContent>
+    </Card>
   );
 }
 
-// ---------- captured invoices ----------
-
-const CONF: Record<string, { label: string; className: string }> = {
-  read: { label: "read", className: "bg-success-soft text-success" },
-  guess: { label: "check", className: "bg-warning-soft text-warning" },
-  entered: { label: "entered", className: "bg-accent text-accent-foreground" },
-  missing: { label: "missing", className: "bg-destructive/10 text-destructive dark:bg-destructive/20" },
-};
-
-function InvoiceCard({ orgId, inv, admin }: { orgId: string; inv: CapturedInvoice; admin: boolean }) {
-  const qc = useQueryClient();
-  const [number, setNumber] = useState(inv.invoiceNumber);
-  const [po, setPo] = useState(inv.poNumber);
-  const [date, setDate] = useState(inv.invoiceDate ?? "");
-  const [due, setDue] = useState(inv.dueDate ?? "");
-  const [total, setTotal] = useState(inv.totalCents === null ? "" : (inv.totalCents / 100).toFixed(2));
-  const [input, setInput] = useState<Record<string, unknown> | null>(null);
-  const save = useMutation({
-    mutationFn: () => api.updateCapturedInvoice(orgId, inv.id, {
-      invoiceNumber: number, poNumber: po, invoiceDate: date || null, dueDate: due || null,
-      totalCents: total.trim() === "" ? null : Math.round(Number(total) * 100),
-    }),
-    onSuccess: () => { toast.success("Saved"); void invalidateOrg(qc, orgId); },
-    onError: (e) => toast.error(errMsg(e)),
-  });
-  const discard = useMutation({
-    mutationFn: () => api.discardCapturedInvoice(orgId, inv.id, window.prompt("Why is this being discarded? (optional)") ?? ""),
-    onSuccess: () => { toast.success("Discarded"); void invalidateOrg(qc, orgId); },
-    onError: (e) => toast.error(errMsg(e)),
-  });
-  const badge = (f: keyof CapturedInvoice["confidence"]) => <Badge variant="secondary" className={cn("ml-1", CONF[inv.confidence[f]]!.className)}>{CONF[inv.confidence[f]]!.label}</Badge>;
-  const editable = inv.status === "captured";
+function PermissionBoxes({ p, onChange, disabled }: { p: ExchangePermissions; onChange: (n: ExchangePermissions) => void; disabled: boolean }) {
+  const set = (patch: Partial<ExchangePermissions>) => onChange({ ...p, ...patch });
   return (
-    <div className="space-y-3 rounded-lg border p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-medium">{inv.invoiceNumber || "(no invoice number found)"} <span className="text-sm font-normal text-muted-foreground">from {inv.partnerName} · {inv.source}</span></h3>
-        <span className="text-xs text-muted-foreground">{formatDateTime(inv.createdAt)}{inv.from ? ` · ${inv.from}` : ""}</span>
-      </div>
-      {inv.subject && <p className="text-sm text-muted-foreground">Subject: {inv.subject}</p>}
-      <div className="grid gap-3 sm:grid-cols-5">
-        <Field label="Invoice number"><span className="flex items-center"><Input disabled={!editable} value={number} onChange={(e) => setNumber(e.target.value)} />{badge("invoiceNumber")}</span></Field>
-        <Field label="Order number"><span className="flex items-center"><Input disabled={!editable} value={po} onChange={(e) => setPo(e.target.value)} />{badge("poNumber")}</span></Field>
-        <Field label="Invoice date"><span className="flex items-center"><Input disabled={!editable} type="date" value={date} onChange={(e) => setDate(e.target.value)} />{badge("invoiceDate")}</span></Field>
-        <Field label="Due date"><span className="flex items-center"><Input disabled={!editable} type="date" value={due} onChange={(e) => setDue(e.target.value)} />{badge("dueDate")}</span></Field>
-        <Field label="Total"><span className="flex items-center"><Input disabled={!editable} inputMode="decimal" value={total} onChange={(e) => setTotal(e.target.value)} />{badge("totalCents")}</span></Field>
-      </div>
-      {inv.lines.length > 0 && (
-        <table className="w-full text-sm"><thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Line</th><th className="py-1 text-right">Qty</th><th className="py-1 text-right">Price</th><th className="py-1 text-right">Amount</th></tr></thead>
-          <tbody className="divide-y">{inv.lines.map((l, i) => <tr key={i}><td className="py-1">{l.description}</td><td className="py-1 text-right tabular-nums">{l.quantity}</td><td className="py-1 text-right tabular-nums">{formatCents(l.unitPriceCents)}</td><td className="py-1 text-right tabular-nums">{formatCents(l.lineTotalCents)}</td></tr>)}</tbody></table>
-      )}
-      <ul className="space-y-0.5 text-sm">
-        {inv.match.notes.map((n) => <li key={n} className={cn(/above|below|already|No order|No order number/.test(n) ? "text-warning" : "text-muted-foreground")}>{n}</li>)}
-        {inv.match.order && <li className="text-muted-foreground">Order {inv.match.order.number} from {inv.match.order.supplierName}: {formatCents(inv.match.order.totalCents)}</li>}
-      </ul>
-      {inv.files.length > 0 && <p className="text-sm">Files: {inv.files.map((f) => <a key={f.id} href={api.b2bFileUrl(orgId, f.id)} download className="mr-3 underline">{f.filename} ({Math.ceil(f.bytes / 1024)} KB)</a>)}<span className="text-xs text-muted-foreground"> PDFs are kept as they came; they are not read automatically.</span></p>}
-      <div className="flex flex-wrap gap-2">
-        {editable && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Save corrections</Button>}
-        <Button size="sm" variant="outline" onClick={async () => setInput(await api.capturedInvoiceInput(orgId, inv.id))}>What invoice entry would get</Button>
-        {editable && admin && <Button size="sm" variant="ghost" onClick={() => discard.mutate()}>Discard</Button>}
-      </div>
-      {input && <pre className="max-h-56 overflow-auto rounded-md border bg-muted/30 p-2 text-xs">{JSON.stringify(input, null, 2)}</pre>}
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+      <label className="flex items-center gap-1.5"><input type="checkbox" disabled={disabled} checked={p.shareStock} onChange={(e) => set({ shareStock: e.target.checked, ...(e.target.checked ? {} : { shareStockQuantities: false }) })} /> may ask if an item is in stock</label>
+      <label className="flex items-center gap-1.5"><input type="checkbox" disabled={disabled || !p.shareStock} checked={p.shareStockQuantities} onChange={(e) => set({ shareStockQuantities: e.target.checked })} /> and see the quantity</label>
+      <label className="flex items-center gap-1.5"><input type="checkbox" disabled={disabled} checked={p.shareOrderStatus} onChange={(e) => set({ shareOrderStatus: e.target.checked })} /> may ask where their order is</label>
     </div>
   );
 }
 
-function UploadForm({ orgId }: { orgId: string }) {
+function Partners({ orgId, admin, partners }: { orgId: string; admin: boolean; partners: ExPartner[] }) {
   const qc = useQueryClient();
-  const partners = useQuery({ queryKey: orgKey(orgId, "b2b", "partners"), queryFn: () => api.b2bPartners(orgId) });
+  const perm = useMutation({
+    mutationFn: ({ id, p }: { id: string; p: ExchangePermissions }) => api.exPermissions(orgId, id, p),
+    onSuccess: () => qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-partners") }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Card>
+      <CardHeader><CardTitle>Connected businesses</CardTitle></CardHeader>
+      <CardContent>
+        {!partners.length ? <EmptyState icon={Handshake} title="Nobody yet" description="Paste a partner's invitation above to trade with them. If they are on this same server, they are connected both ways at once." /> : (
+          <ul className="divide-y">
+            {partners.map((p) => (
+              <li key={p.id} className="space-y-2 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{p.name}</span><Badge variant="secondary">{p.kind}</Badge><Badge variant="secondary">{p.mode}</Badge><code className="ml-auto font-mono text-xs text-muted-foreground">{p.fingerprint}</code></div>
+                <PermissionBoxes p={p.permissions} disabled={!admin || perm.isPending} onChange={(n) => perm.mutate({ id: p.id, p: n })} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function IncomingOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
+  const qc = useQueryClient();
+  const orders = useQuery({ queryKey: orgKey(orgId, "ex-orders"), queryFn: () => api.exOrders(orgId), refetchInterval: 20_000 });
+  const [open, setOpen] = useState<string | null>(null);
+  const [date, setDate] = useState("");
+  const [tracking, setTracking] = useState("");
+  const done = async (msg: string) => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-orders") }); toast.success(msg); setOpen(null); };
+  const respond = useMutation({ mutationFn: (v: { id: string; status: "accepted" | "rejected" | "changed" }) => api.exRespond(orgId, v.id, { status: v.status, promisedDate: date || null, note: "" }), onSuccess: (_r, v) => done(`Answered: ${v.status}`), onError: (e: Error) => toast.error(e.message) });
+  const ship = useMutation({ mutationFn: (id: string) => api.exShip(orgId, id, { carrier: "", tracking }), onSuccess: () => done("Ship notice sent"), onError: (e: Error) => toast.error(e.message) });
+  const list = orders.data ?? [];
+  return (
+    <Card>
+      <CardHeader><CardTitle>Orders from customers</CardTitle></CardHeader>
+      <CardContent>
+        {!list.length ? <p className="text-sm text-muted-foreground">Nothing yet. Orders your connected customers send arrive here.</p> : (
+          <ul className="divide-y">
+            {list.map((o: ExIncomingOrder) => (
+              <li key={o.messageId} className="space-y-2 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono font-medium">{o.order?.poNumber ?? "?"}</span><span>from {o.partner}</span><span className="text-xs text-muted-foreground">{formatRelative(o.receivedAt)}</span>
+                  <span className="ml-auto flex gap-1.5">
+                    {o.response && <Badge variant="secondary" className={o.response.status === "rejected" ? "bg-destructive/10 text-destructive" : "bg-success-soft text-success"}>{o.response.status}{o.response.promisedDate ? ` for ${o.response.promisedDate}` : ""}</Badge>}
+                    {o.shipped && <Badge variant="secondary">shipped</Badge>}
+                  </span>
+                </div>
+                {o.order && <p className="text-xs text-muted-foreground">{o.order.lines.map((l) => `${l.quantity} ${l.unit} ${l.sku}${l.unitPriceCents ? ` @ ${formatCents(l.unitPriceCents)}` : ""}`).join(", ")}{o.order.requestedDate ? `. Wanted by ${o.order.requestedDate}.` : ""}</p>}
+                {open === o.messageId ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!o.response && admin && <><Input aria-label="Promised date" type="date" className="h-8 w-40" value={date} onChange={(e) => setDate(e.target.value)} /><Button size="sm" onClick={() => respond.mutate({ id: o.messageId, status: "accepted" })}><Check /> Accept</Button><Button size="sm" variant="outline" onClick={() => respond.mutate({ id: o.messageId, status: "rejected" })}><X /> Reject</Button></>}
+                    {o.response && !o.shipped && <><Input aria-label="Tracking number" className="h-8 w-48" placeholder="Tracking number (optional)" value={tracking} onChange={(e) => setTracking(e.target.value)} /><Button size="sm" onClick={() => ship.mutate(o.messageId)}><Truck /> Send ship notice</Button></>}
+                    <Button size="sm" variant="ghost" onClick={() => setOpen(null)}>Close</Button>
+                  </div>
+                ) : (!o.shipped && (admin || o.response)) && <Button size="sm" variant="outline" onClick={() => setOpen(o.messageId)}>{o.response ? "Ship" : "Answer"}</Button>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Ask({ orgId, partners }: { orgId: string; partners: ExPartner[] }) {
+  const qc = useQueryClient();
   const [partnerId, setPartnerId] = useState("");
-  const up = useMutation({
-    mutationFn: async (file: File) => {
-      const buf = new Uint8Array(await file.arrayBuffer());
-      let bin = "";
-      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-      return api.uploadInvoice(orgId, { partnerId: partnerId || partners.data![0]!.id, filename: file.name, contentType: file.type || "application/octet-stream", contentBase64: btoa(bin), note: "" });
-    },
-    onSuccess: () => { toast.success("Invoice added for checking"); void invalidateOrg(qc, orgId); },
-    onError: (e) => toast.error(errMsg(e)),
+  const [kind, setKind] = useState<"stock" | "order_status">("stock");
+  const [value, setValue] = useState("");
+  const answers = useQuery({ queryKey: orgKey(orgId, "ex-answers"), queryFn: () => api.exAnswers(orgId), refetchInterval: 15_000 });
+  const ask = useMutation({
+    mutationFn: () => api.exAsk(orgId, partnerId || partners[0]!.id, kind === "stock" ? { kind: "stock", sku: value.trim() } : { kind: "order_status", poNumber: value.trim() }),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "ex-answers") }); setValue(""); },
+    onError: (e: Error) => toast.error(e.message),
   });
-  if (!partners.data?.length) return <p className="text-sm text-muted-foreground">Add a trading partner first, then upload their invoices here.</p>;
+  if (!partners.length) return null;
+  const text = (a: ExAnswer) => {
+    if (!a.answer) return a.state === "failed" ? "Couldn't be delivered." : "Waiting for an answer...";
+    if (!a.answer.ok) return a.answer.reason ?? "No answer.";
+    if (a.answer.stock) { const s = a.answer.stock; return `${s.description}: ${s.availability.replace("_", " ")}${s.quantity !== undefined ? `, ${s.quantity} ${s.unit}` : ""}`; }
+    if (a.answer.order) { const o = a.answer.order; return `${o.poNumber}: ${o.status}${o.promisedDate ? `, promised ${o.promisedDate}` : ""}`; }
+    return "";
+  };
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
-      <Field label="Invoice from">
-        <select className={cn(selectClass, "w-56")} value={partnerId || partners.data[0]!.id} onChange={(e) => setPartnerId(e.target.value)}>{partners.data.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      </Field>
-      <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-muted">
-        <Upload className="size-4" /> Upload a file (PDF, XML or JSON)
-        <input type="file" className="sr-only" accept=".pdf,.xml,.json,application/pdf,application/xml,text/xml,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (f) up.mutate(f); e.target.value = ""; }} />
-      </label>
-      <p className="basis-full text-xs text-muted-foreground">XML (UBL) and JSON invoices are read exactly. A PDF is kept as it is for you to read and type in; nothing is read from it automatically.</p>
-    </div>
+    <Card>
+      <CardHeader><CardTitle>Ask a partner</CardTitle></CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (value.trim()) ask.mutate(); }}>
+          <select aria-label="Who to ask" className="h-9 rounded-md border bg-background px-2" value={partnerId || partners[0]!.id} onChange={(e) => setPartnerId(e.target.value)}>{partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <select aria-label="Kind of question" className="h-9 rounded-md border bg-background px-2" value={kind} onChange={(e) => setKind(e.target.value as "stock" | "order_status")}><option value="stock">Do you have this item?</option><option value="order_status">Where is my order?</option></select>
+          <Input aria-label={kind === "stock" ? "Their item code" : "Our PO number"} className="h-9 w-48" placeholder={kind === "stock" ? "Item code (SKU)" : "PO number"} value={value} onChange={(e) => setValue(e.target.value)} />
+          <Button type="submit" size="sm" disabled={!value.trim() || ask.isPending}><Send /> Ask</Button>
+        </form>
+        <ul className="divide-y">
+          {(answers.data ?? []).slice(0, 8).map((a) => (
+            <li key={a.messageId} className="py-2"><p><span className="font-medium">{a.partner}</span> <span className="text-xs text-muted-foreground">{formatRelative(a.askedAt)} · {a.question.kind === "stock" ? `item ${a.question.sku}` : `order ${a.question.poNumber}`}</span></p><p className={a.answer && !a.answer.ok ? "text-muted-foreground" : ""}>{text(a)}</p></li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
-
-function Invoices({ orgId, admin }: { orgId: string; admin: boolean }) {
-  const [status, setStatus] = useState("captured");
-  const list = useQuery({ queryKey: orgKey(orgId, "b2b", "invoices", status), queryFn: () => api.capturedInvoices(orgId, status) });
-  return (
-    <div className="space-y-4">
-      <UploadForm orgId={orgId} />
-      <select aria-label="Status" className={cn(selectClass, "w-48")} value={status} onChange={(e) => setStatus(e.target.value)}><option value="captured">To check</option><option value="converted">Handed on</option><option value="discarded">Discarded</option><option value="all">All</option></select>
-      {list.data?.length === 0 ? (
-        <EmptyState icon={Inbox} title="No invoices to check" description="Invoices that arrive by email (through a partner's invoice inbox) or that you upload appear here, with what could be read from them." />
-      ) : (
-        <div className="space-y-4">{list.data?.map((i) => <InvoiceCard key={i.id + i.updatedAt} orgId={orgId} inv={i} admin={admin} />)}</div>
-      )}
-    </div>
-  );
-}
-
-// ---------- page ----------
-
-const TABS = [{ id: "partners", label: "Partners" }, { id: "messages", label: "Documents" }, { id: "invoices", label: "Incoming invoices" }] as const;
 
 export default function ExchangePage() {
-  const org = useCurrentOrg();
-  const admin = isAdmin(org.role);
-  const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("partners");
+  const { id: orgId, role } = useCurrentOrg();
+  const admin = isAdmin(role);
+  const partners = useQuery({ queryKey: orgKey(orgId, "ex-partners"), queryFn: () => api.exPartners(orgId) });
+  const list = partners.data ?? [];
   return (
-    <div className="space-y-6">
-      <PageHeader title="Exchange" description="Send orders to your suppliers and take their invoices in. Everything sent or received is kept, with every attempt and answer." />
-      <div role="tablist" className="flex gap-1 border-b">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)} className={cn("-mb-px border-b-2 px-3 py-2 text-sm font-medium", tab === t.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{t.label}</button>
-        ))}
-      </div>
-      {tab === "partners" && <Partners orgId={org.id} admin={admin} />}
-      {tab === "messages" && <Messages orgId={org.id} admin={admin} />}
-      {tab === "invoices" && <Invoices orgId={org.id} admin={admin} />}
-    </div>
+    <>
+      <PageHeader title="Exchange" description="Trade purchase orders, answers and ship notices with other Invintel businesses, signed so nobody can forge or change them." />
+      <Identity orgId={orgId} admin={admin} />
+      {admin && <Connect orgId={orgId} />}
+      <Partners orgId={orgId} admin={admin} partners={list} />
+      <IncomingOrders orgId={orgId} admin={admin} />
+      <Ask orgId={orgId} partners={list} />
+    </>
   );
 }
-

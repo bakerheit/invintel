@@ -20,6 +20,7 @@ import { createApprovalRoutes } from "./approvals.js";
 import { createCountRoutes } from "./counts.js";
 import { createB2BRoutes } from "./b2b-routes.js";
 import { createDataRoutes } from "./data.js";
+import { createExchangeRoutes } from "./exchange.js";
 import { createDowntimeRoutes } from "./downtime.js";
 import { createLocationRoutes } from "./locations.js";
 import { createMemberRoutes } from "./members.js";
@@ -160,6 +161,7 @@ export function createOrgRoutes(store: Store) {
 
   scoped.route("/alerts", createAlertRoutes(store));
   scoped.route("/approvals", createApprovalRoutes(store));
+  scoped.route("/exchange", createExchangeRoutes(store));
   scoped.route("/counts", createCountRoutes(store));
   scoped.route("/data", createDataRoutes(store));
   scoped.route("/members", createMemberRoutes(store));

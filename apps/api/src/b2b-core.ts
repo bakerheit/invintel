@@ -50,6 +50,14 @@ export const onInbound = (docType: B2BDocType, h: InboundHandler) => { inboundHa
 export const getBridge = (id: string) => bridges.get(id);
 export const bridgeIds = () => [...bridges.keys()];
 
+/**
+ * What to do with a document once it has been verified and stored (answer a question, record an acknowledgement...).
+ * A hook runs after the message is safely stored; if it throws, the message stays stored and the error is logged.
+ */
+export type InboundHook = (store: Store, orgId: ObjectId, partner: TradingPartnerDoc, message: B2BMessageDoc) => Promise<void>;
+const inboundHooks = new Map<string, InboundHook>();
+export const registerInboundHook = (bridgeId: string, hook: InboundHook) => { inboundHooks.set(bridgeId, hook); };
+
 /** A bridge that does nothing outside the process: accepts every document, answers like a cooperative partner. For tests and demos. */
 export const loopbackBridge: Bridge = {
   id: "loopback",
@@ -216,6 +224,12 @@ export async function storeInbound(store: Store, orgId: ObjectId, partner: Tradi
     } catch (e) {
       console.error(`inbound handler for ${msg.docType} failed`, e);
     }
+  }
+  // A bridge may also act on everything it receives (the Invintel-to-Invintel exchange does).
+  try {
+    await inboundHooks.get(partner.bridge)?.(store, orgId, partner, msg);
+  } catch (e) {
+    console.error(`inbound hook for ${partner.bridge} failed`, e);
   }
   return { ok: true, message: msg, duplicate: false };
 }

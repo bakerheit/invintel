@@ -21,6 +21,7 @@ import ProductionFloorPage from "./pages/floor/production";
 import ProductionPage from "./pages/production";
 import QualityFloorPage from "./pages/floor/quality";
 import QualityPage from "./pages/quality";
+import DocumentsPage from "./pages/documents";
 import ExchangePage from "./pages/exchange";
 import SupplierPortalPage from "./pages/supplier-portal";
 import ReceivePage from "./pages/floor/receive";
@@ -91,6 +92,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="inventory/:itemId" element={<ItemDetailPage />} />
               <Route path="counts" element={<CountsPage />} />
               <Route path="alerts" element={<AlertsPage />} />
+              <Route path="exchange" element={<ExchangePage />} />
               <Route path="approvals" element={<ApprovalsPage />} />
               <Route path="reports" element={<ReportsHome />} />
               <Route path="reports/aging" element={<AgingReportPage />} />
@@ -105,7 +107,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="labels" element={<LabelsPage />} />
               <Route path="production" element={<ProductionPage />} />
               <Route path="quality" element={<QualityPage />} />
-              <Route path="exchange" element={<ExchangePage />} />
+              <Route path="documents" element={<DocumentsPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="floor" element={<FloorLayout />}>

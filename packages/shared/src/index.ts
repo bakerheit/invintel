@@ -384,6 +384,11 @@ export const AUDIT_ACTIONS = [
   "alert.snoozed",
   "alert.reopened",
   "alert.settings_changed",
+  "exchange.identity_created",
+  "exchange.connected",
+  "exchange.permissions_changed",
+  "exchange.order_answered",
+  "exchange.order_shipped",
   "supplier.created",
   "supplier.updated",
   "purchase_order.created",
@@ -716,3 +721,4 @@ export * from "./downtime.js";
 export * from "./alerts.js";
 export * from "./units.js";
 export * from "./archive.js";
+export * from "./exchange.js";
