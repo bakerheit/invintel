@@ -282,4 +282,6 @@ MIT
 
 `deploy/nginx/run-local.sh start` builds the web app and starts nginx (installed with `brew install nginx`) on port 8080, serving the built files and passing `/api` to the API on loopback (`API_PORT=3011 deploy/nginx/run-local.sh start` if the API isn't on 3001). One address serves both, so a phone on the same network can open `http://<this machine's address>:8080`. It has rate limits on sign-in and the API, basic security headers and long caching for built assets, and uses its own directory (`~/.invintel-nginx`), not nginx's global config. Use `LISTEN=127.0.0.1:8080` to keep it to this machine, and `stop` to turn it off.
 
+The API listens on 127.0.0.1 only (set `HOST` to change that), so everything goes through nginx or the Vite proxy. Behind a tunnel on this machine nginx takes each visitor's real address from `CF-Connecting-IP` (only when the connection is from loopback), so the sign-in limit is per person, not per tunnel. Set `BASIC_AUTH_FILE` to a htpasswd file to put a username and password in front of the whole site before sharing a link with anyone else.
+
 It speaks plain HTTP. Put TLS in front of it before anyone outside your own network uses it, and have Frida review it before it faces the internet.

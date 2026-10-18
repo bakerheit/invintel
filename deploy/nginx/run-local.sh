@@ -10,14 +10,17 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PREFIX="${INVINTEL_NGINX_PREFIX:-$HOME/.invintel-nginx}"
 API_PORT="${API_PORT:-3001}"
 LISTEN="${LISTEN:-8080}"   # use 127.0.0.1:8080 to keep it to this machine
+# Set BASIC_AUTH_FILE to a htpasswd file (create one with: htpasswd -c FILE name) to put a username and password in front of the whole site.
+BASIC_AUTH_FILE="${BASIC_AUTH_FILE:-}"
 NGINX="${NGINX:-$(command -v nginx || echo /opt/homebrew/bin/nginx)}"
 
 case "${1:-}" in
   start)
     mkdir -p "$PREFIX"
     (cd "$ROOT" && pnpm --filter @invintel/web build >/dev/null)
-    cp "$ROOT/deploy/nginx/proxy.conf" "$PREFIX/proxy.conf"
-    sed -e "s|@WEB_ROOT@|$ROOT/apps/web/dist|g" -e "s|@API_PORT@|$API_PORT|g" -e "s|@LISTEN@|$LISTEN|g" -e "s|@PREFIX@|$PREFIX|g" \
+    cp "$ROOT/deploy/nginx/proxy.conf" "$ROOT/deploy/nginx/security.conf" "$PREFIX/"
+    AUTH=""; [ -n "$BASIC_AUTH_FILE" ] && AUTH="auth_basic \"Invintel\"; auth_basic_user_file $BASIC_AUTH_FILE;"
+    sed -e "s|@WEB_ROOT@|$ROOT/apps/web/dist|g" -e "s|@API_PORT@|$API_PORT|g" -e "s|@LISTEN@|$LISTEN|g" -e "s|@PREFIX@|$PREFIX|g" -e "s|@AUTH@|$AUTH|g" \
       "$ROOT/deploy/nginx/invintel.conf.template" > "$PREFIX/nginx.conf"
     "$NGINX" -t -c "$PREFIX/nginx.conf" -p "$PREFIX"
     if [ -f "$PREFIX/nginx.pid" ] && kill -0 "$(cat "$PREFIX/nginx.pid")" 2>/dev/null; then "$NGINX" -s reload -c "$PREFIX/nginx.conf" -p "$PREFIX"; else "$NGINX" -c "$PREFIX/nginx.conf" -p "$PREFIX"; fi
