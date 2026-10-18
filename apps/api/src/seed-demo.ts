@@ -107,6 +107,11 @@ await call(`${prod}/boms`, {
 const wo = await call<{ id: string }>(`${prod}/work-orders`, { outputItemId: rsc, quantity: 100, workCenterId: wc.id, dueDate: null, note: "Demo order" });
 await call(`${prod}/work-orders/${wo.id}/action`, { action: "release" });
 
+// A paper item tracked roll by roll: each roll has its own label (print them from Labels) and a remaining weight.
+const rollItem = await call<{ id: string }>(`${base}/items`, { sku: "ROLL-KR60", name: "Kraft 60 in roll, tracked per roll (kg)", category: "Paper", reorderLevel: 1500, unitCostCents: 120, tracking: "unit" });
+await call(`${base}/units`, { itemId: rollItem.id, locationId: rackB, quantity: 820, count: 3, lot: "MILL-7741" });
+await call(`${base}/units`, { itemId: rollItem.id, locationId: dock, quantity: 640, count: 1, lot: "MILL-7802" });
+
 // A supplier and an order that has been placed, so Purchasing has something in it.
 const supplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Midwest Paper Mill", contact: "Sam Ortiz", email: "orders@midwestpaper.example", phone: "555-0142" });
 const po = await call<{ id: string }>(`${base}/purchasing/orders`, {
