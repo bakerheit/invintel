@@ -87,6 +87,53 @@ function FeaturesForm({ org }: { org: OrgSummary }) {
   );
 }
 
+function ApprovalRulesForm({ orgId }: { orgId: string }) {
+  const qc = useQueryClient();
+  const rules = useQuery({ queryKey: orgKey(orgId, "approval-rules"), queryFn: () => api.approvalRules(orgId) });
+  const [draft, setDraft] = useState<Record<string, { on: boolean; dollars: string; appliesTo: "members" | "everyone" }> | null>(null);
+  const kinds = [
+    ["adjustment", "Stock adjustments", "A change to stock worth at least this much waits for another admin."],
+    ["purchase_order", "Purchase orders", "Placing an order worth at least this much waits for another admin."],
+  ] as const;
+  const state = draft ?? Object.fromEntries(kinds.map(([k]) => {
+    const r = rules.data?.rules.find((x) => x.kind === k);
+    return [k, { on: !!r, dollars: r ? String(r.thresholdCents / 100) : "100", appliesTo: r?.appliesTo ?? (k === "adjustment" ? "members" : "everyone") }];
+  }));
+  const save = useMutation({
+    mutationFn: () => api.saveApprovalRules(orgId, kinds.flatMap(([k]) => (state[k]!.on ? [{ kind: k, thresholdCents: Math.round(Number(state[k]!.dollars || 0) * 100), appliesTo: state[k]!.appliesTo }] : []))),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "approval-rules") }); setDraft(null); toast.success("Approval rules saved"); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const set = (k: string, patch: Partial<{ on: boolean; dollars: string; appliesTo: "members" | "everyone" }>) => setDraft({ ...state, [k]: { ...state[k]!, ...patch } });
+  return (
+    <div className="space-y-3">
+      {kinds.map(([k, label, hint]) => (
+        <div key={k} className="space-y-2 rounded-lg border p-3">
+          <label className="flex items-start gap-3">
+            <input type="checkbox" className="mt-1 size-4" checked={state[k]!.on} onChange={(e) => set(k, { on: e.target.checked })} />
+            <span><span className="block text-sm font-medium">{label}</span><span className="block text-sm text-muted-foreground">{hint}</span></span>
+          </label>
+          {state[k]!.on && (
+            <div className="flex flex-wrap items-center gap-2 pl-7 text-sm">
+              <span>From $</span>
+              <Input aria-label={`${label} threshold in dollars`} className="h-8 w-28" type="number" min={0} step="0.01" value={state[k]!.dollars} onChange={(e) => set(k, { dollars: e.target.value })} />
+              <span>for</span>
+              <select aria-label={`${label} applies to`} className="h-8 rounded-md border bg-background px-2" value={state[k]!.appliesTo} onChange={(e) => set(k, { appliesTo: e.target.value as "members" | "everyone" })}>
+                <option value="members">members only</option>
+                <option value="everyone">everyone, admins too</option>
+              </select>
+            </div>
+          )}
+        </div>
+      ))}
+      <div className="flex items-center gap-3">
+        <Button onClick={() => save.mutate()} disabled={!draft || save.isPending}>Save rules</Button>
+        <p className="text-xs text-muted-foreground">The person who asked can't approve their own request, unless they are the only admin.</p>
+      </div>
+    </div>
+  );
+}
+
 function JoinCodeCard({ orgId, joinCode }: { orgId: string; joinCode: string }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
@@ -235,6 +282,12 @@ export default function SettingsPage() {
         {admin && (
           <Section title="Features" description="Show only what your team uses. Inventory, locations and the audit log are always on.">
             <FeaturesForm org={org} />
+          </Section>
+        )}
+
+        {admin && (
+          <Section title="Approvals" description="Ask for a second person's OK on the actions that matter. Off until you switch a rule on.">
+            <ApprovalRulesForm orgId={org.id} />
           </Section>
         )}
 

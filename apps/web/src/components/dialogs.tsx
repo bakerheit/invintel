@@ -66,16 +66,16 @@ function LocationSelect({ label, value, onChange, locations }: {
 }
 
 /** Shared submit plumbing: runs the mutation, refreshes the org's data, closes on success. */
-function useSubmit<T>(run: (form: FormData) => Promise<T>, successMessage: string) {
+function useSubmit<T>(run: (form: FormData) => Promise<T>, successMessage: string | ((result: T) => string)) {
   const qc = useQueryClient();
   const { id: orgId } = useCurrentOrg();
   const close = useUi((s) => s.closeDialog);
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: run,
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await invalidateOrg(qc, orgId);
-      toast.success(successMessage);
+      toast.success(typeof successMessage === "function" ? successMessage(result) : successMessage);
       close();
     },
     onError: (e: Error) => setError(e.message),
@@ -197,7 +197,7 @@ function AdjustForm({ item, locations, locationId: preferred }: { item: Item; lo
       delta: Number(form.get("delta")),
       reason: text(form, "reason"),
     }),
-    "Stock updated",
+    (r) => ("approvalRequired" in r ? `Sent for approval (${r.approval.number}). It posts when an admin approves.` : "Stock updated"),
   );
 
   return (

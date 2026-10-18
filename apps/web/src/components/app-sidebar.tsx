@@ -29,6 +29,9 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { api } from "@/lib/api";
+import { orgKey, isAdmin } from "@/lib/org";
+import { useQuery } from "@tanstack/react-query";
 import { type Theme, useTheme } from "@/lib/theme";
 import { useAuth } from "@/stores/auth";
 
@@ -48,6 +51,7 @@ export const navItems = (orgId: string): NavItem[] => [
   { to: `/o/${orgId}/counts`, end: false, label: "Counts", icon: ClipboardCheck, adminOnly: false },
   { to: `/o/${orgId}/purchasing`, end: false, label: "Purchasing", icon: ShoppingCart, adminOnly: false, module: "purchasing" },
   { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false, module: "production" },
+  { to: `/o/${orgId}/approvals`, end: false, label: "Approvals", icon: ShieldCheck, adminOnly: false },
   { to: `/o/${orgId}/reports`, end: false, label: "Reports", icon: BarChart3, adminOnly: false },
   { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History, adminOnly: false },
   { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin, adminOnly: false },
@@ -169,6 +173,8 @@ function UserMenu() {
 export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] }) {
   const { pathname } = useLocation();
   const { setOpenMobile } = useSidebar();
+  // A number next to Approvals when something is waiting for this person to decide.
+  const pending = useQuery({ queryKey: orgKey(org.id, "approvals", "pending-count"), queryFn: () => api.pendingApprovals(org.id), enabled: isAdmin(org.role), refetchInterval: 30_000 });
 
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
@@ -191,6 +197,9 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
                   >
                     <Icon />
                     <span>{label}</span>
+                    {label === "Approvals" && (pending.data?.count ?? 0) > 0 && (
+                      <span className="ml-auto rounded-full bg-sidebar-primary px-1.5 text-xs font-semibold text-sidebar-primary-foreground" aria-label={`${pending.data!.count} waiting`}>{pending.data!.count}</span>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

@@ -129,7 +129,10 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
   const done = async (msg: string) => { await invalidateOrg(qc, orgId); toast.success(msg); };
   const act = useMutation({
     mutationFn: (a: "place" | "cancel" | "close") => api.orderAction(orgId, order.id, a),
-    onSuccess: async (o) => { await done(`${o.number} is ${o.status === "received" ? "closed" : o.status}`); onClose(); },
+    onSuccess: async (o) => {
+      await done("approvalRequired" in o ? `${o.approval.number} sent for approval. The order goes out when an admin approves.` : `${o.number} is ${o.status === "received" ? "closed" : o.status}`);
+      onClose();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const receive = useMutation({

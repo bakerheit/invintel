@@ -1,4 +1,8 @@
 import type {
+  ApprovalDecisionInput,
+  ApprovalRequest,
+  ApprovalRequired,
+  ApprovalRule,
   AgingReport,
   CountAccuracyReport,
   CountScheduleReport,
@@ -139,7 +143,7 @@ export const api = {
   orderFromSuggestions: (orgId: string, input: { supplierId: string; itemIds: string[] }) =>
     request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/from-suggestions`, post(input)),
   orderAction: (orgId: string, id: string, action: "place" | "cancel" | "close") =>
-    request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/${id}/${action}`, post({})),
+    request<PurchaseOrder | ApprovalRequired>(`/orgs/${orgId}/purchasing/orders/${id}/${action}`, post({})),
   receiveOrder: (orgId: string, id: string, input: PoReceiveInput) =>
     request<PoReceiveResult>(`/orgs/${orgId}/purchasing/orders/${id}/receive`, post(input)),
   listCounts: (orgId: string) => request<CountListRow[]>(`/orgs/${orgId}/counts`),
@@ -157,6 +161,12 @@ export const api = {
   agingCsvUrl: (orgId: string, locationId?: string) => `/api/orgs/${orgId}/reports/aging.csv${locationId ? `?locationId=${locationId}` : ""}`,
   countAccuracy: (orgId: string) => request<CountAccuracyReport>(`/orgs/${orgId}/reports/count-accuracy`),
   countSchedule: (orgId: string) => request<CountScheduleReport>(`/orgs/${orgId}/reports/count-schedule`),
+  approvalRules: (orgId: string) => request<{ rules: ApprovalRule[] }>(`/orgs/${orgId}/approvals/rules`),
+  saveApprovalRules: (orgId: string, rules: ApprovalRule[]) => request<{ rules: ApprovalRule[] }>(`/orgs/${orgId}/approvals/rules`, { method: "PUT", body: body({ rules }) }),
+  listApprovals: (orgId: string) => request<ApprovalRequest[]>(`/orgs/${orgId}/approvals`),
+  pendingApprovals: (orgId: string) => request<{ count: number }>(`/orgs/${orgId}/approvals/pending-count`),
+  decideApproval: (orgId: string, id: string, action: "approve" | "reject" | "cancel", input: ApprovalDecisionInput = {}) =>
+    request<ApprovalRequest>(`/orgs/${orgId}/approvals/${id}/${action}`, post(input)),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
@@ -176,7 +186,7 @@ export const api = {
   deleteItem: (orgId: string, id: string) =>
     request<void>(`/orgs/${orgId}/items/${id}`, { method: "DELETE" }),
   adjustStock: (orgId: string, id: string, input: Partial<AdjustmentInput> & Pick<AdjustmentInput, "locationId" | "delta">) =>
-    request<Item>(`/orgs/${orgId}/items/${id}/adjust`, post(input)),
+    request<Item | ApprovalRequired>(`/orgs/${orgId}/items/${id}/adjust`, post(input)),
   transferStock: (orgId: string, id: string, input: Partial<TransferInput> & Pick<TransferInput, "fromLocationId" | "toLocationId" | "quantity">) =>
     request<Item>(`/orgs/${orgId}/items/${id}/transfer`, post(input)),
   listMovements: (orgId: string, id: string) =>

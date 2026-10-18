@@ -32,6 +32,7 @@ import CountFloorPage from "./pages/floor/count";
 import ReportsHome from "./pages/reports";
 import AgingReportPage from "./pages/reports/aging";
 import CountingReportPage from "./pages/reports/counting";
+import ApprovalsPage from "./pages/approvals";
 import PurchasingPage from "./pages/purchasing";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
@@ -79,6 +80,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="inventory/:itemId" element={<ItemDetailPage />} />
               <Route path="counts" element={<CountsPage />} />
+              <Route path="approvals" element={<ApprovalsPage />} />
               <Route path="reports" element={<ReportsHome />} />
               <Route path="reports/aging" element={<AgingReportPage />} />
               <Route path="reports/counting" element={<CountingReportPage />} />

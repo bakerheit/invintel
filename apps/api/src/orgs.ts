@@ -15,6 +15,7 @@ import { createUnitRoutes } from "./unit-routes.js";
 import { auditActor, recordAudit } from "./audit.js";
 import { createFloorRoutes } from "./floor.js";
 import { createItemRoutes } from "./items.js";
+import { createApprovalRoutes } from "./approvals.js";
 import { createCountRoutes } from "./counts.js";
 import { createDataRoutes } from "./data.js";
 import { createLocationRoutes } from "./locations.js";
@@ -150,6 +151,7 @@ export function createOrgRoutes(store: Store) {
     return c.json(members);
   });
 
+  scoped.route("/approvals", createApprovalRoutes(store));
   scoped.route("/counts", createCountRoutes(store));
   scoped.route("/data", createDataRoutes(store));
   scoped.route("/members", createMemberRoutes(store));

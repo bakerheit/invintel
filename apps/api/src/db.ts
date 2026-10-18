@@ -25,6 +25,8 @@ export interface OrgDoc {
   createdBy: ObjectId;
   /** Absent means everything is on. */
   modules?: Partial<{ purchasing: boolean; production: boolean }>;
+  /** Absent means nothing needs a second person. */
+  approvalRules?: { kind: "adjustment" | "purchase_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
 
@@ -223,6 +225,25 @@ export interface CountDoc {
   lines: { itemId: ObjectId; counted: number; expectedAtPost?: number }[];
 }
 
+export interface ApprovalDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  kind: "adjustment" | "purchase_order";
+  status: "pending" | "approved" | "rejected" | "cancelled" | "failed";
+  summary: string;
+  valueCents: number;
+  /** What to do when approved. Kept as plain ids and numbers. */
+  payload: { itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId };
+  subject: { type: "item" | "purchase_order"; id: string; label: string };
+  requestedBy: { id: ObjectId; name: string };
+  requestedAt: Date;
+  decidedBy?: { id: ObjectId; name: string };
+  decidedAt?: Date;
+  note: string;
+  failure?: string;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -242,6 +263,7 @@ export interface Store {
   suppliers: Collection<SupplierDoc>;
   purchaseOrders: Collection<PurchaseOrderDoc>;
   counts: Collection<CountDoc>;
+  approvals: Collection<ApprovalDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -275,6 +297,7 @@ export async function connect(
     suppliers: db.collection("suppliers"),
     purchaseOrders: db.collection("purchase_orders"),
     counts: db.collection("counts"),
+    approvals: db.collection("approvals"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -327,6 +350,8 @@ export async function connect(
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.approvals.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.approvals.createIndex({ orgId: 1, status: 1, requestedAt: -1 }),
     // One open count per location: two people counting the same shelf into different sheets is how counts go wrong.
     store.counts.createIndex({ orgId: 1, locationId: 1 }, { unique: true, partialFilterExpression: { status: "open" } }),
     store.movements.createIndex({ purchaseOrderId: 1 }, { sparse: true }),

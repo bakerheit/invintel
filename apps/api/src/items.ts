@@ -16,6 +16,7 @@ import { conflictMessage, findCodeConflict } from "./item-codes.js";
 import { loadItem, loadItems, toItem } from "./item-queries.js";
 import type { OrgEnv } from "./org-access.js";
 import { logMovement, postAdjustment, postMove, type Actor } from "./stock-service.js";
+import { createApproval, isSoleApprover, ruleFor, toApproval } from "./approvals-core.js";
 import { unitCodeTaken } from "./units.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -213,6 +214,22 @@ export function createItemRoutes(store: Store) {
     const orgId = c.get("org")._id;
     const itemId = new ObjectId(c.req.valid("param").id);
     const { locationId, delta, reason } = c.req.valid("json");
+    // A rule may say this adjustment needs a second person. Then it waits as a request instead of posting.
+    const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { sku: 1, name: 1, unitCostCents: 1 } });
+    if (item) {
+      const valueCents = Math.abs(delta) * item.unitCostCents;
+      if (ruleFor(c.get("org"), "adjustment", valueCents, c.get("role"))) {
+        const loc = await store.locations.findOne({ _id: new ObjectId(locationId), orgId }, { projection: { name: 1 } });
+        if (!loc) return c.json({ error: "Location not found" }, 404);
+        const asker = { ...c.get("user"), role: c.get("role") };
+        const doc = await createApproval(store, orgId, asker, {
+          kind: "adjustment", valueCents, payload: { itemId, locationId: new ObjectId(locationId), delta, reason },
+          summary: `${delta > 0 ? "Add" : "Remove"} ${Math.abs(delta).toLocaleString("en-US")} \u00d7 ${item.name} at ${loc.name}${reason ? ` (${reason})` : ""}`,
+          subject: { type: "item", id: itemId.toHexString(), label: `${item.name} (${item.sku})` },
+        });
+        return c.json({ approvalRequired: true, approval: toApproval(doc, { id: asker.id, role: asker.role }, await isSoleApprover(store, orgId)) }, 202);
+      }
+    }
     const result = await postAdjustment(store, orgId, actorOf(c.get("user")), {
       itemId,
       locationId: new ObjectId(locationId),

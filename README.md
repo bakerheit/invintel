@@ -74,6 +74,12 @@ API under `/api/orgs/:orgId/counts`: `GET /`, `POST /` (`{locationId}`), `GET /:
 - **Stock aging** (`GET /reports/aging`, `/reports/aging.csv`, optional `?locationId=`): days since stock last moved at each place, value tied up, which items sit on an active BOM, buckets from 0-30 days to over a year, and the value idle over 180 days.
 - **Counting** (`GET /reports/count-accuracy`, `/reports/count-schedule`): accuracy of posted counts by place, month and item, and an ABC count schedule (A items every 30 days, B every 90, C every 180; a place follows its most important class) with overdue and due-soon flags and a Start count button.
 
+### Approvals
+
+Some actions can need a second person's OK. **Settings > Approvals** (admins) switches on rules for **stock adjustments** and **purchase orders** from a dollar amount up, for members only or for everyone. An action that crosses a rule waits as a request (`APR-0007`) on the **Approvals** page; another admin approves it (it then runs once, as the person who asked, naming the approver) or rejects it with a reason. The asker can't approve their own request unless they are the only admin. Everything is in the audit log. This is a second-person check, not an e-signature system.
+
+API under `/api/orgs/:orgId/approvals`: `GET /rules`, `PUT /rules`, `GET /`, `GET /pending-count`, `POST /:id/approve|reject|cancel`. A gated endpoint answers `202 { approvalRequired, approval }`.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:

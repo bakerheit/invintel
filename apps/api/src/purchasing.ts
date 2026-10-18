@@ -17,6 +17,7 @@ import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.js";
+import { createApproval, isSoleApprover, ruleFor, toApproval } from "./approvals-core.js";
 import { duplicateField, isDuplicateKey, type PurchaseOrderDoc, type Store, type SupplierDoc } from "./db.js";
 import { nextNumber } from "./counters.js";
 import { loadItems } from "./item-queries.js";
@@ -87,6 +88,14 @@ async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<Purchas
 
 const poEntity = (d: { _id: ObjectId; number: string }) => ({ type: "purchase_order" as const, id: d._id.toHexString(), label: d.number });
 const isOpen = (o: PurchaseOrder) => o.status === "ordered" || o.status === "partial";
+
+/** Places a draft order without a request context. Used when an approval is granted. */
+export async function placeOrderDirect(store: Store, orgId: ObjectId, orderId: ObjectId, user: { id: string; name: string }, via: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await store.purchaseOrders.findOneAndUpdate({ _id: orderId, orgId, state: "draft" }, { $set: { state: "ordered", updatedAt: new Date() } }, { returnDocument: "after" });
+  if (!res) return { ok: false, error: "The order isn't a draft any more" };
+  await recordAudit(store, { orgId, actor: auditActor(user), action: "purchase_order.ordered", entity: poEntity(res), summary: `Placed ${res.number} (${via})` });
+  return { ok: true };
+}
 
 export function createPurchasingRoutes(store: Store) {
   const r = new Hono<OrgEnv>();
@@ -285,7 +294,25 @@ export function createPurchasingRoutes(store: Store) {
     return c.json(after);
   }
 
-  r.post("/orders/:id/place", requireRole("admin"), zValidator("param", idParam), (c) => transition(c, ["draft"], "ordered", "purchase_order.ordered", "placed"));
+  r.post("/orders/:id/place", requireRole("admin"), zValidator("param", idParam), async (c) => {
+    // A big order may need a second admin before it goes out. Then it waits as a request.
+    const orgId = c.get("org")._id;
+    const doc = await store.purchaseOrders.findOne({ _id: oid(c.req.valid("param").id), orgId });
+    if (doc?.state === "draft") {
+      const [order] = await toOrders(store, [doc]);
+      if (ruleFor(c.get("org"), "purchase_order", order!.totalCents, c.get("role"))) {
+        const open = await store.approvals.findOne({ orgId, kind: "purchase_order", status: "pending", "payload.orderId": doc._id });
+        const asker = { ...c.get("user"), role: c.get("role") };
+        const approval = open ?? (await createApproval(store, orgId, asker, {
+          kind: "purchase_order", valueCents: order!.totalCents, payload: { orderId: doc._id },
+          summary: `Place ${doc.number} with ${order!.supplierName}: ${order!.orderedUnits.toLocaleString("en-US")} units, $${(order!.totalCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+          subject: { type: "purchase_order", id: doc._id.toHexString(), label: `${doc.number} (${order!.supplierName})` },
+        }));
+        return c.json({ approvalRequired: true, approval: toApproval(approval, { id: asker.id, role: asker.role }, await isSoleApprover(store, orgId)) }, 202);
+      }
+    }
+    return transition(c, ["draft"], "ordered", "purchase_order.ordered", "placed");
+  });
   r.post("/orders/:id/cancel", requireRole("admin"), zValidator("param", idParam), (c) =>
     transition(c, ["draft", "ordered"], "cancelled", "purchase_order.cancelled", "cancelled", (o) => (o.receivedUnits > 0 ? "Some of it has been received. Close it short instead." : null)));
   r.post("/orders/:id/close", requireRole("admin"), zValidator("param", idParam), (c) =>
