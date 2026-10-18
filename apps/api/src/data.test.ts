@@ -77,7 +77,7 @@ describe("items import and export", () => {
     const exp = await call(cookie, `${base}/data/items.csv`);
     expect(exp.headers.get("content-type")).toContain("text/csv");
     const rows = parseCsv(await exp.text());
-    expect(rows[0]).toEqual(["sku", "name", "category", "description", "reorder_level", "unit_cost", "barcodes", "location", "quantity"]);
+    expect(rows[0]).toEqual(["sku", "name", "category", "description", "reorder_level", "unit_cost", "barcodes", "location", "quantity", "unit", "decimals"]);
     expect(rows.slice(1).map((r) => `${r[0]}@${r[7]}=${r[8]}`).sort()).toEqual(["GLUE@=", "KRAFT-42@DOCK=9", "KRAFT-42@Main=4"]);
   });
 

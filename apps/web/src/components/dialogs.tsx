@@ -127,7 +127,7 @@ function UnitFields({ unit, decimals, altUnits, onUnit, onDecimals, onAltUnits, 
   return (
     <fieldset className="grid gap-3 rounded-lg border p-3">
       <legend className="px-1 text-sm font-medium">Unit of measure</legend>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="uom-preset">Common</Label>
           <select
@@ -138,7 +138,7 @@ function UnitFields({ unit, decimals, altUnits, onUnit, onDecimals, onAltUnits, 
               const p = UNIT_PRESETS.find((x) => x.unit === e.target.value);
               if (p) { onUnit(p.unit); onDecimals(p.decimals); }
             }}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm disabled:opacity-50"
+            className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm disabled:opacity-50"
           >
             {preset === "custom" && <option value="custom">Custom</option>}
             {UNIT_PRESETS.map((p) => <option key={p.unit} value={p.unit}>{p.label}</option>)}
@@ -155,7 +155,7 @@ function UnitFields({ unit, decimals, altUnits, onUnit, onDecimals, onAltUnits, 
             value={decimals}
             disabled={decimalsLocked}
             onChange={(e) => onDecimals(Number(e.target.value))}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm disabled:opacity-50"
+            className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-sm disabled:opacity-50"
           >
             {Array.from({ length: MAX_DECIMALS + 1 }, (_, d) => <option key={d} value={d}>{d}</option>)}
           </select>

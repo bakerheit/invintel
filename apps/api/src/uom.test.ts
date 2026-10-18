@@ -277,4 +277,49 @@ describe("units of measure through the API", () => {
     expect(updated.summary).toMatch(/reel = 50/);
     expect((await get("/audit/verify")).ok).toBe(true);
   });
+
+  describe("CSV", () => {
+    const importCsv = (csv: string, dryRun = false) => call(`${base}/data/items/import`, { body: { csv, dryRun }, cookie });
+
+    it("imports quantities in the item's own unit and exports them back the same way", async () => {
+      const csv = [
+        "sku,name,unit,decimals,reorder_level,location,quantity",
+        "RESIN,PET resin,kg,3,50.5,Main,1250.25",
+        "RESIN,PET resin,,,,Main,0.5",
+        "BOLT,Bolt,,,10,Main,40",
+      ].join("\n");
+      const res = await importCsv(csv);
+      expect(res.status).toBe(201);
+      const items = await get("/items");
+      const resin = items.find((i: { sku: string }) => i.sku === "RESIN");
+      expect(resin).toMatchObject({ unit: "kg", decimals: 3, reorderLevel: 50500, quantity: 1250750 });
+      expect(items.find((i: { sku: string }) => i.sku === "BOLT")).toMatchObject({ unit: "ea", decimals: 0, quantity: 40 });
+
+      const exported = await (await call(`${base}/data/items.csv`, { cookie })).text();
+      expect(exported.split("\r\n")[0]).toBe("sku,name,category,description,reorder_level,unit_cost,barcodes,location,quantity,unit,decimals");
+      expect(exported).toContain("RESIN,PET resin,,,50.500,0.00,,Main,1250.750,kg,3");
+      expect(exported).toContain("BOLT,Bolt,,,10,0.00,,Main,40,ea,0");
+    });
+
+    it("refuses a quantity the unit can't hold, without importing anything", async () => {
+      const res = await importCsv("sku,name,unit,decimals,quantity,location\nRESIN,Resin,kg,3,1.2345,Main\nBOLT,Bolt,,,2.5,Main");
+      expect(res.status).toBe(422);
+      const body = await res.json();
+      expect(body.rows[0].message).toMatch(/kg goes to 3 decimal places/);
+      expect(body.rows[1].message).toMatch(/ea only counts whole numbers/);
+      expect(await get("/items")).toHaveLength(0);
+    });
+
+    it("refuses bad unit and decimals columns", async () => {
+      const bad = await importCsv("sku,name,decimals\nA,A,7\nB,B,x", true);
+      const body = await bad.json();
+      expect(body.errors).toBe(2);
+      expect(body.rows[0].message).toMatch(/0 to 4/);
+    });
+
+    it("previews total units in display units", async () => {
+      const res = await importCsv("sku,name,unit,decimals,quantity,location\nR,R,kg,3,2.5,Main\nB,B,,,10,Main", true);
+      expect((await res.json()).units).toBe(13); // 2.5 + 10, rounded
+    });
+  });
 });
