@@ -14,6 +14,9 @@ import { z } from "zod";
 
 export const MAX_DECIMALS = 4;
 
+/** Largest quantity a document line accepts, as a stored whole number. Well inside what a float holds exactly. */
+export const MAX_QTY = 1_000_000_000_000;
+
 export const unitLabelSchema = z
   .string()
   .trim()

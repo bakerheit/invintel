@@ -1,5 +1,5 @@
 import type { ActivityEntry, MovementType } from "@invintel/shared";
-import { MOVEMENT_TYPES } from "@invintel/shared";
+import { MOVEMENT_TYPES, formatQty } from "@invintel/shared";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { History, Link2, MoreHorizontal, Search, Undo2, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -73,7 +73,7 @@ function Row({ entry, onReverse }: { entry: ActivityEntry; onReverse: () => void
         )}
       >
         {entry.delta > 0 ? "+" : "−"}
-        {Math.abs(entry.delta).toLocaleString()}
+        {formatQty(Math.abs(entry.delta), entry.uom)}
       </TableCell>
       <TableCell className="hidden max-w-56 truncate xl:table-cell" title={entry.reason}>
         {entry.reason || <span className="text-muted-foreground">-</span>}

@@ -1,4 +1,4 @@
-import type { LookupResult, StockUnit } from "@invintel/shared";
+import { formatQty, type LookupResult, type StockUnit } from "@invintel/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight, PackagePlus } from "lucide-react";
 import { useState } from "react";
@@ -135,8 +135,8 @@ function LocationContents({ locationId, ids, items, loading }: {
             <span className="block font-mono text-xs text-muted-foreground">{item.sku}</span>
           </span>
           <span className="text-right">
-            <span className="block text-xl font-semibold tabular-nums">{(here + inside).toLocaleString()}</span>
-            {inside > 0 && <span className="block text-xs text-muted-foreground">{here.toLocaleString()} here</span>}
+            <span className="block text-xl font-semibold tabular-nums">{formatQty(here + inside, item)}</span>
+            {inside > 0 && <span className="block text-xs text-muted-foreground">{formatQty(here, item)} here</span>}
           </span>
         </li>
       ))}
@@ -148,7 +148,7 @@ function LocationContents({ locationId, ids, items, loading }: {
 function UnitLookup({ unit, onChange, onAgain }: { unit: StockUnit; onChange: (u: StockUnit) => void; onAgain: () => void }) {
   const { id: orgId } = useCurrentOrg();
   const qc = useQueryClient();
-  const [take, setTake] = useState(1);
+  const [take, setTake] = useState(10 ** unit.uom.decimals);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -158,9 +158,9 @@ function UnitLookup({ unit, onChange, onAgain }: { unit: StockUnit; onChange: (u
     try {
       const { units } = await api.adjustUnit(orgId, unit.id, { delta: -take, reason: "Used" });
       feedback("ok");
-      toast.success(`Took ${take.toLocaleString()} from ${unit.code}`);
+      toast.success(`Took ${formatQty(take, unit.uom)} from ${unit.code}`);
       onChange(units[0]!);
-      setTake(1);
+      setTake(10 ** unit.uom.decimals);
       void invalidateOrg(qc, orgId);
     } catch (e) {
       feedback("error");
@@ -176,8 +176,8 @@ function UnitLookup({ unit, onChange, onAgain }: { unit: StockUnit; onChange: (u
       <UnitCard unit={unit} />
       {usable && (
         <div className="space-y-3 rounded-xl border bg-card p-4">
-          <QtyStepper value={take} onChange={setTake} max={unit.quantity} label="Used some of it?" />
-          <Button className="h-14 w-full text-lg" onClick={() => void record()} disabled={busy}>Take {take.toLocaleString()} from this one</Button>
+          <QtyStepper value={take} onChange={setTake} max={unit.quantity} uom={unit.uom} label="Used some of it?" />
+          <Button className="h-14 w-full text-lg" onClick={() => void record()} disabled={busy || take < 1}>Take {formatQty(take, unit.uom)} from this one</Button>
           {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-medium text-destructive">{error}</p>}
         </div>
       )}

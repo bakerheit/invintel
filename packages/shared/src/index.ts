@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { altUnitsSchema, decimalsSchema, DEFAULT_UOM, unitLabelSchema } from "./units.js";
+import { altUnitsSchema, decimalsSchema, DEFAULT_UOM, unitLabelSchema, type Uom } from "./units.js";
 
 // ---------- ids ----------
 
@@ -281,6 +281,8 @@ export interface ActivityEntry {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   locationId: string;
   locationName: string;
   locationPath: string;
@@ -469,6 +471,8 @@ export interface AttentionItem {
   id: string;
   sku: string;
   name: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   reorderLevel: number;
   status: AttentionStatus;
@@ -545,6 +549,8 @@ export interface StockUnit {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read (kg with 3 decimals, each with 0). */
+  uom: Uom;
   lot: string;
   /** What's left. Shrinks as the unit is used. */
   quantity: number;

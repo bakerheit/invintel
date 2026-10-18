@@ -1,4 +1,5 @@
 // Read-only reports over what the ledger and counts already record.
+import type { Uom } from "./units.js";
 
 export interface AgingRow {
   itemId: string;
@@ -6,6 +7,8 @@ export interface AgingRow {
   name: string;
   locationId: string;
   locationPath: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   valueCents: number;
   /** When stock last moved at this place (any ledger line), or when the stock row last changed if nothing is recorded. */

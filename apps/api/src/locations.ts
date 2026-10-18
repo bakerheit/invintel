@@ -85,10 +85,14 @@ async function ownTotals(store: Store, orgId: ObjectId, locationId?: ObjectId) {
   const rows = await store.stock
     .aggregate<{ _id: ObjectId; skuCount: number; unitCount: number }>([
       { $match: { orgId, quantity: { $gt: 0 }, ...(locationId ? { locationId } : {}) } },
-      { $group: { _id: "$locationId", skuCount: { $sum: 1 }, unitCount: { $sum: "$quantity" } } },
+      // Quantities are counts of each item's smallest unit, so a 12.5 kg item is stored as 12500.
+      // Totals across items are in display units (12.5), whatever the item's decimals.
+      { $lookup: { from: "items", localField: "itemId", foreignField: "_id", pipeline: [{ $project: { decimals: 1 } }], as: "it" } },
+      { $addFields: { shown: { $divide: ["$quantity", { $pow: [10, { $ifNull: [{ $first: "$it.decimals" }, 0] }] }] } } },
+      { $group: { _id: "$locationId", skuCount: { $sum: 1 }, unitCount: { $sum: "$shown" } } },
     ])
     .toArray();
-  return new Map(rows.map((t) => [t._id.toHexString(), t]));
+  return new Map(rows.map((t) => [t._id.toHexString(), { ...t, unitCount: Math.round(t.unitCount) }]));
 }
 
 const duplicateMessage = (e: unknown) =>

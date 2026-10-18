@@ -1,4 +1,4 @@
-import type { Item, Location, PostedDocument } from "@invintel/shared";
+import { formatQty, uomOf, type Item, type Location, type PostedDocument } from "@invintel/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -64,6 +64,7 @@ export default function ReceivePage() {
         return;
       }
       setItem(r.value);
+      setQty(10 ** uomOf(r.value).decimals);
       setStep("details");
     } catch (e) {
       feedback("error");
@@ -147,12 +148,12 @@ export default function ReceivePage() {
       {step === "details" && item && item.tracking !== "unit" && (
         <div className="space-y-6">
           <ItemSummary item={item} locations={locations} />
-          <QtyStepper value={qty} onChange={setQty} label="How many arrived?" />
+          <QtyStepper value={qty} onChange={setQty} uom={item} label={`How many arrived?${uomOf(item).unit === "ea" ? "" : ` (${uomOf(item).unit})`}`} />
           <div className="space-y-2">
             <label htmlFor="floor-ref" className="text-base font-medium">PO or delivery note (optional)</label>
             <Input id="floor-ref" className="h-14 text-lg" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} />
           </div>
-          <Button className="h-16 w-full text-xl" onClick={() => { setError(null); setStep("destination"); }}>
+          <Button className="h-16 w-full text-xl" disabled={qty < 1} onClick={() => { setError(null); setStep("destination"); }}>
             Next: where to?
           </Button>
           <Button variant="ghost" className="h-12 w-full text-base" onClick={reset}>
@@ -164,7 +165,7 @@ export default function ReceivePage() {
       {step === "destination" && item && (
         <div className="space-y-6">
           <div className="rounded-xl border bg-card p-4 text-lg">
-            <span className="font-semibold">{qty.toLocaleString()} × {item.name}</span>
+            <span className="font-semibold">{formatQty(qty, item)} × {item.name}</span>
             {reference && <span className="block text-sm text-muted-foreground">{reference}</span>}
           </div>
           {usual && (
@@ -184,7 +185,7 @@ export default function ReceivePage() {
       )}
 
       {step === "done" && done && item && (
-        <ResultPanel title={`Received ${done.qty.toLocaleString()} × ${item.name}`} detail={`Into ${done.to.path}`}>
+        <ResultPanel title={`Received ${formatQty(done.qty, item)} × ${item.name}`} detail={`Into ${done.to.path}`}>
           {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-medium text-destructive">{error}</p>}
           <Button className="h-16 w-full text-xl" onClick={reset}>Receive another</Button>
           <Button variant="outline" className="h-14 w-full text-base" onClick={() => void undo()} disabled={busy}>

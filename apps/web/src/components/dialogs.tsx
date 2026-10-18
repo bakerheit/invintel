@@ -1,4 +1,4 @@
-import { LOCATION_TYPES, type ActivityEntry, type Item, type Location, type LocationType } from "@invintel/shared";
+import { formatQty, LOCATION_TYPES, MAX_ALT_UNITS, MAX_DECIMALS, UNIT_PRESETS, uomOf, type ActivityEntry, type AltUnit, type Item, type Location, type LocationType } from "@invintel/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { type FormEvent, type ReactNode, useState } from "react";
@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { api } from "@/lib/api";
 import { centsToDollars, dollarsToCents } from "@/lib/format";
 import { BarcodeField } from "@/components/barcode-field";
+import { QtyInput } from "@/components/qty-input";
+import { useQtyEntry } from "@/lib/qty";
 import { LOCATION_TYPE_META, withDescendants } from "@/lib/locations";
 import { invalidateOrg, useCurrentOrg, useLocations } from "@/lib/org";
 import { useUi } from "@/stores/ui";
@@ -110,6 +112,78 @@ function FormShell({ onSubmit, error, pending, close, submitLabel, children }: {
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? "");
 
+/** Unit of measure: what the item is counted in, how many decimal places it goes to, and other units it comes in. */
+function UnitFields({ unit, decimals, altUnits, onUnit, onDecimals, onAltUnits, decimalsLocked }: {
+  unit: string;
+  decimals: number;
+  altUnits: AltUnit[];
+  onUnit: (u: string) => void;
+  onDecimals: (d: number) => void;
+  onAltUnits: (a: AltUnit[]) => void;
+  decimalsLocked: boolean;
+}) {
+  const preset = UNIT_PRESETS.find((p) => p.unit === unit && p.decimals === decimals)?.unit ?? "custom";
+  const change = (i: number, patch: Partial<AltUnit>) => onAltUnits(altUnits.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  return (
+    <fieldset className="grid gap-3 rounded-lg border p-3">
+      <legend className="px-1 text-sm font-medium">Unit of measure</legend>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="grid gap-1.5">
+          <Label htmlFor="uom-preset">Common</Label>
+          <select
+            id="uom-preset"
+            value={preset}
+            disabled={decimalsLocked}
+            onChange={(e) => {
+              const p = UNIT_PRESETS.find((x) => x.unit === e.target.value);
+              if (p) { onUnit(p.unit); onDecimals(p.decimals); }
+            }}
+            className="h-8 rounded-lg border border-input bg-background px-2 text-sm disabled:opacity-50"
+          >
+            {preset === "custom" && <option value="custom">Custom</option>}
+            {UNIT_PRESETS.map((p) => <option key={p.unit} value={p.unit}>{p.label}</option>)}
+          </select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="uom-unit">Unit</Label>
+          <Input id="uom-unit" value={unit} onChange={(e) => onUnit(e.target.value)} maxLength={16} required />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="uom-decimals">Decimal places</Label>
+          <select
+            id="uom-decimals"
+            value={decimals}
+            disabled={decimalsLocked}
+            onChange={(e) => onDecimals(Number(e.target.value))}
+            className="h-8 rounded-lg border border-input bg-background px-2 text-sm disabled:opacity-50"
+          >
+            {Array.from({ length: MAX_DECIMALS + 1 }, (_, d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+      </div>
+      {decimalsLocked && <p className="text-xs text-muted-foreground">Decimal places are fixed once an item has stock, history or orders.</p>}
+      <div className="grid gap-2">
+        <p className="text-sm font-medium">Also bought or counted in (optional)</p>
+        {altUnits.map((a, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">1</span>
+            <Input aria-label="Other unit name" placeholder="case" value={a.name} onChange={(e) => change(i, { name: e.target.value })} maxLength={16} className="w-24" />
+            <span className="text-sm text-muted-foreground">=</span>
+            <Input aria-label="How many of the main unit" inputMode="decimal" placeholder="12" value={a.factor} onChange={(e) => change(i, { factor: e.target.value })} className="w-24" />
+            <span className="text-sm text-muted-foreground">{unit || "ea"}</span>
+            <Button type="button" variant="ghost" size="sm" aria-label="Remove unit" onClick={() => onAltUnits(altUnits.filter((_, j) => j !== i))}>Remove</Button>
+          </div>
+        ))}
+        {altUnits.length < MAX_ALT_UNITS && (
+          <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={() => onAltUnits([...altUnits, { name: "", factor: "" }])}>
+            Add a unit
+          </Button>
+        )}
+      </div>
+    </fieldset>
+  );
+}
+
 function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations: Location[]; initialBarcode?: string }) {
   const { id: orgId } = useCurrentOrg();
   const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
@@ -119,19 +193,32 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
   const [tracking, setTracking] = useState<"quantity" | "unit">(item?.tracking ?? "quantity");
   // Switching how an item is counted is only safe while nothing is in stock.
   const canChangeTracking = !item || item.quantity === 0;
+  const [unit, setUnit] = useState(item?.unit ?? "ea");
+  const [decimals, setDecimals] = useState(item?.decimals ?? 0);
+  const [altUnits, setAltUnits] = useState<AltUnit[]>(item?.altUnits ?? []);
+  // Decimal places can't move once an item has stock (the server also checks history and orders).
+  const canChangeDecimals = !item || item.quantity === 0;
+  const uom = { unit: unit.trim() || "ea", decimals, altUnits };
+  const reorder = useQtyEntry(uom, { initial: item?.reorderLevel ?? 0 });
+  const starting = useQtyEntry(uom, { initial: 0 });
   const submit = useSubmit((form) => {
+    if (reorder.stored === null) throw new Error(`Reorder level: ${reorder.error ?? "enter a quantity"}`);
+    if (!item && tracking === "quantity" && starting.stored === null) throw new Error(`Starting quantity: ${starting.error ?? "enter a quantity"}`);
     const base = {
       sku: sku.trim(),
       name: text(form, "name"),
       description: text(form, "description"),
       category: text(form, "category"),
-      reorderLevel: Number(text(form, "reorderLevel") || 0),
+      reorderLevel: reorder.stored,
       unitCostCents: dollarsToCents(text(form, "unitCost")),
       barcodes,
+      unit: uom.unit,
+      ...(canChangeDecimals ? { decimals } : {}),
+      altUnits: altUnits.filter((a) => a.name.trim() && a.factor.trim()).map((a) => ({ name: a.name.trim(), factor: a.factor.trim() })),
       ...(canChangeTracking ? { tracking } : {}),
     };
     if (item) return api.updateItem(orgId, item.id, base);
-    const quantity = Number(text(form, "quantity") || 0);
+    const quantity = starting.stored ?? 0;
     return api.createItem(orgId, { ...base, ...(tracking === "quantity" && quantity > 0 && locationId ? { initialStock: { locationId, quantity } } : {}) });
   }, item ? "Changes saved" : "Item created");
 
@@ -144,8 +231,11 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
         </div>
         <Field label="Name" name="name" defaultValue={item?.name} required />
         <Field label="Category" name="category" defaultValue={item?.category} />
-        <Field label="Reorder level" name="reorderLevel" type="number" min={0} defaultValue={item?.reorderLevel ?? 0} />
-        <Field label="Unit cost ($)" name="unitCost" type="number" min={0} step="0.01" defaultValue={centsToDollars(item?.unitCostCents ?? 0)} />
+        <div className="grid gap-1.5">
+          <Label htmlFor="reorderLevel">Reorder level</Label>
+          <QtyInput entry={reorder} id="reorderLevel" />
+        </div>
+        <Field label={`Unit cost ($ per ${uom.unit})`} name="unitCost" type="number" min={0} step="0.01" defaultValue={centsToDollars(item?.unitCostCents ?? 0)} />
       </div>
       <BarcodeField
         value={barcodes}
@@ -156,6 +246,15 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
         }}
       />
       <Field label="Description" name="description" defaultValue={item?.description} />
+      <UnitFields
+        unit={unit}
+        decimals={decimals}
+        altUnits={altUnits}
+        onUnit={setUnit}
+        onDecimals={setDecimals}
+        onAltUnits={setAltUnits}
+        decimalsLocked={!canChangeDecimals}
+      />
       <div className="grid gap-1.5">
         <Label>How is it counted?</Label>
         <Select
@@ -177,7 +276,10 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
       </div>
       {!item && tracking === "quantity" && (
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Starting quantity" name="quantity" type="number" min={0} defaultValue={0} />
+          <div className="grid gap-1.5">
+            <Label htmlFor="quantity">Starting quantity</Label>
+            <QtyInput entry={starting} id="quantity" />
+          </div>
           <LocationSelect label="Stored at" value={locationId} onChange={setLocationId} locations={locationOptions(locations)} />
         </div>
       )}
@@ -191,27 +293,34 @@ function AdjustForm({ item, locations, locationId: preferred }: { item: Item; lo
   const [locationId, setLocationId] = useState(
     preferred ?? item.stock[0]?.locationId ?? locations[0]?.id ?? "",
   );
-  const submit = useSubmit((form) =>
-    api.adjustStock(orgId, item.id, {
+  const delta = useQtyEntry(item, { initial: 10 ** uomOf(item).decimals, signed: true });
+  const submit = useSubmit((form) => {
+    if (delta.stored === null) throw new Error(delta.error ?? "Enter how much to add or remove");
+    if (delta.stored === 0) throw new Error("Change must not be 0");
+    return api.adjustStock(orgId, item.id, {
       locationId,
-      delta: Number(form.get("delta")),
+      delta: delta.stored,
       reason: text(form, "reason"),
-    }),
+    });
+  },
     (r) => ("approvalRequired" in r ? `Sent for approval (${r.approval.number}). It posts when an admin approves.` : "Stock updated"),
   );
 
   return (
     <FormShell {...submit} submitLabel="Apply">
       <p className="text-sm text-muted-foreground">
-        {item.name}: {item.quantity} in stock in total. Use a negative number to remove stock.
+        {item.name}: {formatQty(item.quantity, item)} in stock in total. Use a negative number to remove stock.
       </p>
       <LocationSelect
         label="Location"
         value={locationId}
         onChange={setLocationId}
-        locations={locationOptions(locations, (id) => `${held(id)} here`)}
+        locations={locationOptions(locations, (id) => `${formatQty(held(id), item)} here`)}
       />
-      <Field label="Change" name="delta" type="number" defaultValue={1} required />
+      <div className="grid gap-1.5">
+        <Label htmlFor="delta">Change</Label>
+        <QtyInput entry={delta} id="delta" />
+      </div>
       <Field label="Reason" name="reason" />
     </FormShell>
   );
@@ -223,15 +332,16 @@ function TransferForm({ item, locations }: { item: Item; locations: Location[] }
   const sources = locations.filter((l) => held(l.id) > 0);
   const [from, setFrom] = useState(sources[0]?.id ?? "");
   const [to, setTo] = useState(locations.find((l) => l.id !== sources[0]?.id)?.id ?? "");
-  const submit = useSubmit((form) =>
-    api.transferStock(orgId, item.id, {
+  const moving = useQtyEntry(item, { initial: Math.min(10 ** uomOf(item).decimals, held(sources[0]?.id ?? "") || 1) });
+  const submit = useSubmit((form) => {
+    if (moving.stored === null || moving.stored < 1) throw new Error(moving.error ?? "Enter how much to move");
+    return api.transferStock(orgId, item.id, {
       fromLocationId: from,
       toLocationId: to,
-      quantity: Number(form.get("quantity")),
+      quantity: moving.stored,
       reason: text(form, "reason"),
-    }),
-    "Stock moved",
-  );
+    });
+  }, "Stock moved");
 
   if (!sources.length) {
     return <p className="text-sm text-muted-foreground">{item.name} has no stock to move yet. Add some first.</p>;
@@ -243,7 +353,7 @@ function TransferForm({ item, locations }: { item: Item; locations: Location[] }
           label="From"
           value={from}
           onChange={setFrom}
-          locations={locationOptions(sources, (id) => `${held(id)} here`)}
+          locations={locationOptions(sources, (id) => `${formatQty(held(id), item)} here`)}
         />
         <LocationSelect
           label="To"
@@ -252,7 +362,10 @@ function TransferForm({ item, locations }: { item: Item; locations: Location[] }
           locations={locationOptions(locations.filter((l) => l.id !== from))}
         />
       </div>
-      <Field label="Quantity" name="quantity" type="number" min={1} defaultValue={1} required />
+      <div className="grid gap-1.5">
+        <Label htmlFor="quantity">Quantity</Label>
+        <QtyInput entry={moving} id="quantity" />
+      </div>
       <Field label="Note" name="reason" />
     </FormShell>
   );
@@ -338,15 +451,14 @@ function ReverseForm({ entry }: { entry: ActivityEntry }) {
     entry.type === "transfer"
       ? "Both halves of this transfer will be undone."
       : entry.delta > 0
-        ? `${entry.delta} will be taken back out of ${entry.locationPath}.`
-        : `${-entry.delta} will be put back into ${entry.locationPath}.`;
+        ? `${formatQty(entry.delta, entry.uom)} will be taken back out of ${entry.locationPath}.`
+        : `${formatQty(-entry.delta, entry.uom)} will be put back into ${entry.locationPath}.`;
   return (
     <FormShell {...submit} submitLabel="Reverse entry">
       <div className="rounded-lg border bg-muted/40 p-3 text-sm">
         <p className="font-medium">{entry.itemName}</p>
         <p className="text-muted-foreground">
-          {entry.delta > 0 ? "+" : ""}
-          {entry.delta} at {entry.locationPath}. {what}
+          {formatQty(entry.delta, entry.uom, { sign: true })} at {entry.locationPath}. {what}
         </p>
       </div>
       <p className="text-sm text-muted-foreground">

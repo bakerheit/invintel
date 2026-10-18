@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_QTY } from "./units.js";
 
 const id = z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id");
 
@@ -41,7 +42,7 @@ export type PoStatus = (typeof PO_STATUSES)[number];
 
 export const poLineInputSchema = z.object({
   itemId: id,
-  quantity: z.number().int().positive().max(1_000_000),
+  quantity: z.number().int().positive().max(MAX_QTY),
   unitCostCents: z.number().int().min(0).max(100_000_000),
 });
 
@@ -89,7 +90,7 @@ export interface PurchaseOrder {
 
 export const poReceiveInputSchema = z.object({
   locationId: id,
-  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(1_000_000) })).min(1).max(100),
+  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(MAX_QTY) })).min(1).max(100),
 });
 export type PoReceiveInput = z.input<typeof poReceiveInputSchema>;
 

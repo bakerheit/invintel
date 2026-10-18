@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { countLineSchema, lineValueCents, countPostSchema, countStartSchema, objectIdSchema, type Count, type CountListRow } from "@invintel/shared";
+import { countLineSchema, lineValueCents, uomOf, countPostSchema, countStartSchema, objectIdSchema, type Count, type CountListRow } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
@@ -39,14 +39,14 @@ export function createCountRoutes(store: Store) {
       const expected = posted ? (l.expectedAtPost ?? 0) : (live.get(l.itemId.toHexString()) ?? 0);
       const variance = l.counted - expected;
       return {
-        itemId: l.itemId.toHexString(), itemSku: item?.sku ?? "", itemName: item?.name ?? "Deleted item",
+        itemId: l.itemId.toHexString(), itemSku: item?.sku ?? "", itemName: item?.name ?? "Deleted item", uom: uomOf(item),
         expected, counted: l.counted, variance, varianceCents: lineValueCents(variance, item?.unitCostCents ?? 0, item?.decimals ?? 0),
       };
     });
     const counted = new Set(doc.lines.map((l) => l.itemId.toHexString()));
     const uncounted = posted ? [] : [...live.entries()]
       .filter(([id]) => !counted.has(id) && byId.get(id)?.tracking !== "unit")
-      .map(([id, expected]) => ({ itemId: id, itemSku: byId.get(id)?.sku ?? "", itemName: byId.get(id)?.name ?? "Deleted item", expected }))
+      .map(([id, expected]) => ({ itemId: id, itemSku: byId.get(id)?.sku ?? "", itemName: byId.get(id)?.name ?? "Deleted item", uom: uomOf(byId.get(id)), expected }))
       .sort((a, b) => a.itemName.localeCompare(b.itemName, "en"));
     lines.sort((a, b) => Math.abs(b.varianceCents) - Math.abs(a.varianceCents) || a.itemName.localeCompare(b.itemName, "en"));
     return {

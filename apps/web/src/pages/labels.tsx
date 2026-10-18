@@ -1,3 +1,4 @@
+import { formatQty } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Printer } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -77,7 +78,7 @@ export default function LabelsPage() {
     () => ({
       items: (items.data ?? []).map((i) => ({ id: i.id, code: i.sku, title: i.name, subtitle: i.category })),
       locations: locations.map((l) => ({ id: l.id, code: l.code || l.name, title: l.path, subtitle: l.code ? l.name : "" })),
-      units: (units.data?.units ?? []).map((u) => ({ id: u.id, code: u.code, title: u.itemName, subtitle: [u.lot && `Lot ${u.lot}`, `${u.quantity.toLocaleString()}`].filter(Boolean).join(" · ") })),
+      units: (units.data?.units ?? []).map((u) => ({ id: u.id, code: u.code, title: u.itemName, subtitle: [u.lot && `Lot ${u.lot}`, formatQty(u.quantity, u.uom)].filter(Boolean).join(" · ") })),
     }),
     [items.data, locations, units.data],
   );

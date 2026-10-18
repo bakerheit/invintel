@@ -3,6 +3,7 @@ import {
   movementTypeSchema,
   objectIdSchema,
   reverseInputSchema,
+  uomOf,
   type ActivityEntry,
   type ActivityPage,
 } from "@invintel/shared";
@@ -84,14 +85,19 @@ export function createActivityRoutes(store: Store) {
 
     const page = rows.slice(0, limit);
     const itemIds = [...new Set(page.map((m) => m.itemId.toHexString()))].map((id) => new ObjectId(id));
-    const items = await store.items.find({ _id: { $in: itemIds } }, { projection: { sku: 1, name: 1 } }).toArray();
-    const itemById = new Map<string, { sku: string; name: string }>(items.map((i) => [i._id.toHexString(), i]));
+    const items = await store.items.find({ _id: { $in: itemIds } }, { projection: { sku: 1, name: 1, unit: 1, decimals: 1 } }).toArray();
+    const itemById = new Map<string, { sku: string; name: string; unit?: string; decimals?: number }>(items.map((i) => [i._id.toHexString(), i]));
 
     // Deleted items and locations keep their names in the ledger: the audit log remembers them.
     const missingItems = itemIds.filter((id) => !itemById.has(id.toHexString())).map((id) => id.toHexString());
     if (missingItems.length) {
       for (const e of await store.audit.find({ orgId, action: "item.deleted", "entity.id": { $in: missingItems } }).toArray()) {
-        itemById.set(e.entity.id, { sku: String(e.snapshot?.sku ?? ""), name: `${e.snapshot?.name ?? "Deleted item"} (deleted)` });
+        itemById.set(e.entity.id, {
+          sku: String(e.snapshot?.sku ?? ""),
+          name: `${e.snapshot?.name ?? "Deleted item"} (deleted)`,
+          unit: typeof e.snapshot?.unit === "string" ? e.snapshot.unit : undefined,
+          decimals: typeof e.snapshot?.decimals === "number" ? e.snapshot.decimals : undefined,
+        });
       }
     }
     const missingLocations = [...new Set(page.map((m) => m.locationId.toHexString()))].filter((id) => !locations.byId.has(id));
@@ -112,6 +118,7 @@ export function createActivityRoutes(store: Store) {
         itemId: m.itemId.toHexString(),
         itemSku: item?.sku ?? "",
         itemName: item?.name ?? "Deleted item",
+        uom: uomOf(item),
         locationId: m.locationId.toHexString(),
         locationName: loc?.name ?? deletedLocation.get(m.locationId.toHexString()) ?? "Deleted location",
         locationPath: loc ? locations.pathOf(m.locationId.toHexString()) : (deletedLocation.get(m.locationId.toHexString()) ?? "Deleted location"),

@@ -1,4 +1,4 @@
-import type { LocationType } from "@invintel/shared";
+import { formatQty, type LocationType } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CheckCircle2, Circle, CircleDollarSign, Download, History, Layers, Package, ScanLine, TriangleAlert, X } from "lucide-react";
 import { useState } from "react";
@@ -157,8 +157,8 @@ export default function OverviewPage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-3">
                       <span className="tabular-nums text-muted-foreground">
-                        {a.quantity.toLocaleString()}
-                        {a.reorderLevel > 0 && <> / {a.reorderLevel.toLocaleString()}</>}
+                        {formatQty(a.quantity, a.uom)}
+                        {a.reorderLevel > 0 && <> / {formatQty(a.reorderLevel, a.uom, { unit: false })}</>}
                       </span>
                       <Badge variant={a.status === "out" ? "destructive" : "secondary"}>{a.status === "out" ? "Out" : "Low"}</Badge>
                     </div>
@@ -214,7 +214,7 @@ export default function OverviewPage() {
                     <p className="truncate"><span className="font-medium">{e.itemName}</span> <span className="text-muted-foreground">· {e.locationName}</span></p>
                     <p className="truncate text-xs text-muted-foreground">{e.userName} · {formatRelative(e.createdAt)}</p>
                   </div>
-                  <span className={cn("shrink-0 tabular-nums font-medium", e.delta < 0 && "text-muted-foreground")}>{e.delta > 0 ? "+" : ""}{e.delta.toLocaleString()}</span>
+                  <span className={cn("shrink-0 tabular-nums font-medium", e.delta < 0 && "text-muted-foreground")}>{formatQty(e.delta, e.uom, { sign: true })}</span>
                 </li>
               ))}
             </ul>

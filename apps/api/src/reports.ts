@@ -1,7 +1,7 @@
 import type {
   AbcClass, AgingBucket, AgingReport, AgingRow, CountAccuracyReport, CountScheduleReport, CountScheduleRow, ItemAccuracy, LocationAccuracy,
 } from "@invintel/shared";
-import { lineValueCents } from "@invintel/shared";
+import { lineValueCents, uomOf } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { csvNumber, csvText } from "./csv.js";
@@ -50,7 +50,7 @@ export async function agingReport(store: Store, orgId: ObjectId, now = new Date(
     rows.push({
       itemId: item._id.toHexString(), sku: item.sku, name: item.name, locationId: s.locationId.toHexString(),
       locationPath: idx.byId.has(s.locationId.toHexString()) ? idx.pathOf(s.locationId.toHexString()) : "Deleted location",
-      quantity: s.quantity, valueCents: lineValueCents(s.quantity, item.unitCostCents, item.decimals ?? 0), lastMovementAt: at.toISOString(), daysSince,
+      uom: uomOf(item), quantity: s.quantity, valueCents: lineValueCents(s.quantity, item.unitCostCents, item.decimals ?? 0), lastMovementAt: at.toISOString(), daysSince,
       onActiveBom: wanted.has(item._id.toHexString()), bucket: bucketOf(daysSince).label,
     });
   }
