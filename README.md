@@ -138,6 +138,8 @@ Organizations (session required):
 | PATCH  | `/api/orgs/:orgId` | rename (admin) |
 | POST   | `/api/orgs/:orgId/join-code` | rotate the join code (admin) |
 | GET    | `/api/orgs/:orgId/members` | members and roles |
+| PATCH  | `/api/orgs/:orgId/members/:userId` | `{ role: "admin" \| "member" }` (owner only) |
+| DELETE | `/api/orgs/:orgId/members/:userId` | remove a member, or leave yourself (the owner can't) |
 
 Under `/api/orgs/:orgId` (members only):
 
