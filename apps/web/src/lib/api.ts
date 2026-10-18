@@ -1,4 +1,8 @@
 import type {
+  Alert,
+  AlertSettings,
+  AlertsResponse,
+  DigestPreview,
   DowntimeEvent,
   DowntimeSettings,
   DowntimeSummary,
@@ -178,6 +182,12 @@ export const api = {
   startDowntime: (orgId: string, workCenterId: string, reason: string, note = "") =>
     request<DowntimeEvent>(`/orgs/${orgId}/production/downtime/start`, post({ workCenterId, reason, note })),
   endDowntime: (orgId: string, id: string) => request<DowntimeEvent>(`/orgs/${orgId}/production/downtime/${id}/end`, post({})),
+  alerts: (orgId: string) => request<AlertsResponse>(`/orgs/${orgId}/alerts`),
+  alertDigest: (orgId: string) => request<DigestPreview>(`/orgs/${orgId}/alerts/digest`),
+  alertSettings: (orgId: string) => request<AlertSettings>(`/orgs/${orgId}/alerts/settings`),
+  saveAlertSettings: (orgId: string, s: AlertSettings) => request<AlertSettings>(`/orgs/${orgId}/alerts/settings`, { method: "PUT", body: body(s) }),
+  alertAction: (orgId: string, action: "acknowledge" | "reopen" | { snooze: number }, key: string) =>
+    typeof action === "string" ? request<Alert>(`/orgs/${orgId}/alerts/${action}`, post({ key })) : request<Alert>(`/orgs/${orgId}/alerts/snooze`, post({ key, days: action.snooze })),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 

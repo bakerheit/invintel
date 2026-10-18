@@ -29,6 +29,7 @@ export interface OrgDoc {
   /** Downtime: the pick-list and the hours a machine is meant to run each day. Defaults apply when absent. */
   downtimeReasons?: string[];
   scheduledHoursPerDay?: number;
+  alertSettings?: { daysOfSupply: number; machineDownMinutes: number };
   approvalRules?: { kind: "adjustment" | "purchase_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
@@ -261,6 +262,16 @@ export interface DowntimeDoc {
   endedBy?: { id: ObjectId; name: string };
 }
 
+export interface AlertStateDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  key: string;
+  state: "acknowledged" | "snoozed";
+  until?: Date;
+  by: { id: ObjectId; name: string };
+  at: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -282,6 +293,7 @@ export interface Store {
   counts: Collection<CountDoc>;
   approvals: Collection<ApprovalDoc>;
   downtime: Collection<DowntimeDoc>;
+  alertStates: Collection<AlertStateDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -317,6 +329,7 @@ export async function connect(
     counts: db.collection("counts"),
     approvals: db.collection("approvals"),
     downtime: db.collection("downtime"),
+    alertStates: db.collection("alert_states"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -370,6 +383,7 @@ export async function connect(
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.approvals.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.alertStates.createIndex({ orgId: 1, key: 1 }, { unique: true }),
     store.downtime.createIndex({ orgId: 1, workCenterId: 1, startedAt: -1 }),
     // One machine can only be down once at a time.
     store.downtime.createIndex({ orgId: 1, workCenterId: 1 }, { unique: true, partialFilterExpression: { open: true } }),

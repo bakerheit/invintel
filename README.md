@@ -86,6 +86,12 @@ API under `/api/orgs/:orgId/approvals`: `GET /rules`, `PUT /rules`, `GET /`, `GE
 
 API under `/api/orgs/:orgId/production/downtime`: `GET /settings`, `PUT /settings`, `POST /start`, `POST /:id/end`, `GET /` (`?open=1`, `?workCenterId=`), `GET /summary?days=`.
 
+### Alerts and digests
+
+**Alerts** (sidebar, with a count badge) lists what needs attention right now, computed fresh each time from stock, purchase orders, the count schedule and downtime: out of stock, low stock, "runs out in N days" at the last 30 days' production usage, late purchase orders, places overdue for a count, and machines down too long. Anyone can acknowledge (shared, with their name), snooze for 1 or 7 days, or reopen. An acknowledgement belongs to the problem: fix it and it disappears, and if it happens again it is a new alert. The page also shows a **daily digest preview**, the exact text an email or chat message would carry (nothing is sent: that needs an outside account). Admins set the days-of-supply and machine-down thresholds.
+
+API under `/api/orgs/:orgId/alerts`: `GET /`, `GET /digest`, `GET|PUT /settings`, `POST /acknowledge|snooze|reopen` (`{ key }`, snooze also `{ days }`). Every change is in the audit log.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:

@@ -1,6 +1,6 @@
 import type { OrgModules, OrgSummary } from "@invintel/shared";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
+import { BarChart3, Bell, Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -51,6 +51,7 @@ export const navItems = (orgId: string): NavItem[] => [
   { to: `/o/${orgId}/counts`, end: false, label: "Counts", icon: ClipboardCheck, adminOnly: false },
   { to: `/o/${orgId}/purchasing`, end: false, label: "Purchasing", icon: ShoppingCart, adminOnly: false, module: "purchasing" },
   { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false, module: "production" },
+  { to: `/o/${orgId}/alerts`, end: false, label: "Alerts", icon: Bell, adminOnly: false },
   { to: `/o/${orgId}/approvals`, end: false, label: "Approvals", icon: ShieldCheck, adminOnly: false },
   { to: `/o/${orgId}/reports`, end: false, label: "Reports", icon: BarChart3, adminOnly: false },
   { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History, adminOnly: false },
@@ -176,6 +177,8 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
   // A number next to Approvals when something is waiting for this person to decide.
   const pending = useQuery({ queryKey: orgKey(org.id, "approvals", "pending-count"), queryFn: () => api.pendingApprovals(org.id), enabled: isAdmin(org.role), refetchInterval: 30_000 });
 
+  const alerts = useQuery({ queryKey: orgKey(org.id, "alerts", "open-count"), queryFn: () => api.alerts(org.id), refetchInterval: 60_000 });
+
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="gap-3">
@@ -197,6 +200,9 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
                   >
                     <Icon />
                     <span>{label}</span>
+                    {label === "Alerts" && (alerts.data?.open.total ?? 0) > 0 && (
+                      <span className={`ml-auto rounded-full px-1.5 text-xs font-semibold ${alerts.data!.open.critical ? "bg-destructive text-white" : "bg-sidebar-primary text-sidebar-primary-foreground"}`} aria-label={`${alerts.data!.open.total} open`}>{alerts.data!.open.total}</span>
+                    )}
                     {label === "Approvals" && (pending.data?.count ?? 0) > 0 && (
                       <span className="ml-auto rounded-full bg-sidebar-primary px-1.5 text-xs font-semibold text-sidebar-primary-foreground" aria-label={`${pending.data!.count} waiting`}>{pending.data!.count}</span>
                     )}

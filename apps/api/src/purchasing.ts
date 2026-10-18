@@ -42,7 +42,7 @@ async function receivedByOrder(store: Store, orderIds: ObjectId[]) {
   return out;
 }
 
-async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<PurchaseOrder[]> {
+export async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<PurchaseOrder[]> {
   if (!docs.length) return [];
   const [suppliers, items, received] = await Promise.all([
     store.suppliers.find({ _id: { $in: docs.map((d) => d.supplierId) } }).toArray(),
@@ -87,7 +87,7 @@ async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<Purchas
 }
 
 const poEntity = (d: { _id: ObjectId; number: string }) => ({ type: "purchase_order" as const, id: d._id.toHexString(), label: d.number });
-const isOpen = (o: PurchaseOrder) => o.status === "ordered" || o.status === "partial";
+export const isOpen = (o: PurchaseOrder) => o.status === "ordered" || o.status === "partial";
 
 /** Places a draft order without a request context. Used when an approval is granted. */
 export async function placeOrderDirect(store: Store, orgId: ObjectId, orderId: ObjectId, user: { id: string; name: string }, via: string): Promise<{ ok: true } | { ok: false; error: string }> {
