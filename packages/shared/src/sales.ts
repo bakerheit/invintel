@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalAddressSchema, type Address } from "./address.js";
 import { MAX_QTY, type Uom } from "./units.js";
 
 // INV-15: sales orders. A customer's order, with stock RESERVED for it when it is confirmed, and shipped through the ledger.
@@ -26,6 +27,9 @@ const soFields = {
   customerRef: z.string().trim().max(80),
   requestedDate: day.nullable(),
   note: z.string().trim().max(1000),
+  /** Where the invoice goes and where the goods go (INV-18). Left out: the customer partner's own. */
+  billTo: optionalAddressSchema,
+  shipTo: optionalAddressSchema,
   lines: z.array(soLineInputSchema).min(1, "Add at least one line").max(100),
 };
 export const salesOrderInputSchema = z
@@ -36,6 +40,8 @@ export const salesOrderInputSchema = z
     customerRef: soFields.customerRef.default(""),
     requestedDate: soFields.requestedDate.default(null),
     note: soFields.note.default(""),
+    billTo: soFields.billTo,
+    shipTo: soFields.shipTo,
   })
   .refine((o) => o.customerPartnerId !== null || o.customerName !== "", { message: "Say who the customer is", path: ["customerName"] });
 export type SalesOrderInput = z.input<typeof salesOrderInputSchema>;
@@ -117,6 +123,8 @@ export interface SalesOrder {
   messageId: string | null;
   requestedDate: string | null;
   note: string;
+  billTo: Address | null;
+  shipTo: Address | null;
   lines: SalesOrderLine[];
   totalCents: number;
   /** Stock that can't be promised in full right now (confirmed lines where available is below zero). */

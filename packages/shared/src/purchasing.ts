@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { addressSchema, optionalAddressSchema, type Address } from "./address.js";
 import { MAX_QTY, type Uom } from "./units.js";
 
 const id = z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id");
@@ -11,6 +12,8 @@ const supplierFields = {
   email: z.string().trim().max(200),
   phone: z.string().trim().max(40),
   notes: z.string().trim().max(1000),
+  /** Their address (INV-18): printed on purchase orders and written into EDI orders. Blank means none. */
+  address: optionalAddressSchema,
 };
 export const supplierInputSchema = z.object({
   ...supplierFields,
@@ -18,9 +21,11 @@ export const supplierInputSchema = z.object({
   email: supplierFields.email.default(""),
   phone: supplierFields.phone.default(""),
   notes: supplierFields.notes.default(""),
+  address: supplierFields.address,
 });
 export type SupplierInput = z.input<typeof supplierInputSchema>;
 export const supplierUpdateSchema = z.object(supplierFields).partial();
+void addressSchema;
 
 export interface Supplier {
   id: string;
@@ -29,6 +34,7 @@ export interface Supplier {
   email: string;
   phone: string;
   notes: string;
+  address: Address | null;
   /** Orders that are placed and not yet fully received. */
   openOrders: number;
   createdAt: string;

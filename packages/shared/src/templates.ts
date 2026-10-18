@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { addressSchema } from "./address.js";
 
 // INV-17: document templates. Every document we produce (purchase order, sales order confirmation, packing slip, invoice) is drawn from
 // the organization's letterhead (company) and a template for that kind of document, optionally adjusted for one trading partner.
@@ -32,7 +33,10 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a colour like #1d4ed8");
 export const companyProfileSchema = z.object({
   /** Leave empty to use the organization's name. */
   name: line(100).default(""),
+  /** Printed lines (the older way to give an address). The structured `address` below wins when it is filled in. */
   addressLines: z.array(line(80)).max(5).default([]),
+  /** Our own address, structured: printed on documents and written into EDI documents (N1/N3/N4). */
+  address: addressSchema.default(addressSchema.parse({})),
   phone: line(40).default(""),
   email: line(120).default(""),
   website: line(120).default(""),
@@ -119,6 +123,8 @@ export const canonicalSalesConfirmationSchema = z.object({
   issuedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   customerName: z.string().max(200),
   customerRef: z.string().max(80).default(""),
+  billTo: addressSchema.optional(),
+  shipTo: addressSchema.optional(),
   requestedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
   note: z.string().max(1000).default(""),
   currency: z.string().length(3).default("USD"),

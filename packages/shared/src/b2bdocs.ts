@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { addressSchema } from "./address.js";
 
 // The canonical documents Invintel keeps for business-to-business exchange. Every bridge and every standard (PDF and
 // email, X12, cXML, UBL) is rendered FROM these and parsed INTO these, so the purchase order code never needs to know
@@ -12,8 +13,10 @@ export const canonicalOrderSchema = z.object({
   /** Counts up when a placed order changes; 1 for the first send. */
   revision: z.number().int().min(1).default(1),
   issuedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  buyer: z.object({ name: z.string().max(200) }),
-  supplier: z.object({ name: z.string().max(200), contact: z.string().max(200).default(""), email: z.string().max(200).default("") }),
+  buyer: z.object({ name: z.string().max(200), address: addressSchema.optional() }),
+  supplier: z.object({ name: z.string().max(200), contact: z.string().max(200).default(""), email: z.string().max(200).default(""), address: addressSchema.optional() }),
+  /** Where the goods are delivered (INV-18). Absent: not said. */
+  shipTo: addressSchema.optional(),
   /** Invintel doesn't model currency yet: amounts are in the organization's currency, shown as USD. */
   currency: z.string().length(3).default("USD"),
   expectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
@@ -125,6 +128,8 @@ export const canonicalShipNoticeSchema = z.object({
   /** Who is shipping and to whom, for the packing slip. */
   shipper: z.string().max(100).optional(),
   customerName: z.string().max(200).optional(),
+  shipTo: addressSchema.optional(),
+  billTo: addressSchema.optional(),
 });
 export type CanonicalShipNotice = z.infer<typeof canonicalShipNoticeSchema>;
 
@@ -145,6 +150,8 @@ export const canonicalInvoiceSchema = z.object({
   totalCents: z.number().int().min(0),
   /** For the PDF (INV-17): who it is for, what the tax is called, which shipment it covers, and who issued it. Optional: X12 doesn't carry them. */
   billTo: z.string().max(200).optional(),
+  billToAddress: addressSchema.optional(),
+  shipToAddress: addressSchema.optional(),
   taxLabel: z.string().max(20).optional(),
   shipmentNo: z.string().max(40).optional(),
   shipper: z.string().max(100).optional(),

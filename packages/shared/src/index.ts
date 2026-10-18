@@ -739,3 +739,4 @@ export * from "./archive.js";
 export * from "./exchange.js";
 export * from "./sales.js";
 export * from "./templates.js";
+export * from "./address.js";
