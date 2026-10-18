@@ -5,8 +5,9 @@
 import { createApp } from "./app.js";
 import { connect } from "./db.js";
 
-const DEMO_EMAIL = "demo@invintel.local";
-const DEMO_PASSWORD = "invintel-demo-2026";
+// A different account can be seeded with DEMO_EMAIL and DEMO_PASSWORD in the environment (used for a shared demo, so the password in this file is never the one that is exposed).
+const DEMO_EMAIL = process.env.DEMO_EMAIL ?? "demo@invintel.local";
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? "invintel-demo-2026";
 
 const store = await connect();
 const app = createApp(store, { allowRegistration: true, cookieSecure: false });
