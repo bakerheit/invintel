@@ -61,6 +61,10 @@ export const WEBHOOK_EVENTS = [
   "approval.rejected",
   "import.applied",
   "import.undone",
+  "invoice.approved",
+  "invoice.voided",
+  "payment.recorded",
+  "shipment.received",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 

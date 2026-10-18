@@ -33,7 +33,9 @@ export interface OrgDoc {
   downtimeReasons?: string[];
   scheduledHoursPerDay?: number;
   alertSettings?: { daysOfSupply: number; machineDownMinutes: number };
-  approvalRules?: { kind: "adjustment" | "purchase_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
+  /** Invoice matching rules and the currency the books are kept in. Defaults apply when absent. */
+  invoiceSettings?: { currency: string; priceTolerancePct: number; qtyTolerancePct: number; totalToleranceCents: number };
+  approvalRules?: { kind: "adjustment" | "purchase_order" | "invoice" | "supplier_payment_details"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
 
@@ -152,6 +154,8 @@ export interface MovementDoc {
   reversedBy?: ObjectId;
   /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
   purchaseOrderId?: ObjectId;
+  /** Receipts made against a shipment (an advance ship notice) carry it too. */
+  shipmentId?: ObjectId;
   createdAt: Date;
 }
 
@@ -229,6 +233,8 @@ export interface SupplierDoc {
   email: string;
   phone: string;
   notes: string;
+  /** Where this supplier is paid: the last four digits and a description, never a full account number. */
+  paymentDetails?: { method: "bank_transfer" | "check" | "card" | "cash" | "other"; accountName: string; bankName: string; accountLast4: string; instructions: string };
   createdAt: Date;
 }
 
@@ -265,13 +271,13 @@ export interface ApprovalDoc {
   _id: ObjectId;
   orgId: ObjectId;
   number: string;
-  kind: "adjustment" | "purchase_order";
+  kind: "adjustment" | "purchase_order" | "invoice" | "supplier_payment_details";
   status: "pending" | "approved" | "rejected" | "cancelled" | "failed";
   summary: string;
   valueCents: number;
   /** What to do when approved. Kept as plain ids and numbers. */
-  payload: { itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId };
-  subject: { type: "item" | "purchase_order"; id: string; label: string };
+  payload: { itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId; invoiceId?: ObjectId; supplierId?: ObjectId; paymentDetails?: NonNullable<SupplierDoc["paymentDetails"]>; overrideReason?: string };
+  subject: { type: "item" | "purchase_order" | "invoice" | "supplier"; id: string; label: string };
   requestedBy: { id: ObjectId; name: string };
   requestedAt: Date;
   decidedBy?: { id: ObjectId; name: string };
@@ -347,6 +353,93 @@ export interface WebhookDeliveryDoc {
   error?: string;
   createdAt: Date;
   deliveredAt?: Date;
+}
+
+export interface InvoiceLineDoc {
+  itemId: ObjectId | null;
+  description: string;
+  quantity: number;
+  unitPriceCents: number;
+  taxCents: number;
+}
+
+/** A bill from a supplier. Totals are worked out from the lines, never taken from the client. */
+export interface InvoiceDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** INVC-0001, ours. */
+  number: string;
+  status: "draft" | "review" | "approved" | "paid" | "void";
+  supplierId: ObjectId;
+  purchaseOrderId: ObjectId | null;
+  /** The supplier's own number. Unique per supplier among invoices that aren't void. */
+  invoiceNumber: string;
+  /** invoiceNumber, trimmed and upper-cased, for the duplicate check. */
+  invoiceKey: string;
+  issueDate: string;
+  dueDate: string | null;
+  currency: string;
+  lines: InvoiceLineDoc[];
+  subtotalCents: number;
+  taxCents: number;
+  freightCents: number;
+  totalCents: number;
+  statedTotalCents: number | null;
+  note: string;
+  /** Paid so far, kept in step by payments (atomically), never recomputed from a guess. */
+  paidCents: number;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+  approvedBy?: { id: ObjectId; name: string };
+  approvedAt?: Date;
+  overrideReason?: string;
+  voidReason?: string;
+  /** A waiting approval request for it (INV-7), if the organization's rules ask for one. */
+  approvalId?: ObjectId;
+  /** What the last match found. Kept so lists don't re-run it for every row, and so an approved invoice remembers what it was approved against. */
+  match?: import("@invintel/shared").MatchResult;
+}
+
+export interface ShipmentDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** SHP-0001, ours. */
+  number: string;
+  status: "expected" | "cancelled";
+  supplierId: ObjectId;
+  purchaseOrderId: ObjectId | null;
+  reference: string;
+  /** reference, trimmed and upper-cased, unique per supplier. */
+  referenceKey: string;
+  shipDate: string | null;
+  expectedDate: string | null;
+  carrier: string;
+  tracking: string;
+  lines: { itemId: ObjectId; quantity: number; supplierLot: string }[];
+  note: string;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+}
+
+export interface PaymentDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** PAY-0001, ours. */
+  number: string;
+  supplierId: ObjectId;
+  method: "bank_transfer" | "check" | "card" | "cash" | "other";
+  paidOn: string;
+  reference: string;
+  note: string;
+  currency: string;
+  amountCents: number;
+  allocations: { invoiceId: ObjectId; amountCents: number }[];
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  voidedAt?: Date;
+  voidedBy?: { id: ObjectId; name: string };
+  voidReason?: string;
 }
 
 export interface AlertStateDoc {
@@ -431,6 +524,9 @@ export interface Store {
   alertStates: Collection<AlertStateDoc>;
   importBatches: Collection<ImportBatchDoc>;
   apiKeys: Collection<ApiKeyDoc>;
+  invoices: Collection<InvoiceDoc>;
+  shipments: Collection<ShipmentDoc>;
+  payments: Collection<PaymentDoc>;
   webhooks: Collection<WebhookDoc>;
   webhookDeliveries: Collection<WebhookDeliveryDoc>;
   counters: Collection<{ _id: string; seq: number }>;
@@ -473,6 +569,9 @@ export async function connect(
     alertStates: db.collection("alert_states"),
     importBatches: db.collection("import_batches"),
     apiKeys: db.collection("api_keys"),
+    invoices: db.collection("invoices"),
+    shipments: db.collection("shipments"),
+    payments: db.collection("payments"),
     webhooks: db.collection("webhooks"),
     webhookDeliveries: db.collection("webhook_deliveries"),
     counters: db.collection("counters"),
@@ -539,6 +638,17 @@ export async function connect(
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, at: -1 }),
+    store.invoices.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.invoices.createIndex({ orgId: 1, supplierId: 1, invoiceKey: 1 }),
+    store.invoices.createIndex({ orgId: 1, purchaseOrderId: 1 }, { sparse: true }),
+    store.invoices.createIndex({ orgId: 1, status: 1, dueDate: 1 }),
+    store.shipments.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.shipments.createIndex({ orgId: 1, supplierId: 1, referenceKey: 1 }, { unique: true }),
+    store.shipments.createIndex({ orgId: 1, purchaseOrderId: 1 }, { sparse: true }),
+    store.payments.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.payments.createIndex({ orgId: 1, supplierId: 1, paidOn: -1 }),
+    store.payments.createIndex({ "allocations.invoiceId": 1 }),
+    store.movements.createIndex({ shipmentId: 1 }, { sparse: true }),
     store.apiKeys.createIndex({ prefix: 1 }),
     store.apiKeys.createIndex({ orgId: 1, createdAt: -1 }),
     store.webhooks.createIndex({ orgId: 1, enabled: 1 }),

@@ -32,6 +32,9 @@ import { createReportRoutes } from "./reports.js";
 import { createPurchasingRoutes } from "./purchasing.js";
 import { keyPermits, createApiKeyRoutes } from "./api-keys.js";
 import { createWebhookRoutes } from "./webhook-routes.js";
+import { createInvoiceRoutes } from "./invoices.js";
+import { createPaymentRoutes } from "./payments.js";
+import { createShipmentRoutes } from "./shipments.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
 import {
   createOrganization,
@@ -172,6 +175,9 @@ export function createOrgRoutes(store: Store) {
     return c.json(members);
   });
 
+  scoped.route("/invoices", createInvoiceRoutes(store));
+  scoped.route("/payments", createPaymentRoutes(store));
+  scoped.route("/shipments", createShipmentRoutes(store));
   scoped.route("/api-keys", createApiKeyRoutes(store));
   scoped.route("/webhooks", createWebhookRoutes(store));
   scoped.route("/alerts", createAlertRoutes(store));
