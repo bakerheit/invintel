@@ -141,11 +141,13 @@ export default function OverviewPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle>Latest activity</CardTitle>
-          <Link to={`/o/${orgId}/activity`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-            <History /> All activity
-          </Link>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Latest activity</CardTitle>
+            <Link to={`/o/${orgId}/activity`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+              <History /> All activity
+            </Link>
+          </div>
         </CardHeader>
         <CardContent>
           {!entries.length ? (

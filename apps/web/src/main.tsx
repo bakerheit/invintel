@@ -18,6 +18,7 @@ import LookupPage from "./pages/floor/lookup";
 import MovePage from "./pages/floor/move";
 import ReceivePage from "./pages/floor/receive";
 import InventoryPage from "./pages/inventory";
+import ItemDetailPage from "./pages/item-detail";
 import OverviewPage from "./pages/overview";
 import LocationsPage from "./pages/locations";
 import LoginPage from "./pages/login";
@@ -67,6 +68,7 @@ createRoot(document.getElementById("root")!).render(
             <Route element={<AppShell />}>
               <Route index element={<OverviewPage />} />
               <Route path="inventory" element={<InventoryPage />} />
+              <Route path="inventory/:itemId" element={<ItemDetailPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />

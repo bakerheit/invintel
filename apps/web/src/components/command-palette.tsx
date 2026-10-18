@@ -6,7 +6,6 @@ import { navItems } from "@/components/app-sidebar";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { orgKey, useCurrentOrg, useLocations } from "@/lib/org";
-import { useUi } from "@/stores/ui";
 import { cn } from "@/lib/utils";
 
 interface Hit {
@@ -24,7 +23,6 @@ const MAX_PER_GROUP = 6;
 export function CommandPalette() {
   const org = useCurrentOrg();
   const navigate = useNavigate();
-  const setSearch = useUi((s) => s.setSearch);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -61,7 +59,7 @@ export function CommandPalette() {
       .map((i) => ({
         key: `i${i.id}`, group: "Items" as const, label: i.name, hint: `${i.sku} · ${i.quantity.toLocaleString()} on hand`,
         icon: <Package className="size-4" />,
-        run: () => { setSearch(i.sku); navigate(`/o/${org.id}/inventory`); },
+        run: () => void navigate(`/o/${org.id}/inventory/${i.id}`),
       }));
     const locationHits: Hit[] = locations
       .filter((l) => [l.name, l.path, l.code].some((t) => t.toLowerCase().includes(q)))
@@ -71,7 +69,7 @@ export function CommandPalette() {
         icon: <MapPin className="size-4" />, run: go(`/o/${org.id}/inventory?location=${l.id}`),
       }));
     return [...pages, ...itemHits, ...locationHits];
-  }, [query, items.data, locations, navigate, org.id, org.role, setSearch]);
+  }, [query, items.data, locations, navigate, org.id, org.role]);
 
   useEffect(() => setActive(0), [query]);
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [active]);

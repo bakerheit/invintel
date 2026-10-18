@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, History, MoreHorizontal, Pencil, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,7 +84,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         sortingFn: (a, b) => a.original.name.localeCompare(b.original.name),
         cell: ({ row }) => (
           <div className="min-w-0">
-            <div className="truncate font-medium">{row.original.name}</div>
+            <Link to={`/o/${org.id}/inventory/${row.original.id}`} className="block truncate font-medium hover:underline">{row.original.name}</Link>
             <div className="truncate font-mono text-xs text-muted-foreground">{row.original.sku}</div>
           </div>
         ),
