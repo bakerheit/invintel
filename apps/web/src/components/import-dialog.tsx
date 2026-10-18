@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { invalidateOrg, orgKey } from "@/lib/org";
+import { problemRowsCsv } from "@/lib/import-csv";
 import { cn } from "@/lib/utils";
 
 const STATUS: Record<ImportRowStatus, { label: string; className: string }> = {
@@ -23,15 +24,6 @@ const MODES: { value: ImportMode; label: string; hint: string }[] = [
   { value: "update", label: "Update existing items", hint: "Changes what the file fills in. Blank cells change nothing. Stock is never changed for existing items." },
   { value: "upsert", label: "Add and update", hint: "New SKUs are added, existing SKUs are updated." },
 ];
-
-/** A spreadsheet cell: quoted if it needs to be. */
-const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-
-/** The rows that had problems, with the original cells and a "problem" column, ready to fix and upload again. */
-export function problemRowsCsv(result: ImportResult): string {
-  const rows = result.rows.filter((r) => r.status === "error" && r.cells);
-  return [[...result.headers, "problem"], ...rows.map((r) => [...r.cells!, r.message])].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
-}
 
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
@@ -151,13 +143,13 @@ export function ImportDialog({ orgId, open, onOpenChange }: { orgId: string; ope
                   <div className="overflow-auto rounded-lg border">
                     <table className="w-full text-sm">
                       <thead className="bg-muted text-left text-xs text-muted-foreground">
-                        <tr><th className="p-2">Column in your file</th><th className="p-2">Example</th><th className="p-2">Use it as</th></tr>
+                        <tr><th className="p-2">Column in your file</th><th className="hidden p-2 sm:table-cell">Example</th><th className="p-2">Use it as</th></tr>
                       </thead>
                       <tbody className="divide-y">
                         {preview.headers.map((h, i) => (
                           <tr key={i}>
                             <td className="p-2 font-medium">{h || <span className="text-muted-foreground">(no heading)</span>}</td>
-                            <td className="max-w-48 truncate p-2 text-muted-foreground">{preview.sample.map((r) => r[i]).find((v) => v) ?? ""}</td>
+                            <td className="hidden max-w-48 truncate p-2 text-muted-foreground sm:table-cell">{preview.sample.map((r) => r[i]).find((v) => v) ?? ""}</td>
                             <td className="p-2">
                               <select
                                 aria-label={`Use ${h || `column ${i + 1}`} as`}

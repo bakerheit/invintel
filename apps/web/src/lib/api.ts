@@ -49,6 +49,7 @@ import type {
   UnitsPosted,
   AuditPage,
   AuditVerification,
+  ArchiveRestoreResult,
   ImportBatch,
   ImportInput,
   ImportUndoResult,
@@ -155,6 +156,14 @@ export const api = {
     const data = await res.json().catch(() => ({}));
     if (res.ok || (res.status === 422 && Array.isArray(data.rows))) return data as ImportResult;
     throw new Error(typeof data.error === "string" ? data.error : "Import failed");
+  },
+  restoreArchive: async (orgId: string, archive: unknown, dryRun: boolean): Promise<ArchiveRestoreResult> => {
+    const res = await fetch(`/api/orgs/${orgId}/data/archive/restore`, {
+      method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ archive, dryRun }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return data as ArchiveRestoreResult;
+    throw new Error(typeof data.error === "string" ? data.error : "Restore failed");
   },
   listImports: (orgId: string) => request<ImportBatch[]>(`/orgs/${orgId}/data/imports`),
   undoImport: async (orgId: string, id: string): Promise<ImportUndoResult> => {
