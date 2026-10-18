@@ -92,6 +92,10 @@ API under `/api/orgs/:orgId/production/downtime`: `GET /settings`, `PUT /setting
 
 API under `/api/orgs/:orgId/alerts`: `GET /`, `GET /digest`, `GET|PUT /settings`, `POST /acknowledge|snooze|reopen` (`{ key }`, snooze also `{ days }`). Every change is in the audit log.
 
+### Colours
+
+The sidebar (and the frame around the page) uses the same gradient as the sign-in page. The account menu (bottom of the sidebar) has a **Colour** choice: Pink (default), Ocean, Forest, Sunset, Grape and Graphite. A colour recolours the sidebar gradient, buttons and highlights; the main area stays a neutral dark (or white in light mode). The choice is remembered per browser. To add a colour, add an entry to `PALETTES` in `apps/web/src/lib/theme.tsx` and a matching `:root[data-palette="..."]` pair at the bottom of `apps/web/src/index.css`.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:
@@ -215,6 +219,28 @@ Things to know:
 - `pnpm test` run the API tests (Vitest, needs `docker compose up -d`; uses a throwaway database)
 - `pnpm build` typecheck the API and build the web app
 
+### Quality hold and NCR
+
+Anyone can **put stock on hold** so it can't be used: on the desk (**Quality**) or on the floor (**Floor mode > Quality hold**: scan a roll or pallet label, or an item, pick where and how many, tap a reason). Plain stock moves into an automatic **Quality hold** place; a labelled roll or pallet stays where it is and is marked on hold. Every hold is an **NCR** (NCR-0001, ...). Held stock can't be moved, adjusted, counted, loaded onto a machine or reversed from Activity: only an admin **decides** it, partly or all at once: **use as is / rework** (back to a place you pick, by default where it came from), **scrap** (with a reason from the scrap list) or **return to supplier**. Each decision is a ledger line tagged with the NCR and written to the audit log.
+
+**Inspect before release:** the floor Receive screen, the purchase-order receive dialog and the unit receive screen each have an "Inspect before release" switch; what arrives is received and goes straight on hold as "Awaiting inspection", tied to the order and the supplier lot. The same screens take an optional **supplier lot**, which is kept on the receipt's ledger line (and shown in Activity) for traceability. Admins edit the hold and scrap **reason lists** under Quality > Reason lists.
+
+API under `/api/orgs/:orgId`: `POST /quality/holds`, `GET /quality/ncrs?status=open|closed|all`, `GET /quality/ncrs/:id`, `POST /quality/ncrs/:id/dispose` (admin), `GET /quality/summary`, `GET|PUT /reasons` (PUT is admin).
+
+### Lot trace and mock recall
+
+**Reports > Lot trace and mock recall** follows a supplier lot, a roll or pallet label, or a work order **forward** (where did it go: the work orders that used it, what they made, where that is now and how much is still in stock) or **backward** (what went into this pallet or work order: the rolls, their lots, their receipts and orders). The answer is a tree you can read, a table of the affected stock with where it sits now, and a CSV. **Run as a mock recall** does the same trace, times it, keeps it in a history (who, when, how many units and work orders, how long it took) and writes it to the audit log, so a plant can show how fast it can answer a recall.
+
+The trace is read from the ledger, so it is exact for anything tracked by roll or pallet label and for lots you record at receiving. Plain stock has no lot after receiving, so links that pass through it are shown as **possible** (with a note and the likely receipts), never as fact. Stock on quality hold shows as held. The demo has a traceable chain: try lot `MILL-0712`.
+
+API under `/api/orgs/:orgId/traceability`: `GET /trace` and `GET /trace.csv` (`?lot=` with optional `itemId=`, or `?unit=`, or `?workOrder=`; `&direction=forward|backward`), `POST /drills` (same fields in the body), `GET /drills`.
+
+### Scrap and yield trends
+
+On the floor, anything scrapped now needs a **reason** from a short list: the Production tile asks "Why was it scrapped?" once the scrap count is above zero (material scrapped at Report usage, finished output scrapped at Report output), and scrap decided from a quality hold uses the same list. Admins edit the list under Quality > Reason lists. **Reports > Scrap and yield trends** (Production switch) shows, for the last 7, 30, 90 or 180 days and optionally one work center: scrap value (quantity x each item's current unit cost), **yield** (good output / good + scrapped output), the biggest reason, scrap with no reason, a bar chart by reason, a trend (per day, or per week from Monday for long windows), tables by work center (value, entries, good, scrapped, yield) and by material, where the scrap came from (material used, output, quality hold), and a CSV of every scrap entry. Scrap that was reversed in Activity is ignored.
+
+API: `GET /api/orgs/:orgId/production/scrap?days=7|30|90|180&workCenterId=` and `GET .../production/scrap/lines.csv`. `POST .../production/work-orders/:id/consume` and `/output` take an optional `scrapReason` (must be on the org's scrap list; stored on the ledger line as `reasonCode`).
+
 ## API
 
 Auth (no session needed except `/me`):
@@ -267,3 +293,11 @@ Under `/api/orgs/:orgId` (members only):
 ## License
 
 MIT
+
+## Running behind nginx
+
+`deploy/nginx/run-local.sh start` builds the web app and starts nginx (installed with `brew install nginx`) on port 8080, serving the built files and passing `/api` to the API on loopback (`API_PORT=3011 deploy/nginx/run-local.sh start` if the API isn't on 3001). One address serves both, so a phone on the same network can open `http://<this machine's address>:8080`. It has rate limits on sign-in and the API, basic security headers and long caching for built assets, and uses its own directory (`~/.invintel-nginx`), not nginx's global config. Use `LISTEN=127.0.0.1:8080` to keep it to this machine, and `stop` to turn it off.
+
+The API listens on 127.0.0.1 only (set `HOST` to change that), so everything goes through nginx or the Vite proxy. Behind a tunnel on this machine nginx takes each visitor's real address from `CF-Connecting-IP` (only when the connection is from loopback), so the sign-in limit is per person, not per tunnel. Set `BASIC_AUTH_FILE` to a htpasswd file to put a username and password in front of the whole site before sharing a link with anyone else.
+
+It speaks plain HTTP. Put TLS in front of it before anyone outside your own network uses it, and have Frida review it before it faces the internet.

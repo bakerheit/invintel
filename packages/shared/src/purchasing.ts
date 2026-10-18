@@ -92,13 +92,16 @@ export interface PurchaseOrder {
 
 export const poReceiveInputSchema = z.object({
   locationId: id,
-  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(MAX_QTY) })).min(1).max(100),
+  /** Inspect before release: everything received goes straight on quality hold. */
+  inspect: z.boolean().default(false),
+  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(MAX_QTY), supplierLot: z.string().trim().max(64).default('') })).min(1).max(100),
 });
 export type PoReceiveInput = z.input<typeof poReceiveInputSchema>;
 
 export interface PoReceiveResult {
   order: PurchaseOrder;
   movementIds: string[];
+  ncrs?: { id: string; number: string }[];
   /** Lines that now have more than was ordered. Allowed (suppliers over-ship), but flagged. */
   overReceived: { itemId: string; itemName: string; over: number }[];
 }

@@ -1,5 +1,5 @@
 import type { Location, LocationType } from "@invintel/shared";
-import { Factory, Layers, PackageCheck, Send, Truck, Warehouse, type LucideIcon } from "lucide-react";
+import { Factory, Layers, PackageCheck, Send, ShieldAlert, Truck, Warehouse, type LucideIcon } from "lucide-react";
 
 export const LOCATION_TYPE_META: Record<LocationType, { label: string; hint: string; icon: LucideIcon; className: string }> = {
   receiving: { label: "Receiving", hint: "Where deliveries arrive", icon: Truck, className: "bg-accent text-accent-foreground" },
@@ -8,6 +8,7 @@ export const LOCATION_TYPE_META: Record<LocationType, { label: string; hint: str
   production: { label: "Production", hint: "At a machine or line", icon: Factory, className: "bg-success-soft text-success" },
   finished: { label: "Finished goods", hint: "Ready to ship", icon: PackageCheck, className: "bg-success-soft text-success" },
   shipping: { label: "Shipping", hint: "Dock and staging for outbound", icon: Send, className: "bg-accent text-accent-foreground" },
+  quarantine: { label: "Quality hold", hint: "Stock waiting for a quality decision", icon: ShieldAlert, className: "bg-destructive/10 text-destructive dark:bg-destructive/20" },
 };
 
 export interface LocationNode {

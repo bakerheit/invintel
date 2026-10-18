@@ -1,6 +1,6 @@
 import type { OrgModules, OrgSummary } from "@invintel/shared";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, Bell, Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
+import { BarChart3, Bell, Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldAlert, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -32,7 +32,7 @@ import {
 import { api } from "@/lib/api";
 import { orgKey, isAdmin } from "@/lib/org";
 import { useQuery } from "@tanstack/react-query";
-import { type Theme, useTheme } from "@/lib/theme";
+import { PALETTES, type Palette, type Theme, useTheme } from "@/lib/theme";
 import { useAuth } from "@/stores/auth";
 
 const initials = (name: string) =>
@@ -51,6 +51,7 @@ export const navItems = (orgId: string): NavItem[] => [
   { to: `/o/${orgId}/counts`, end: false, label: "Counts", icon: ClipboardCheck, adminOnly: false },
   { to: `/o/${orgId}/purchasing`, end: false, label: "Purchasing", icon: ShoppingCart, adminOnly: false, module: "purchasing" },
   { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false, module: "production" },
+  { to: `/o/${orgId}/quality`, end: false, label: "Quality", icon: ShieldAlert, adminOnly: false },
   { to: `/o/${orgId}/alerts`, end: false, label: "Alerts", icon: Bell, adminOnly: false },
   { to: `/o/${orgId}/approvals`, end: false, label: "Approvals", icon: ShieldCheck, adminOnly: false },
   { to: `/o/${orgId}/reports`, end: false, label: "Reports", icon: BarChart3, adminOnly: false },
@@ -125,7 +126,7 @@ function OrgSwitcher({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] }) {
 
 function UserMenu() {
   const { user, logout } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, palette, setPalette } = useTheme();
   const { isMobile } = useSidebar();
   if (!user) return null;
   return (
@@ -158,6 +159,17 @@ function UserMenu() {
                 <DropdownMenuRadioItem value="light"><Sun /> Light</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="dark"><Moon /> Dark</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="system"><Monitor /> System</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Colour</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={palette} onValueChange={(v) => setPalette(v as Palette)}>
+                {PALETTES.map((p) => (
+                  <DropdownMenuRadioItem key={p.id} value={p.id}>
+                    <span className="size-3.5 rounded-full border" style={{ background: p.swatch }} aria-hidden /> {p.label}
+                  </DropdownMenuRadioItem>
+                ))}
               </DropdownMenuRadioGroup>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

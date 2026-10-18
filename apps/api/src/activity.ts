@@ -125,6 +125,7 @@ export function createActivityRoutes(store: Store) {
         delta: m.delta,
         reason: m.reason,
         userName: m.userName,
+        ...(m.supplierLot ? { supplierLot: m.supplierLot } : {}),
         ...(m.transferId ? { transferId: m.transferId.toHexString() } : {}),
         ...(m.reversalOf ? { reversalOf: m.reversalOf.toHexString() } : {}),
         reversed: !!m.reversedBy,
@@ -151,6 +152,7 @@ export function createActivityRoutes(store: Store) {
       return c.json({ error: "A reversal can't be reversed. Record a new receipt or adjustment instead." }, 409);
     }
     if (original.reversedBy) return c.json({ error: "That entry has already been reversed" }, 409);
+    if (original.ncrId) return c.json({ error: "That is part of a quality hold. Decide it from Quality instead." }, 409);
     if (original.unitId) {
       return c.json({ error: "Entries for a roll or pallet can't be reversed yet. Move it back or adjust what's left instead." }, 409);
     }
@@ -232,16 +234,16 @@ export function createActivityRoutes(store: Store) {
     const places = await store.locations.find({ _id: { $in: group.map((m) => m.locationId) } }).toArray();
     const placeName = (id: ObjectId) => places.find((l) => l._id.equals(id))?.name ?? "a deleted location";
     const amount = (n: number) => Math.abs(n).toLocaleString("en-US");
+    const out = group.find((m) => m.delta < 0);
+    const into = group.find((m) => m.delta > 0);
     const what =
-      original.transferId && group.length === 2
-        ? (() => {
-            const out = group.find((m) => m.delta < 0)!;
-            const into = group.find((m) => m.delta > 0)!;
-            return `move of ${amount(into.delta)} × ${item.name} from ${placeName(out.locationId)} to ${placeName(into.locationId)}`;
-          })()
-        : movementType(original) === "receive"
-          ? `receipt of ${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`
-          : `adjustment of ${original.delta > 0 ? "+" : "-"}${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`;
+      original.transferId && group.length === 2 && out && into
+        ? `move of ${amount(into.delta)} × ${item.name} from ${placeName(out.locationId)} to ${placeName(into.locationId)}`
+        : group.length > 1
+          ? `${movementType(original)} entry of ${group.length} lines (${item.name})`
+          : movementType(original) === "receive"
+            ? `receipt of ${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`
+            : `adjustment of ${original.delta > 0 ? "+" : "-"}${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`;
     await recordAudit(store, {
       orgId,
       actor: auditActor(user),

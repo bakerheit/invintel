@@ -69,7 +69,14 @@ export interface UnitOpOptions {
   type?: MovementType;
   workOrderId?: ObjectId;
   transferId?: ObjectId;
+  /** Tag the ledger lines with a quality hold and/or a pick-list reason. */
+  ncrId?: ObjectId;
+  reasonCode?: string;
+  /** Only the quality hold flow may touch a unit that is on hold (or move one into the hold area). */
+  viaQuality?: boolean;
 }
+
+const ON_HOLD = (code: string) => `${code} is on quality hold. Decide what to do with it from Quality.`;
 
 export type UnitsResult = { ok: true; units: StockUnitDoc[]; movementIds: ObjectId[] } | Failure;
 
@@ -126,6 +133,7 @@ export async function receiveUnits(
         type: opts.type ?? "receive",
         ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}),
         ...(opts.transferId ? { transferId: opts.transferId } : {}),
+        ...(input.lot ? { supplierLot: input.lot } : {}),
         itemId: input.itemId,
         locationId: input.locationId,
         unitId: u._id,
@@ -161,6 +169,7 @@ export async function moveUnit(
   const unit = await store.units.findOne({ _id: unitId, orgId });
   if (!unit) return { ok: false, status: 404, error: "Unit not found" };
   if (unit.status === "consumed") return { ok: false, status: 409, error: `${unit.code} has been used up` };
+  if (unit.status === "quarantined" && !opts.viaQuality) return { ok: false, status: 409, error: ON_HOLD(unit.code) };
   if (unit.locationId.equals(toLocationId)) return { ok: false, status: 409, error: "It's already there" };
   const [to, from, item] = await Promise.all([
     store.locations.findOne({ _id: toLocationId, orgId }),
@@ -168,6 +177,7 @@ export async function moveUnit(
     store.items.findOne({ _id: unit.itemId, orgId }, { projection: { name: 1, sku: 1 } }),
   ]);
   if (!to) return { ok: false, status: 404, error: "Location not found" };
+  if (to.type === "quarantine" && !opts.viaQuality) return { ok: false, status: 409, error: "That place is for stock on quality hold. Use Quality to hold stock." };
   if (!item) return { ok: false, status: 409, error: "That unit's item was deleted" };
 
   // Claim the unit first: if two people move it at once, only one finds it still at `from`.
@@ -182,7 +192,7 @@ export async function moveUnit(
   await bumpStock(store, orgId, unit.itemId, toLocationId, claimed.quantity);
 
   const transferId = opts.transferId ?? new ObjectId();
-  const extra = { type: opts.type ?? ("transfer" as MovementType), ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}) };
+  const extra = { type: opts.type ?? ("transfer" as MovementType), ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}), ...(opts.ncrId ? { ncrId: opts.ncrId } : {}), ...(opts.reasonCode ? { reasonCode: opts.reasonCode } : {}) };
   const note = reason || `Moved ${unit.code} ${from?.name ?? "?"} → ${to.name}`;
   const out = await logMovement(store, { orgId, ...extra, itemId: unit.itemId, locationId: unit.locationId, unitId, unitCode: unit.code, delta: -claimed.quantity, reason: note, transferId, actor });
   const into = await logMovement(store, { orgId, ...extra, itemId: unit.itemId, locationId: toLocationId, unitId, unitCode: unit.code, delta: claimed.quantity, reason: note, transferId, actor });
@@ -214,6 +224,7 @@ export async function adjustUnit(
   const unit = await store.units.findOne({ _id: unitId, orgId });
   if (!unit) return { ok: false, status: 404, error: "Unit not found" };
   if (unit.status === "consumed") return { ok: false, status: 409, error: `${unit.code} has been used up` };
+  if (unit.status === "quarantined" && !opts.viaQuality) return { ok: false, status: 409, error: ON_HOLD(unit.code) };
   const item = await store.items.findOne({ _id: unit.itemId, orgId }, { projection: { name: 1, sku: 1 } });
   if (!item) return { ok: false, status: 409, error: "That unit's item was deleted" };
 
@@ -238,6 +249,8 @@ export async function adjustUnit(
     type: opts.type ?? "adjust",
     ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}),
     ...(opts.transferId ? { transferId: opts.transferId } : {}),
+    ...(opts.ncrId ? { ncrId: opts.ncrId } : {}),
+    ...(opts.reasonCode ? { reasonCode: opts.reasonCode } : {}),
     itemId: unit.itemId,
     locationId: after.locationId,
     unitId,

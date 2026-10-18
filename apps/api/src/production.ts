@@ -39,6 +39,7 @@ import { actorOf } from "./items.js";
 import { indexLocations, loadLocations } from "./locations.js";
 import { consumeUnit, isUnitTracked, loadUnit, outputUnits, type UnitProd } from "./production-units.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
+import { matchReason, scrapReasonsOf } from "./reasons.js";
 import { changeStock, logMovement, quantityAt, type Actor } from "./stock-service.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -62,6 +63,7 @@ export const startedFor = (bom: Pick<BomDoc, "yieldPct">, good: number) => good 
 
 interface Line {
   type: MovementType;
+  reasonCode?: string;
   itemId: ObjectId;
   locationId: ObjectId;
   delta: number;
@@ -628,6 +630,7 @@ export function createProductionRoutes(store: Store) {
     if (oid(fromId).equals(center.locationId)) return c.json({ error: "That material is already at the machine" }, 422);
     const from = await store.locations.findOne({ _id: oid(fromId), orgId });
     if (!from) return c.json({ error: "Location not found" }, 404);
+    if (from.type === "quarantine") return c.json({ error: "That stock is on quality hold, so it can't be loaded." }, 422);
     const itemId = oid(input.itemId);
     const itemName = await nameOf(itemId);
     const note = `Loaded to ${center.name} for ${wo.number}`;
@@ -657,13 +660,15 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     if (!requiresItem(wo, input.itemId)) return c.json({ error: "That material isn't on this work order's BOM" }, 422);
     const itemId = oid(input.itemId);
+    const why = input.scrapReason ? matchReason(scrapReasonsOf(c.get("org")), input.scrapReason) : null;
+    if (input.scrapReason && !why) return c.json({ error: "Pick a scrap reason from the list" }, 400);
     if (input.unitId || (await isUnitTracked(store, orgId, itemId))) {
-      return unitReply(c, orgId, wo, "production.consumed", await consumeUnit(store, orgId, actorOf(c.get("user")), wo, center, itemId, input));
+      return unitReply(c, orgId, wo, "production.consumed", await consumeUnit(store, orgId, actorOf(c.get("user")), wo, center, itemId, { ...input, ...(why ? { scrapReason: why } : {}) }));
     }
     const itemName = await nameOf(itemId);
     const lines: Line[] = [
       { type: "consume", itemId, locationId: center.locationId, delta: -input.used, reason: input.reason || `Used on ${wo.number}` },
-      { type: "scrap", itemId, locationId: center.locationId, delta: -input.scrap, reason: input.reason || `Scrap on ${wo.number}` },
+      { type: "scrap", itemId, locationId: center.locationId, delta: -input.scrap, reason: input.reason || `Scrap on ${wo.number}`, ...(why ? { reasonCode: why } : {}) },
     ];
     if (input.remnant > 0) {
       const dest = await store.locations.findOne({ _id: oid(input.remnantLocationId!), orgId });
@@ -698,6 +703,8 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     const dest = await store.locations.findOne({ _id: oid(input.toLocationId), orgId });
     if (!dest) return c.json({ error: "Location not found" }, 404);
+    const scrapWhy = input.scrapReason ? matchReason(scrapReasonsOf(c.get("org")), input.scrapReason) : null;
+    if (input.scrapReason && !scrapWhy) return c.json({ error: "Pick a scrap reason from the list" }, 400);
     if (await isUnitTracked(store, orgId, wo.outputItemId)) {
       return unitReply(c, orgId, wo, "production.output", await outputUnits(store, orgId, actorOf(c.get("user")), wo, dest._id, input));
     }
@@ -706,7 +713,7 @@ export function createProductionRoutes(store: Store) {
       { type: "produce", itemId: wo.outputItemId, locationId: dest._id, delta: input.good, reason: why || `Output of ${wo.number}` },
       // Scrapped output never reaches stock, but it was made: book it in and out so the ledger shows it.
       { type: "produce", itemId: wo.outputItemId, locationId: center.locationId, delta: input.scrap, reason: why || `Output of ${wo.number} (scrapped)` },
-      { type: "scrap", itemId: wo.outputItemId, locationId: center.locationId, delta: -input.scrap, reason: why || `Scrapped output of ${wo.number}` },
+      { type: "scrap", itemId: wo.outputItemId, locationId: center.locationId, delta: -input.scrap, reason: why || `Scrapped output of ${wo.number}`, ...(scrapWhy ? { reasonCode: scrapWhy } : {}) },
     ];
     const res = await postLines(store, orgId, actorOf(c.get("user")), wo, lines);
     if (!res.ok) return c.json({ error: res.error }, res.status);

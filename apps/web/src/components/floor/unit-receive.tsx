@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Printer } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { InspectToggle } from "@/components/floor/inspect-toggle";
 import { ItemSummary } from "@/components/floor/item-summary";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { QtyStepper } from "@/components/floor/qty-stepper";
@@ -26,6 +27,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
   const [count, setCount] = useState(1);
   const [lot, setLot] = useState("");
   const [reference, setReference] = useState("");
+  const [inspect, setInspect] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -35,7 +37,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
     setBusy(true);
     setError(null);
     try {
-      const posted = await api.receiveUnits(orgId, { itemId: item.id, locationId: to.id, quantity: each, count, lot: lot.trim(), reference: reference.trim() });
+      const posted = await api.receiveUnits(orgId, { itemId: item.id, locationId: to.id, quantity: each, count, lot: lot.trim(), reference: reference.trim(), inspect });
       feedback("ok");
       setDone({ posted, to });
       setStep("done");
@@ -126,6 +128,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
         <label htmlFor="unit-ref" className="text-base font-medium">PO or delivery note (optional)</label>
         <Input id="unit-ref" className="h-14 text-lg" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} />
       </div>
+      <InspectToggle value={inspect} onChange={setInspect} />
       <Button className="h-16 w-full text-xl" disabled={each < 1 || count < 1} onClick={() => setStep("destination")}>Next: where to?</Button>
       <Button variant="ghost" className="h-12 w-full text-base" onClick={onReset}>Scan a different item</Button>
     </div>

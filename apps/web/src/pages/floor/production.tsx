@@ -66,6 +66,8 @@ export default function ProductionFloorPage() {
   const [fromId, setFromId] = useState("");
   const [qty, setQty] = useState(0);
   const [scrap, setScrap] = useState(0);
+  const [scrapReason, setScrapReason] = useState("");
+  const scrapReasons = useQuery({ queryKey: orgKey(orgId, "reasons"), queryFn: () => api.reasons(orgId) });
   const [remnant, setRemnant] = useState(0);
   const [toId, setToId] = useState("");
   // Unit-tracked material (rolls, pallets): the floor scans the label instead of typing a quantity.
@@ -91,6 +93,7 @@ export default function ProductionFloorPage() {
     setUnitError(null);
     setKeepLoaded(false);
     setUnitSize(0);
+    setScrapReason("");
   };
 
   const run = async (title: string, detail: string, fn: () => Promise<{ movementIds: string[] }>) => {
@@ -244,6 +247,23 @@ export default function ProductionFloorPage() {
   );
   const unitLeft = unit ? unit.quantity - qty - scrap : 0;
 
+  /** Scrap needs a reason from the list, so scrap reports can say why. Shown once there is something scrapped. */
+  const scrapPicker = (n: number) =>
+    n > 0 && (
+      <div className="space-y-2">
+        <p className="text-base font-medium">Why was it scrapped?</p>
+        <div className="grid grid-cols-2 gap-2">
+          {(scrapReasons.data?.scrap ?? []).map((r) => (
+            <button key={r} type="button" aria-pressed={scrapReason === r} onClick={() => setScrapReason(r)}
+              className={cn("min-h-14 rounded-xl border px-3 text-base font-medium", scrapReason === r ? "border-primary bg-accent/60 ring-2 ring-primary" : "hover:bg-muted")}>
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  const needReason = (n: number) => n > 0 && !scrapReason;
+
   const materialPicker = (
     <div className="space-y-2">
       <p className="text-base font-medium">Which material?</p>
@@ -344,6 +364,7 @@ export default function ProductionFloorPage() {
                     <>
                       <Count label="Used" value={qty} onChange={setQty} max={unit.quantity - scrap} />
                       <Count label="Scrap" value={scrap} onChange={setScrap} max={unit.quantity - qty} />
+                      {scrapPicker(scrap)}
                       <p className="text-lg font-medium">{unitLeft.toLocaleString()} left on {unit.code}</p>
                       {unitLeft > 0 && (
                         <>
@@ -355,9 +376,9 @@ export default function ProductionFloorPage() {
                       )}
                     </>
                   )}
-                  <Button className="h-16 w-full text-xl" disabled={busy || !unit || qty + scrap < 1 || (unitLeft > 0 && !keepLoaded && !toId)} onClick={() =>
+                  <Button className="h-16 w-full text-xl" disabled={busy || !unit || qty + scrap < 1 || needReason(scrap) || (unitLeft > 0 && !keepLoaded && !toId)} onClick={() =>
                     void run("Usage reported", `${unit!.code}: used ${qty}, scrap ${scrap}, ${unitLeft} left${unitLeft > 0 && !keepLoaded ? ` → ${pathOf(toId)}` : ""}`, () =>
-                      api.reportUsage(orgId, order.id, { itemId, unitId: unit!.id, used: qty, scrap, remnant: unitLeft > 0 && !keepLoaded ? unitLeft : 0, ...(unitLeft > 0 && !keepLoaded ? { remnantLocationId: toId } : {}) }))}>
+                      api.reportUsage(orgId, order.id, { itemId, unitId: unit!.id, used: qty, scrap, ...(scrap > 0 ? { scrapReason } : {}), remnant: unitLeft > 0 && !keepLoaded ? unitLeft : 0, ...(unitLeft > 0 && !keepLoaded ? { remnantLocationId: toId } : {}) }))}>
                     Save usage
                   </Button>
                 </>
@@ -367,13 +388,14 @@ export default function ProductionFloorPage() {
                   <p className="text-sm text-muted-foreground">{atMachine.toLocaleString()} at the machine right now</p>
                   <Count label="Used" value={qty} onChange={setQty} />
                   <Count label="Scrap" value={scrap} onChange={setScrap} />
+                  {scrapPicker(scrap)}
                   <Count label="Left over (back to stock)" value={remnant} onChange={setRemnant} />
                   {remnant > 0 && placeButton("to", toId, "Leftover goes to")}
                 </>
               )}
-              {!tracked && <Button className="h-16 w-full text-xl" disabled={busy || !itemId || qty + scrap + remnant < 1 || (remnant > 0 && !toId)} onClick={() =>
+              {!tracked && <Button className="h-16 w-full text-xl" disabled={busy || !itemId || qty + scrap + remnant < 1 || needReason(scrap) || (remnant > 0 && !toId)} onClick={() =>
                 void run("Usage reported", `Used ${qty}, scrap ${scrap}, leftover ${remnant}`, () =>
-                  api.reportUsage(orgId, order.id, { itemId, used: qty, scrap, remnant, ...(remnant > 0 ? { remnantLocationId: toId } : {}) }))}>
+                  api.reportUsage(orgId, order.id, { itemId, used: qty, scrap, ...(scrap > 0 ? { scrapReason } : {}), remnant, ...(remnant > 0 ? { remnantLocationId: toId } : {}) }))}>
                 Save usage
               </Button>}
             </>
@@ -385,12 +407,15 @@ export default function ProductionFloorPage() {
               {order.outputTracking === "unit" ? (
                 <Count label="How many on each pallet or roll?" value={unitSize} onChange={setUnitSize} />
               ) : (
-                <Count label="Scrapped" value={scrap} onChange={setScrap} />
+                <>
+                  <Count label="Scrapped" value={scrap} onChange={setScrap} />
+                  {scrapPicker(scrap)}
+                </>
               )}
               {placeButton("to", toId, "Good ones go to")}
-              <Button className="h-16 w-full text-xl" disabled={busy || qty + scrap < 1 || !toId || (order.outputTracking === "unit" && unitSize < 1)} onClick={() =>
+              <Button className="h-16 w-full text-xl" disabled={busy || qty + scrap < 1 || !toId || needReason(order.outputTracking === "unit" ? 0 : scrap) || (order.outputTracking === "unit" && unitSize < 1)} onClick={() =>
                 void run(`Output reported`, `${qty} good${order.outputTracking === "unit" ? ` on pallets of ${unitSize}` : `, ${scrap} scrap`} → ${pathOf(toId)}`, () =>
-                  api.reportOutput(orgId, order.id, { good: qty, scrap, toLocationId: toId, ...(order.outputTracking === "unit" ? { unitSize } : {}) }))}>
+                  api.reportOutput(orgId, order.id, { good: qty, scrap, ...(scrap > 0 && order.outputTracking !== "unit" ? { scrapReason } : {}), toLocationId: toId, ...(order.outputTracking === "unit" ? { unitSize } : {}) }))}>
                 Save output
               </Button>
             </>

@@ -1,4 +1,14 @@
 import type {
+  RecallDrill,
+  TraceQuery,
+  TraceResult,
+  ScrapReport,
+  DisposeInput,
+  HoldInput,
+  Ncr,
+  NcrSummary,
+  Reasons,
+  ReasonsUpdate,
   Alert,
   AlertSettings,
   AlertsResponse,
@@ -74,6 +84,8 @@ import type {
   TransferInput,
   User,
 } from "@invintel/shared";
+
+const traceParams = (q: TraceQuery) => new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
 
 let onUnauthorized: () => void = () => {};
 /** The auth store registers itself here so any 401 drops the user back to the login page. */
@@ -289,4 +301,23 @@ export const api = {
   workOrderVariance: (orgId: string, id: string) =>
     request<WorkOrderVariance>(`/orgs/${orgId}/production/work-orders/${id}/variance`),
   varianceSummary: (orgId: string) => request<VarianceSummaryRow[]>(`/orgs/${orgId}/production/variance`),
+
+  // Quality hold and NCR, and the shared reason lists.
+  ncrs: (orgId: string, status: "open" | "closed" | "all" = "all") => request<Ncr[]>(`/orgs/${orgId}/quality/ncrs?status=${status}`),
+  ncrSummary: (orgId: string) => request<NcrSummary>(`/orgs/${orgId}/quality/summary`),
+  putOnHold: (orgId: string, input: HoldInput) => request<Ncr>(`/orgs/${orgId}/quality/holds`, post(input)),
+  disposeNcr: (orgId: string, id: string, input: DisposeInput) => request<Ncr>(`/orgs/${orgId}/quality/ncrs/${id}/dispose`, post(input)),
+  reasons: (orgId: string) => request<Reasons>(`/orgs/${orgId}/reasons`),
+  saveReasons: (orgId: string, input: ReasonsUpdate) => request<Reasons>(`/orgs/${orgId}/reasons`, { method: "PUT", body: JSON.stringify(input) }),
+
+  // Lot genealogy and mock recall.
+  trace: (orgId: string, q: TraceQuery) => request<TraceResult>(`/orgs/${orgId}/traceability/trace?${traceParams(q)}`),
+  traceCsvUrl: (orgId: string, q: TraceQuery) => `/api/orgs/${orgId}/traceability/trace.csv?${traceParams(q)}`,
+  runDrill: (orgId: string, q: TraceQuery) => request<{ drill: RecallDrill; result: TraceResult }>(`/orgs/${orgId}/traceability/drills`, post(q)),
+  drills: (orgId: string) => request<RecallDrill[]>(`/orgs/${orgId}/traceability/drills`),
+  // Scrap and yield trends (production reports).
+  scrapReport: (orgId: string, days: number, workCenterId?: string) =>
+    request<ScrapReport>(`/orgs/${orgId}/production/scrap?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`),
+  scrapCsvUrl: (orgId: string, days: number, workCenterId?: string) =>
+    `/api/orgs/${orgId}/production/scrap/lines.csv?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`,
 };
