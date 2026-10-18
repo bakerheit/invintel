@@ -92,6 +92,10 @@ API under `/api/orgs/:orgId/production/downtime`: `GET /settings`, `PUT /setting
 
 API under `/api/orgs/:orgId/alerts`: `GET /`, `GET /digest`, `GET|PUT /settings`, `POST /acknowledge|snooze|reopen` (`{ key }`, snooze also `{ days }`). Every change is in the audit log.
 
+### Colours
+
+The sidebar (and the frame around the page) uses the same gradient as the sign-in page. The account menu (bottom of the sidebar) has a **Colour** choice: Pink (default), Ocean, Forest, Sunset, Grape and Graphite. A colour recolours the sidebar gradient, buttons and highlights; the main area stays a neutral dark (or white in light mode). The choice is remembered per browser. To add a colour, add an entry to `PALETTES` in `apps/web/src/lib/theme.tsx` and a matching `:root[data-palette="..."]` pair at the bottom of `apps/web/src/index.css`.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:

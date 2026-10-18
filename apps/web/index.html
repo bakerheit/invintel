@@ -11,6 +11,8 @@
         var dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
         document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        var p = localStorage.getItem("palette");
+        if (p && p !== "pink") document.documentElement.setAttribute("data-palette", p);
       } catch (e) {}
     </script>
   </head>

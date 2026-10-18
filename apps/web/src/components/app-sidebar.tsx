@@ -32,7 +32,7 @@ import {
 import { api } from "@/lib/api";
 import { orgKey, isAdmin } from "@/lib/org";
 import { useQuery } from "@tanstack/react-query";
-import { type Theme, useTheme } from "@/lib/theme";
+import { PALETTES, type Palette, type Theme, useTheme } from "@/lib/theme";
 import { useAuth } from "@/stores/auth";
 
 const initials = (name: string) =>
@@ -125,7 +125,7 @@ function OrgSwitcher({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] }) {
 
 function UserMenu() {
   const { user, logout } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, palette, setPalette } = useTheme();
   const { isMobile } = useSidebar();
   if (!user) return null;
   return (
@@ -158,6 +158,17 @@ function UserMenu() {
                 <DropdownMenuRadioItem value="light"><Sun /> Light</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="dark"><Moon /> Dark</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="system"><Monitor /> System</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Colour</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={palette} onValueChange={(v) => setPalette(v as Palette)}>
+                {PALETTES.map((p) => (
+                  <DropdownMenuRadioItem key={p.id} value={p.id}>
+                    <span className="size-3.5 rounded-full border" style={{ background: p.swatch }} aria-hidden /> {p.label}
+                  </DropdownMenuRadioItem>
+                ))}
               </DropdownMenuRadioGroup>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
