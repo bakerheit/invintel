@@ -254,6 +254,14 @@ On the floor, anything scrapped now needs a **reason** from a short list: the Pr
 
 API: `GET /api/orgs/:orgId/production/scrap?days=7|30|90|180&workCenterId=` and `GET .../production/scrap/lines.csv`. `POST .../production/work-orders/:id/consume` and `/output` take an optional `scrapReason` (must be on the org's scrap list; stored on the ledger line as `reasonCode`).
 
+### Business-to-business exchange (core)
+
+The transport-independent core for exchanging documents with other businesses (INV-12). A **trading partner** is a business we exchange documents with, carried by a **bridge** (an adapter for one way of moving documents: email, an EDI provider, the Invintel-to-Invintel exchange, or the built-in `loopback` for tests and demos). A **B2B message** is one document sent or received, kept whole (the raw document, with its hash and size, never changed), with its state (`queued, sent, delivered, acknowledged, rejected, failed`, and `received` for inbound), every attempt, every acknowledgement (transport, functional, business), an idempotency key (the same key never makes two messages or two sends) and a link to our own record (PO number, invoice, shipment). Failed sends can be retried as the same message; permanent failures can't. Test partners are marked as such in the audit log. Settings values (endpoints, secrets) never appear in audit entries.
+
+Code: `packages/shared/src/b2b.ts` (types, states, allowed transitions), `apps/api/src/b2b-core.ts` (the `Bridge` interface, `registerBridge`, `sendMessage`, `receiveMessage`, `retryMessage`, `recordAck`, the loopback bridge), `apps/api/src/b2b-routes.ts`. A bridge is `{ id, carries, send(message, partner), verifyInbound(request, partner) }` and never touches the database.
+
+API under `/api/orgs/:orgId/b2b`: `GET /bridges`, `GET|POST /partners`, `PATCH /partners/:id` (admin writes), `GET /messages` (`?partnerId=&direction=&state=`), `GET /messages/:id` (with the raw body), `POST /partners/:id/messages` (send, admin), `POST /messages/:id/retry`, `POST /messages/:id/ack` (admin; record an answer by hand). Partners post documents to `POST /api/b2b/inbound/:partnerId` (no session; the partner's bridge verifies the request; anything not accepted gets the same plain refusal; 2 MB and 120 requests a minute per partner).
+
 ## API
 
 Auth (no session needed except `/me`):

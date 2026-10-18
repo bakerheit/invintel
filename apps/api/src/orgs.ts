@@ -18,6 +18,7 @@ import { createItemRoutes } from "./items.js";
 import { createAlertRoutes } from "./alerts.js";
 import { createApprovalRoutes } from "./approvals.js";
 import { createCountRoutes } from "./counts.js";
+import { createB2BRoutes } from "./b2b-routes.js";
 import { createDataRoutes } from "./data.js";
 import { createDowntimeRoutes } from "./downtime.js";
 import { createLocationRoutes } from "./locations.js";
@@ -174,6 +175,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/reports", createReportRoutes(store));
   scoped.route("/reasons", createReasonRoutes(store));
   scoped.route("/quality", createQualityRoutes(store));
+  scoped.route("/b2b", createB2BRoutes(store));
   scoped.route("/traceability", createTraceabilityRoutes(store));
   scoped.route("/purchasing", createPurchasingRoutes(store));
   scoped.route("/overview", createOverviewRoutes(store));
