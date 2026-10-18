@@ -302,7 +302,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order", "supplier", "purchase_order"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -319,6 +319,14 @@ export const AUDIT_ACTIONS = [
   "member.role_changed",
   "member.removed",
   "member.left",
+  "supplier.created",
+  "supplier.updated",
+  "purchase_order.created",
+  "purchase_order.updated",
+  "purchase_order.ordered",
+  "purchase_order.received",
+  "purchase_order.cancelled",
+  "purchase_order.closed",
   "stock.received",
   "stock.adjusted",
   "stock.moved",
@@ -477,3 +485,4 @@ export const importInputSchema = z.object({
 });
 export type ImportInput = z.input<typeof importInputSchema>;
 export * from "./production.js";
+export * from "./purchasing.js";

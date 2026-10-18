@@ -88,6 +88,8 @@ export interface MovementDoc {
   reversedBy?: ObjectId;
   /** Production lines (load, consume, produce, scrap, remnant transfers) carry the work order they belong to. */
   workOrderId?: ObjectId;
+  /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
+  purchaseOrderId?: ObjectId;
   createdAt: Date;
 }
 
@@ -156,6 +158,31 @@ export interface WorkOrderDoc {
   updatedAt: Date;
 }
 
+export interface SupplierDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  notes: string;
+  createdAt: Date;
+}
+
+export interface PurchaseOrderDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  /** Draft until placed. "closed" means done even if short. Arrival is read from the ledger, not stored here. */
+  state: "draft" | "ordered" | "closed" | "cancelled";
+  supplierId: ObjectId;
+  expectedDate: string | null;
+  note: string;
+  lines: { itemId: ObjectId; quantity: number; unitCostCents: number }[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -171,6 +198,8 @@ export interface Store {
   workCenters: Collection<WorkCenterDoc>;
   boms: Collection<BomDoc>;
   workOrders: Collection<WorkOrderDoc>;
+  suppliers: Collection<SupplierDoc>;
+  purchaseOrders: Collection<PurchaseOrderDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -200,6 +229,8 @@ export async function connect(
     workCenters: db.collection("work_centers"),
     boms: db.collection("boms"),
     workOrders: db.collection("work_orders"),
+    suppliers: db.collection("suppliers"),
+    purchaseOrders: db.collection("purchase_orders"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -245,6 +276,10 @@ export async function connect(
     store.boms.createIndex({ orgId: 1, outputItemId: 1, version: 1 }, { unique: true }),
     store.workOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.workOrders.createIndex({ orgId: 1, status: 1 }),
+    store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
+    store.movements.createIndex({ purchaseOrderId: 1 }, { sparse: true }),
   ]);
   return store;
 }

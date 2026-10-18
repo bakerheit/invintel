@@ -17,6 +17,7 @@ import { createLocationRoutes } from "./locations.js";
 import { createMemberRoutes } from "./members.js";
 import { createOverviewRoutes } from "./overview.js";
 import { createProductionRoutes } from "./production.js";
+import { createPurchasingRoutes } from "./purchasing.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
 import {
   createOrganization,
@@ -123,6 +124,7 @@ export function createOrgRoutes(store: Store) {
 
   scoped.route("/data", createDataRoutes(store));
   scoped.route("/members", createMemberRoutes(store));
+  scoped.route("/purchasing", createPurchasingRoutes(store));
   scoped.route("/overview", createOverviewRoutes(store));
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));
