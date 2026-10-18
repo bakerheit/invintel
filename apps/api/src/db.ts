@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type Db, type ObjectId } from "mongodb";
-import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole } from "@invintel/shared";
+import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -21,6 +21,8 @@ export interface OrgDoc {
   name: string;
   joinCode: string;
   createdBy: ObjectId;
+  /** Absent means everything is on. */
+  modules?: Partial<{ purchasing: boolean; production: boolean }>;
   createdAt: Date;
 }
 
@@ -90,8 +92,6 @@ export interface StockUnitDoc {
 export interface MovementDoc {
   _id: ObjectId;
   orgId: ObjectId;
-  /** The work order that caused this movement, if any. */
-  workOrderId?: ObjectId;
   /** Set when the movement is about one specific roll or pallet. */
   unitId?: ObjectId;
   unitCode?: string;
@@ -108,6 +108,10 @@ export interface MovementDoc {
   reversalOf?: ObjectId;
   /** On an original: the reversal that undid it. */
   reversedBy?: ObjectId;
+  /** Production lines (load, consume, produce, scrap, remnant transfers) carry the work order they belong to. */
+  workOrderId?: ObjectId;
+  /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
+  purchaseOrderId?: ObjectId;
   createdAt: Date;
 }
 
@@ -134,6 +138,75 @@ export interface AuditEventDoc {
   hash: string;
 }
 
+export interface WorkCenterDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  code: string;
+  description: string;
+  locationId: ObjectId;
+  active: boolean;
+  createdAt: Date;
+}
+
+export interface BomDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  outputItemId: ObjectId;
+  outputQuantity: number;
+  yieldPct: number;
+  inputs: { itemId: ObjectId; quantity: number; scrapPct: number }[];
+  note: string;
+  version: number;
+  status: "active" | "retired";
+  createdAt: Date;
+}
+
+export interface WorkOrderDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  status: WorkOrderStatus;
+  bomId: ObjectId;
+  bomVersion: number;
+  outputItemId: ObjectId;
+  quantity: number;
+  workCenterId: ObjectId;
+  dueDate: string | null;
+  note: string;
+  /** Snapshot taken when the order was made, so a later BOM version can't change an open order. */
+  requirements: { itemId: ObjectId; expected: number }[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SupplierDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  notes: string;
+  createdAt: Date;
+}
+
+export interface PurchaseOrderDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  /** Draft until placed. "closed" means done even if short. Arrival is read from the ledger, not stored here. */
+  state: "draft" | "ordered" | "closed" | "cancelled";
+  supplierId: ObjectId;
+  expectedDate: string | null;
+  note: string;
+  /** Set for a few seconds while stock is being received, so a cancel or close can't slip in between the check and the posting. */
+  receivingUntil?: Date;
+  lines: { itemId: ObjectId; quantity: number; unitCostCents: number }[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -147,6 +220,11 @@ export interface Store {
   movements: Collection<MovementDoc>;
   audit: Collection<AuditEventDoc>;
   units: Collection<StockUnitDoc>;
+  workCenters: Collection<WorkCenterDoc>;
+  boms: Collection<BomDoc>;
+  workOrders: Collection<WorkOrderDoc>;
+  suppliers: Collection<SupplierDoc>;
+  purchaseOrders: Collection<PurchaseOrderDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -174,6 +252,11 @@ export async function connect(
     movements: db.collection("stock_movements"),
     audit: db.collection("audit_events"),
     units: db.collection("stock_units"),
+    workCenters: db.collection("work_centers"),
+    boms: db.collection("boms"),
+    workOrders: db.collection("work_orders"),
+    suppliers: db.collection("suppliers"),
+    purchaseOrders: db.collection("purchase_orders"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -213,6 +296,19 @@ export async function connect(
     store.audit.createIndex({ orgId: 1, seq: 1 }, { unique: true }),
     store.audit.createIndex({ orgId: 1, "entity.type": 1, "entity.id": 1, seq: -1 }),
     store.audit.createIndex({ orgId: 1, action: 1, seq: -1 }),
+    store.movements.createIndex({ workOrderId: 1 }, { sparse: true }),
+    store.workCenters.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.workCenters.createIndex(
+      { orgId: 1, code: 1 },
+      { unique: true, collation: caseInsensitive, partialFilterExpression: { code: { $gt: "" } } },
+    ),
+    store.boms.createIndex({ orgId: 1, outputItemId: 1, version: 1 }, { unique: true }),
+    store.workOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.workOrders.createIndex({ orgId: 1, status: 1 }),
+    store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
+    store.movements.createIndex({ purchaseOrderId: 1 }, { sparse: true }),
   ]);
   return store;
 }

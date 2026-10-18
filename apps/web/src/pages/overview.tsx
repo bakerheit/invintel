@@ -1,6 +1,7 @@
 import type { LocationType } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CircleDollarSign, Download, History, Layers, Package, ScanLine, TriangleAlert } from "lucide-react";
+import { ArrowRight, CheckCircle2, Circle, CircleDollarSign, Download, History, Layers, Package, ScanLine, TriangleAlert, X } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -23,8 +24,55 @@ const TYPE_LABEL: Record<LocationType, string> = {
   shipping: "Shipping",
 };
 
+/** A short list for a new organization. Hides itself once everything is done, or when dismissed. */
+function GettingStarted({ orgId, items, locations, units, members, movements }: { orgId: string; items: number; locations: number; units: number; members: number; movements: number }) {
+  const key = `invintel.started.${orgId}`;
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem(key) === "1"; } catch { return false; }
+  });
+  const steps = [
+    { done: items > 0, label: "Add your items", hint: "One by one, or import a spreadsheet.", to: `/o/${orgId}/inventory` },
+    { done: locations > 1, label: "Set up your locations", hint: "Receiving dock, racks, machines, shipping. Give them codes you can print.", to: `/o/${orgId}/locations` },
+    { done: units > 0 || movements > 0, label: "Receive some stock", hint: "Floor mode is the fast way: scan the item, scan the place.", to: `/o/${orgId}/floor/receive` },
+    { done: members > 1, label: "Invite your team", hint: "Share the join code from Settings.", to: `/o/${orgId}/settings` },
+  ];
+  if (hidden || steps.every((s) => s.done)) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle>Getting started · {steps.filter((s) => s.done).length} of {steps.length}</CardTitle>
+          <button
+            type="button"
+            aria-label="Hide getting started"
+            className="rounded p-1 text-muted-foreground hover:bg-muted"
+            onClick={() => { try { localStorage.setItem(key, "1"); } catch { /* private mode: it just comes back next visit */ } setHidden(true); }}
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ol className="grid gap-2 sm:grid-cols-2">
+          {steps.map((s) => (
+            <li key={s.label}>
+              <Link to={s.to} className="flex h-full items-start gap-3 rounded-lg border p-3 hover:bg-muted/40">
+                {s.done ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" /> : <Circle className="mt-0.5 size-5 shrink-0 text-muted-foreground" />}
+                <span>
+                  <span className={cn("block text-sm font-medium", s.done && "text-muted-foreground line-through")}>{s.label}</span>
+                  <span className="block text-xs text-muted-foreground">{s.hint}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function OverviewPage() {
-  const { id: orgId } = useCurrentOrg();
+  const { id: orgId, memberCount } = useCurrentOrg();
   const overview = useQuery({ queryKey: orgKey(orgId, "overview"), queryFn: () => api.overview(orgId), refetchInterval: 30_000 });
   const recent = useQuery({ queryKey: orgKey(orgId, "recent"), queryFn: () => api.activity(orgId, {}) });
   const o = overview.data;
@@ -57,6 +105,8 @@ export default function OverviewPage() {
           </Link>
         }
       />
+
+      <GettingStarted orgId={orgId} items={o.items} locations={o.locations} units={o.units} members={memberCount} movements={o.movements24h} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Items" value={o.items.toLocaleString()} icon={Package} hint={`${o.locations} ${o.locations === 1 ? "location" : "locations"}`} />
@@ -92,7 +142,11 @@ export default function OverviewPage() {
           </CardHeader>
           <CardContent>
             {!o.attention.length ? (
-              <EmptyState icon={Package} title="Nothing to chase" description="No item is out of stock or at its reorder level." />
+              o.items === 0 ? (
+                <EmptyState icon={Package} title="No items yet" description="Add items or import a spreadsheet, and anything running low shows up here." />
+              ) : (
+                <EmptyState icon={Package} title="Nothing to chase" description="No item is out of stock or at its reorder level." />
+              )
             ) : (
               <ul className="divide-y">
                 {o.attention.map((a) => (

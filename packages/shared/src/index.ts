@@ -30,6 +30,12 @@ export const registrationOrganizationSchema = z.discriminatedUnion("mode", [
 ]);
 export type RegistrationOrganization = z.infer<typeof registrationOrganizationSchema>;
 
+/** Parts of the app an organization can switch off, so a small shop only sees what it uses. Everything is on by default. */
+export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean() });
+export type OrgModules = z.infer<typeof orgModulesSchema>;
+export const orgModulesUpdateSchema = orgModulesSchema.partial().refine((m) => Object.keys(m).length > 0, "Nothing to change");
+export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true };
+
 export interface OrgSummary {
   id: string;
   name: string;
@@ -38,6 +44,7 @@ export interface OrgSummary {
   /** Only sent to owners and admins. */
   joinCode?: string;
   memberCount: number;
+  modules: OrgModules;
   createdAt: string;
 }
 
@@ -196,7 +203,7 @@ export const transferInputSchema = z
   });
 export type TransferInput = z.infer<typeof transferInputSchema>;
 
-export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal"]);
+export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap"]);
 export type MovementType = z.infer<typeof movementTypeSchema>;
 export const MOVEMENT_TYPES = movementTypeSchema.options;
 
@@ -308,7 +315,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order", "supplier", "purchase_order"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -320,15 +327,34 @@ export const AUDIT_ACTIONS = [
   "location.deleted",
   "organization.created",
   "organization.renamed",
+  "organization.modules_changed",
   "organization.join_code_rotated",
   "member.joined",
   "member.role_changed",
   "member.removed",
   "member.left",
+  "supplier.created",
+  "supplier.updated",
+  "purchase_order.created",
+  "purchase_order.updated",
+  "purchase_order.ordered",
+  "purchase_order.received",
+  "purchase_order.cancelled",
+  "purchase_order.closed",
   "stock.received",
   "stock.adjusted",
   "stock.moved",
   "stock.reversed",
+  "work_center.created",
+  "work_center.updated",
+  "bom.created",
+  "work_order.created",
+  "work_order.released",
+  "work_order.completed",
+  "work_order.cancelled",
+  "production.loaded",
+  "production.consumed",
+  "production.output",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -531,3 +557,5 @@ export interface UnitsPosted {
   units: StockUnit[];
   movementIds: string[];
 }
+export * from "./production.js";
+export * from "./purchasing.js";

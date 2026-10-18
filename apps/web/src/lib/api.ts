@@ -1,4 +1,17 @@
 import type {
+  Bom,
+  BomInput,
+  ConsumeInput,
+  LoadInput,
+  OutputInput,
+  ProductionPosted,
+  VarianceSummaryRow,
+  WorkCenter,
+  WorkCenterInput,
+  WorkOrder,
+  WorkOrderAction,
+  WorkOrderInput,
+  WorkOrderVariance,
   ActivityPage,
   AdjustUnitInput,
   MoveUnitInput,
@@ -8,6 +21,13 @@ import type {
   AuditPage,
   AuditVerification,
   ImportInput,
+  PoReceiveInput,
+  PoReceiveResult,
+  PurchaseOrder,
+  PurchaseOrderInput,
+  ReorderSuggestion,
+  Supplier,
+  SupplierInput,
   ImportResult,
   Overview,
   AdjustmentInput,
@@ -22,6 +42,7 @@ import type {
   MoveInput,
   MovementType,
   OrganizationInput,
+  OrgModules,
   OrgMember,
   OrgSummary,
   RegisterInput,
@@ -85,6 +106,7 @@ export const api = {
   createOrg: (input: OrganizationInput) => request<OrgSummary>("/orgs", post(input)),
   joinOrg: (input: { joinCode: string }) => request<OrgSummary>("/orgs/join", post(input)),
   renameOrg: (orgId: string, input: OrganizationInput) => request<OrgSummary>(`/orgs/${orgId}`, patch(input)),
+  setModules: (orgId: string, modules: Partial<OrgModules>) => request<OrgSummary>(`/orgs/${orgId}/modules`, patch(modules)),
   rotateJoinCode: (orgId: string) => request<OrgSummary>(`/orgs/${orgId}/join-code`, post()),
   listMembers: (orgId: string) => request<OrgMember[]>(`/orgs/${orgId}/members`),
   setMemberRole: (orgId: string, userId: string, role: "admin" | "member") =>
@@ -101,6 +123,17 @@ export const api = {
     if (res.ok || (res.status === 422 && Array.isArray(data.rows))) return data as ImportResult;
     throw new Error(typeof data.error === "string" ? data.error : "Import failed");
   },
+  listSuppliers: (orgId: string) => request<Supplier[]>(`/orgs/${orgId}/purchasing/suppliers`),
+  createSupplier: (orgId: string, input: SupplierInput) => request<Supplier>(`/orgs/${orgId}/purchasing/suppliers`, post(input)),
+  suggestions: (orgId: string) => request<ReorderSuggestion[]>(`/orgs/${orgId}/purchasing/suggestions`),
+  listOrders: (orgId: string) => request<PurchaseOrder[]>(`/orgs/${orgId}/purchasing/orders`),
+  createOrder: (orgId: string, input: PurchaseOrderInput) => request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders`, post(input)),
+  orderFromSuggestions: (orgId: string, input: { supplierId: string; itemIds: string[] }) =>
+    request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/from-suggestions`, post(input)),
+  orderAction: (orgId: string, id: string, action: "place" | "cancel" | "close") =>
+    request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/${id}/${action}`, post({})),
+  receiveOrder: (orgId: string, id: string, input: PoReceiveInput) =>
+    request<PoReceiveResult>(`/orgs/${orgId}/purchasing/orders/${id}/receive`, post(input)),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
@@ -159,4 +192,27 @@ export const api = {
     request<PostedDocument>(`/orgs/${orgId}/receipts`, post(input)),
   move: (orgId: string, input: Partial<MoveInput> & Pick<MoveInput, "itemId" | "fromLocationId" | "toLocationId" | "quantity">) =>
     request<PostedDocument>(`/orgs/${orgId}/moves`, post(input)),
+
+  // Production: work centers, BOMs, work orders, floor actions, variance.
+  workCenters: (orgId: string) => request<WorkCenter[]>(`/orgs/${orgId}/production/work-centers`),
+  createWorkCenter: (orgId: string, input: Partial<WorkCenterInput> & Pick<WorkCenterInput, "name" | "locationId">) =>
+    request<WorkCenter>(`/orgs/${orgId}/production/work-centers`, post(input)),
+  boms: (orgId: string, all = false) => request<Bom[]>(`/orgs/${orgId}/production/boms${all ? "?all=1" : ""}`),
+  createBom: (orgId: string, input: Partial<BomInput> & Pick<BomInput, "outputItemId" | "inputs">) =>
+    request<Bom>(`/orgs/${orgId}/production/boms`, post(input)),
+  workOrders: (orgId: string, status?: string) =>
+    request<WorkOrder[]>(`/orgs/${orgId}/production/work-orders${status ? `?status=${status}` : ""}`),
+  createWorkOrder: (orgId: string, input: Partial<WorkOrderInput> & Pick<WorkOrderInput, "quantity" | "workCenterId">) =>
+    request<WorkOrder>(`/orgs/${orgId}/production/work-orders`, post(input)),
+  workOrderAction: (orgId: string, id: string, action: WorkOrderAction["action"]) =>
+    request<WorkOrder>(`/orgs/${orgId}/production/work-orders/${id}/action`, post({ action })),
+  loadMaterial: (orgId: string, id: string, input: LoadInput) =>
+    request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/load`, post(input)),
+  reportUsage: (orgId: string, id: string, input: Partial<ConsumeInput> & Pick<ConsumeInput, "itemId" | "used">) =>
+    request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/consume`, post(input)),
+  reportOutput: (orgId: string, id: string, input: Partial<OutputInput> & Pick<OutputInput, "good" | "toLocationId">) =>
+    request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/output`, post(input)),
+  workOrderVariance: (orgId: string, id: string) =>
+    request<WorkOrderVariance>(`/orgs/${orgId}/production/work-orders/${id}/variance`),
+  varianceSummary: (orgId: string) => request<VarianceSummaryRow[]>(`/orgs/${orgId}/production/variance`),
 };

@@ -1,4 +1,4 @@
-import type { OrgMember, OrgSummary } from "@invintel/shared";
+import type { OrgMember, OrgModules, OrgSummary } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, LogOut, MoreHorizontal, Plus, RefreshCw, ShieldCheck, ShieldOff, UserMinus } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
@@ -57,6 +57,33 @@ function RenameForm({ orgId, name }: { orgId: string; name: string }) {
       </div>
       <Button type="submit" disabled={rename.isPending}>Save</Button>
     </form>
+  );
+}
+
+function FeaturesForm({ org }: { org: OrgSummary }) {
+  const qc = useQueryClient();
+  const set = useMutation({
+    mutationFn: (m: Partial<OrgModules>) => api.setModules(org.id, m),
+    onSuccess: () => qc.invalidateQueries({ queryKey: orgsKey }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const rows = [
+    ["purchasing", "Purchasing", "Suppliers, purchase orders and reorder suggestions."],
+    ["production", "Production", "Work centers, bills of materials and work orders, with their Floor mode tile."],
+  ] as const;
+  return (
+    <div className="space-y-3">
+      {rows.map(([key, label, hint]) => (
+        <label key={key} className="flex items-start gap-3 rounded-lg border p-3">
+          <input type="checkbox" className="mt-1 size-4" checked={org.modules[key]} disabled={set.isPending} onChange={(e) => set.mutate({ [key]: e.target.checked })} />
+          <span>
+            <span className="block text-sm font-medium">{label}</span>
+            <span className="block text-sm text-muted-foreground">{hint}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-xs text-muted-foreground">Switching one off only hides it. Nothing is deleted, and turning it back on brings everything back.</p>
+    </div>
   );
 }
 
@@ -204,6 +231,12 @@ export default function SettingsPage() {
             </div>
           )}
         </Section>
+
+        {admin && (
+          <Section title="Features" description="Show only what your team uses. Inventory, locations and the audit log are always on.">
+            <FeaturesForm org={org} />
+          </Section>
+        )}
 
         <Section title="Invite people" description="Share this code. Anyone who has it can join as a member.">
           {admin && org.joinCode ? (
