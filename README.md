@@ -172,6 +172,27 @@ function verify(secret, rawBody, header) {
 
 API: `GET/POST /api-keys`, `POST /api-keys/:id/revoke`; `GET/POST /webhooks`, `PATCH/DELETE /webhooks/:id`, `POST /webhooks/:id/test`, `POST /webhooks/:id/rotate-secret`, `GET /webhooks/:id/deliveries`, `POST /webhooks/:id/deliveries/:deliveryId/retry`. All need an admin signed in as a person; a key can't call them.
 
+### Payables: invoices, shipments and payments
+
+**Payables** (sidebar, with Purchasing on) is where supplier paperwork meets what you ordered and what actually arrived. No money moves anywhere: a payment is a record you make, and everything exports as CSV for your accounting system.
+
+**Supplier invoices** (admins). Enter one against a purchase order (or none): the supplier's own invoice number, dates, currency, lines (an item in its own unit, or a free line for freight and fees), per-line tax and freight. Totals are always worked out by the server from the lines, in the item's units (12.500 kg x $1.20 is $15.00), and an optional "their total" is checked against them. **Fill from what arrived** takes the quantities received and the order's prices.
+
+- **Three-way match.** Matching compares the invoice with the **order's price and quantity** and with **what was actually received** (ledger receipts against the order that haven't been reversed), including what other approved invoices for the same order already billed. A problem is one of: `price_higher` (above the order by more than the tolerance; a lower price is only noted), `not_received`, `over_billed` (more billed than received, across invoices), `over_ordered`, `not_on_po`, `duplicate` (same supplier invoice number already entered), `currency`, `total_differs`, `po_not_open` or `po_supplier`; an invoice with no order is `no_po`. Receipts made after the invoice was entered count the next time it is looked at.
+- **Rules** (Matching rules): the currency of your books, how far a price may be above the order (default 1%), how far billed may exceed received (default 0%) and how far their total may differ (default $0.05).
+- **Flow.** Enter (draft) > **Match it** > a clean match goes straight to *Ready to pay*; anything else is *Needs review*. An admin approves a flagged invoice by saying **why** it is fine ("price confirmed by phone"), which is kept with the invoice and the audit log; the person who entered it can't override its problems unless they are the only approver. Editing sends it back to draft. An invoice can be voided (with a reason) until something is paid against it.
+- **Second person's OK** (INV-7). Settings > Approvals now has two more rules: *Supplier invoices* from $X, and *Changes to how a supplier is paid*. A matching invoice at or over the line, or a payment-details change, waits as an approval request; the second person's approval re-runs the match first, so it can't be approved on stale information.
+
+**How a supplier is paid.** Method, account name, bank and the **last four digits**, and instructions. A full account or card number is refused on purpose. Changing it is audited, and can require a second person's OK (changing where money goes is how invoice fraud works).
+
+**Shipments** (an advance ship notice, anyone on the dock). Record what the supplier says is coming: their reference (unique per supplier), carrier, tracking, expected date and lines with their lot, optionally against a purchase order. Warnings say what doesn't match the order (not on it, more than ordered). **Receive** puts stock in through the ledger like any receipt, tagged with the shipment and the order (so the order, the match and the lot trail all see it), in full or in part, optionally held for inspection. A shipment never changes stock by itself, and can be cancelled until something arrives.
+
+**Payments** (admins). Pay one or several approved invoices of one supplier: method, date (not in the future), reference, note. Each invoice's balance is kept exact with an atomic guard, so two people paying the same invoice can't pay it past its total. Voiding a payment (with a reason) puts the balance back. **Remittance advice** prints a page for the supplier.
+
+**Exports**: `GET /invoices/export/bills.csv` (one row per line of approved and paid invoices, plus a freight row) and `/invoices/export/payments.csv`. The column layout is generic; mapping it to a particular accounting system's import format is not done (unverified).
+
+API (admins, signed in as a person; API keys can't reach these): `/invoices` (list, create, `GET/PATCH /:id`, `POST /:id/submit|approve|void`), `GET/PUT /invoices/settings`, `GET/PUT /invoices/suppliers/:id/payment-details`, `/payments` (list, create, `/:id/void`, `/:id/remittance`), `/shipments` (list, create, `/:id/receive`, `/:id/cancel`; members can record and receive). Invoices, shipments, payments and the rules travel in the full archive.
+
 ### Units of measure
 
 Every item says what it is counted in. Set **Unit** and **Decimal places** in the item form (presets for kg, g, lb, m, m², L, ft, or any text up to 16 characters), and optionally **Also bought or counted in**: `1 bag = 25 kg`. Receiving and counting then take `12.5` for a 3-decimal kg item, and the unit picker next to a quantity box converts bags to kilograms as you type (`2 bag = 50.000 kg`) and refuses anything that wouldn't come out as a whole number of the smallest unit.
