@@ -164,6 +164,10 @@ export function createItemRoutes(store: Store) {
     const _id = new ObjectId(c.req.valid("param").id);
     const doc = await store.items.findOne({ _id, orgId });
     if (!doc) return c.json({ error: "Item not found" }, 404);
+    // Rolls and pallets belong to the item: deleting it would leave them orphaned and still counted as stock.
+    if (await store.units.findOne({ itemId: _id, status: { $ne: "consumed" } }, { projection: { _id: 1 } })) {
+      return c.json({ error: "This item still has rolls or pallets in stock. Use them up first." }, 409);
+    }
 
     const actor = actorOf(c.get("user"));
     const stock = await store.stock.find({ itemId: _id, quantity: { $gt: 0 } }).toArray();
