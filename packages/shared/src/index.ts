@@ -346,6 +346,8 @@ export const AUDIT_ACTIONS = [
   "work_order.released",
   "work_order.completed",
   "work_order.cancelled",
+  "work_order.approved",
+  "production.settings_changed",
   "production.loaded",
   "production.consumed",
   "production.output",

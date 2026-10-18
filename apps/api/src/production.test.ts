@@ -106,6 +106,21 @@ describe("work centers", () => {
     expect((await w.post("/production/work-centers", { name: "Other", code: "wc-1", locationId: w.ids.machine })).status).toBe(409);
     expect((await w.get("/production/work-centers", "member")).status).toBe(200);
   });
+
+  it("can be renamed and switched off, but not while work orders are open on them", async () => {
+    const w = await world();
+    const { wc, order } = await plant(w);
+    const patch = (body: unknown) => call(`${w.base}/production/work-centers/${wc.id}`, { method: "PATCH", body, cookie: w.owner.cookie });
+    expect((await patch({ name: "Corrugator One" })).status).toBe(200);
+    expect((await patch({ active: false })).status).toBe(409); // WO released on it
+    await w.post(`/production/work-orders/${order.id}/action`, { action: "cancel" });
+    const off = await patch({ active: false });
+    expect(off.status).toBe(200);
+    expect(await off.json()).toMatchObject({ name: "Corrugator One", active: false });
+    // a switched-off machine takes no new work orders
+    expect((await w.post("/production/work-orders", { outputItemId: w.ids.box, quantity: 5, workCenterId: wc.id })).status).toBe(422);
+    expect((await call(`${w.base}/production/work-centers/${wc.id}`, { method: "PATCH", body: { active: true }, cookie: w.member.cookie })).status).toBe(403);
+  });
 });
 
 describe("BOMs", () => {
@@ -297,5 +312,67 @@ describe("number sequences", () => {
     expect([...nums].sort()[0]).toBe("PO-0001");
     expect(await nextNumber(store, a, "wo", "WO-")).toBe("WO-0001"); // another kind
     expect(await nextNumber(store, b, "po", "PO-")).toBe("PO-0001"); // another org
+  });
+});
+
+describe("scan lookup", () => {
+  it("resolves work order numbers and work center codes", async () => {
+    const w = await world();
+    const { order } = await plant(w);
+    const find = async (code: string) => (await (await w.get(`/production/lookup?code=${encodeURIComponent(code)}`, "member")).json());
+    expect(await find("WO-0001")).toMatchObject({ kind: "work_order", workOrder: { id: order.id } });
+    expect(await find("wo1")).toMatchObject({ kind: "work_order" });
+    expect(await find("wo-0099")).toEqual({ kind: "none" });
+    const byCode = await find("wc-1");
+    expect(byCode).toMatchObject({ kind: "work_center", workCenter: { code: "WC-1" } });
+    expect(byCode.workOrders.map((o: { id: string }) => o.id)).toEqual([order.id]);
+    expect((await find("Corrugator 1")).kind).toBe("work_center"); // by name too
+    // finished orders are not offered for a machine
+    await w.post(`/production/work-orders/${order.id}/action`, { action: "complete" });
+    expect((await find("WC-1")).workOrders).toEqual([]);
+    expect(await find("")).toEqual({ kind: "none" });
+  });
+});
+
+describe("variance approval", () => {
+  it("is off by default, then flags done orders over the threshold until an admin signs off", async () => {
+    const w = await world();
+    const { order } = await plant(w, { quantity: 100 });
+    const id = order.id;
+    await w.post(`/production/work-orders/${id}/load`, { itemId: w.ids.glue, fromLocationId: w.ids.storage, quantity: 200 });
+    await w.post(`/production/work-orders/${id}/consume`, { itemId: w.ids.glue, used: 150 }); // BOM says 100: +50%
+    await w.post(`/production/work-orders/${id}/output`, { good: 100, toLocationId: w.ids.finished });
+    await w.post(`/production/work-orders/${id}/action`, { action: "complete" });
+    const view = async () => (await (await w.get(`/production/work-orders/${id}`)).json());
+    expect((await view()).approval).toBe("not_needed");
+    expect((await w.post(`/production/work-orders/${id}/approve`, {})).status).toBe(409); // nothing to approve while off
+
+    const put = (body: unknown, who: "owner" | "member" = "owner") =>
+      call(`${w.base}/production/settings`, { method: "PUT", body, cookie: (who === "owner" ? w.owner : w.member).cookie });
+    expect((await put({ varianceThresholdPct: 10 }, "member")).status).toBe(403);
+    expect((await put({ varianceThresholdPct: -5 })).status).toBe(400);
+    expect((await put({ varianceThresholdPct: 10 })).status).toBe(200);
+    expect((await (await w.get("/production/settings", "member")).json()).varianceThresholdPct).toBe(10);
+    expect((await view()).approval).toBe("needed");
+
+    expect((await w.post(`/production/work-orders/${id}/approve`, { note: "ok" }, "member")).status).toBe(403);
+    const ok = await w.post(`/production/work-orders/${id}/approve`, { note: "Glue pail spilled, confirmed with shift lead" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ approval: "approved", approvedBy: "Ada" });
+    expect((await w.post(`/production/work-orders/${id}/approve`, {})).status).toBe(409);
+    const actions = (await store.audit.find({}).toArray()).map((e) => e.action);
+    expect(actions).toContain("work_order.approved");
+    expect(actions).toContain("production.settings_changed");
+
+    // turning it off clears the flag for orders not yet approved, and a raise above the variance does too
+    expect((await put({ varianceThresholdPct: null })).status).toBe(200);
+  });
+
+  it("an order under the threshold, or not done, never needs approval", async () => {
+    const w = await world();
+    const { order } = await plant(w, { quantity: 100 });
+    await call(`${w.base}/production/settings`, { method: "PUT", body: { varianceThresholdPct: 10 }, cookie: w.owner.cookie });
+    expect((await (await w.get(`/production/work-orders/${order.id}`)).json()).approval).toBe("not_needed"); // not done
+    expect((await w.post(`/production/work-orders/${order.id}/approve`, {})).status).toBe(409);
   });
 });

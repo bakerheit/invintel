@@ -145,6 +145,11 @@ function WorkOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
     onSuccess: (wo) => { toast.success(`${wo.number} is now ${wo.status}`); void invalidateOrg(qc, orgId); },
     onError: (e) => toast.error(errMsg(e)),
   });
+  const approve = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) => api.approveWorkOrder(orgId, id, note),
+    onSuccess: (wo) => { toast.success(`${wo.number} variance approved`); void invalidateOrg(qc, orgId); },
+    onError: (e) => toast.error(errMsg(e)),
+  });
   const rows: WorkOrder[] = orders.data ?? [];
   return (
     <div className="space-y-4">
@@ -177,8 +182,15 @@ function WorkOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
                     <TableCell>{o.outputItemName} <span className="text-xs text-muted-foreground">BOM v{o.bomVersion}</span></TableCell>
                     <TableCell>{o.workCenterName}</TableCell>
                     <TableCell className="text-right tabular-nums">{o.produced.toLocaleString()} / {o.quantity.toLocaleString()}</TableCell>
-                    <TableCell><Badge variant="secondary" className={cn("capitalize", STATUS_STYLE[o.status])}>{o.status}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className={cn("capitalize", STATUS_STYLE[o.status])}>{o.status}</Badge>
+                      {o.approval === "needed" && <Badge variant="secondary" className="ml-1 bg-warning-soft text-warning">Needs approval</Badge>}
+                      {o.approval === "approved" && <Badge variant="secondary" className="ml-1 bg-success-soft text-success" title={`Approved by ${o.approvedBy}`}>Approved</Badge>}
+                    </TableCell>
                     <TableCell className="space-x-2 text-right" onClick={(e) => e.stopPropagation()}>
+                      {admin && o.approval === "needed" && (
+                        <Button size="sm" onClick={() => { const note = window.prompt("Why is this variance OK? (optional)"); if (note !== null) approve.mutate({ id: o.id, note }); }}>Approve</Button>
+                      )}
                       {admin && o.status === "planned" && <Button size="sm" onClick={() => act.mutate({ id: o.id, action: "release" })}>Release</Button>}
                       {(o.status === "released" || o.status === "running") && <Button size="sm" variant="outline" onClick={() => act.mutate({ id: o.id, action: "complete" })}>Complete</Button>}
                       {admin && (o.status === "planned" || o.status === "released") && <Button size="sm" variant="ghost" onClick={() => act.mutate({ id: o.id, action: "cancel" })}>Cancel</Button>}
@@ -210,6 +222,11 @@ function WorkCenters({ orgId, admin }: { orgId: string; admin: boolean }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [locationId, setLocationId] = useState("");
+  const update = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; active?: boolean } }) => api.updateWorkCenter(orgId, id, patch),
+    onSuccess: () => void invalidateOrg(qc, orgId),
+    onError: (e) => toast.error(errMsg(e)),
+  });
   const create = useMutation({
     mutationFn: () => api.createWorkCenter(orgId, { name, code, locationId: locationId || production[0]!.id }),
     onSuccess: () => { setName(""); setCode(""); void invalidateOrg(qc, orgId); },
@@ -240,7 +257,7 @@ function WorkCenters({ orgId, admin }: { orgId: string; admin: boolean }) {
       ) : (
         <div className="rounded-lg border">
           <Table>
-            <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Code</TableHead><TableHead>Staging area</TableHead><TableHead className="text-right">Running</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Code</TableHead><TableHead>Staging area</TableHead><TableHead className="text-right">Running</TableHead><TableHead>Status</TableHead>{admin && <TableHead />}</TableRow></TableHeader>
             <TableBody>
               {centers.data?.map((c) => (
                 <TableRow key={c.id}>
@@ -248,6 +265,15 @@ function WorkCenters({ orgId, admin }: { orgId: string; admin: boolean }) {
                   <TableCell>{c.code || "—"}</TableCell>
                   <TableCell>{c.locationPath}</TableCell>
                   <TableCell className="text-right tabular-nums">{c.runningOrders}</TableCell>
+                  <TableCell><Badge variant="secondary" className={c.active ? "bg-success-soft text-success" : "bg-secondary text-secondary-foreground"}>{c.active ? "In use" : "Switched off"}</Badge></TableCell>
+                  {admin && (
+                    <TableCell className="space-x-2 text-right">
+                      <Button size="sm" variant="ghost" onClick={() => { const name = window.prompt("New name", c.name); if (name && name.trim() && name.trim() !== c.name) update.mutate({ id: c.id, patch: { name: name.trim() } }); }}>Rename</Button>
+                      <Button size="sm" variant="outline" disabled={c.active && c.runningOrders > 0} title={c.active && c.runningOrders > 0 ? "Finish its running work orders first" : undefined} onClick={() => update.mutate({ id: c.id, patch: { active: !c.active } })}>
+                        {c.active ? "Switch off" : "Switch on"}
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -341,10 +367,41 @@ function Boms({ orgId, admin }: { orgId: string; admin: boolean }) {
 
 // ---------- variance overview ----------
 
-function VarianceList({ orgId }: { orgId: string }) {
-  const rows = useProd(orgId, "variance-summary", () => api.varianceSummary(orgId));
-  if (!rows.data?.length) return <EmptyState icon={Gauge} title="Nothing to compare yet" description="Once a work order is running, its expected vs actual usage shows up here, worst first." />;
+function ThresholdSetting({ orgId, admin }: { orgId: string; admin: boolean }) {
+  const qc = useQueryClient();
+  const settings = useProd(orgId, "settings", () => api.productionSettings(orgId));
+  const [text, setText] = useState<string | null>(null);
+  const current = settings.data?.varianceThresholdPct ?? null;
+  const value = text ?? (current === null ? "" : String(current));
+  const save = useMutation({
+    mutationFn: () => api.saveProductionSettings(orgId, { varianceThresholdPct: value.trim() === "" ? null : Number(value) }),
+    onSuccess: (s) => { toast.success(s.varianceThresholdPct === null ? "Variance approval is off" : `Work orders over ${s.varianceThresholdPct}% variance need approval`); setText(null); void invalidateOrg(qc, orgId); },
+    onError: (e) => toast.error(errMsg(e)),
+  });
   return (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border p-4">
+      <Field label="Ask for approval when a done work order's worst variance is over (%)">
+        <Input className="w-32" type="number" min={0} step="any" placeholder="Off" value={value} disabled={!admin} onChange={(e) => setText(e.target.value)} />
+      </Field>
+      {admin && <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>}
+      <p className="basis-full text-xs text-muted-foreground">Leave empty to turn it off. Admins approve from the Work orders tab, and each approval is written to the audit log.</p>
+    </div>
+  );
+}
+
+function VarianceList({ orgId, admin }: { orgId: string; admin: boolean }) {
+  const rows = useProd(orgId, "variance-summary", () => api.varianceSummary(orgId));
+  if (!rows.data?.length) {
+    return (
+      <div className="space-y-4">
+        <ThresholdSetting orgId={orgId} admin={admin} />
+        <EmptyState icon={Gauge} title="Nothing to compare yet" description="Once a work order is running, its expected vs actual usage shows up here, worst first." />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+    <ThresholdSetting orgId={orgId} admin={admin} />
     <div className="rounded-lg border">
       <Table>
         <TableHeader><TableRow><TableHead>Work order</TableHead><TableHead>Output</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Yield</TableHead><TableHead className="text-right">Worst variance</TableHead></TableRow></TableHeader>
@@ -362,6 +419,7 @@ function VarianceList({ orgId }: { orgId: string }) {
           ))}
         </TableBody>
       </Table>
+    </div>
     </div>
   );
 }
@@ -396,7 +454,7 @@ export default function ProductionPage() {
         ))}
       </div>
       {tab === "orders" && <WorkOrders orgId={org.id} admin={admin} />}
-      {tab === "variance" && <VarianceList orgId={org.id} />}
+      {tab === "variance" && <VarianceList orgId={org.id} admin={admin} />}
       {tab === "centers" && <WorkCenters orgId={org.id} admin={admin} />}
       {tab === "boms" && <Boms orgId={org.id} admin={admin} />}
     </div>

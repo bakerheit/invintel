@@ -1,6 +1,8 @@
 import { zValidator } from "@hono/zod-validator";
 import {
+  approveInputSchema,
   bomInputSchema,
+  productionSettingsSchema,
   consumeInputSchema,
   loadInputSchema,
   objectIdSchema,
@@ -12,6 +14,7 @@ import {
   workOrderStatusSchema,
   type Bom,
   type MovementType,
+  type ProductionLookup,
   type VarianceLine,
   type VarianceSummaryRow,
   type WorkCenter,
@@ -40,6 +43,7 @@ import { changeStock, logMovement, quantityAt, type Actor } from "./stock-servic
 const idParam = z.object({ id: objectIdSchema });
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const oid = (s: string) => new ObjectId(s);
+const ci = { locale: "en", strength: 2 } as const;
 
 type Fail = { ok: false; status: 404 | 409 | 422; error: string };
 const fail = (status: Fail["status"], error: string): Fail => ({ ok: false, status, error });
@@ -155,9 +159,16 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
   const centers = await store.workCenters.find({ _id: { $in: docs.map((d) => d.workCenterId) } }).toArray();
   const centerById = new Map(centers.map((c) => [c._id.toHexString(), c]));
   const names = await loadItemNames(store, [...new Set(docs.flatMap((d) => [d.outputItemId, ...d.requirements.map((r) => r.itemId)]).map(String))].map(oid));
+  const threshold = docs.length ? ((await store.orgs.findOne({ _id: docs[0]!.orgId }, { projection: { varianceThresholdPct: 1 } }))?.varianceThresholdPct ?? null) : null;
   return Promise.all(
     docs.map(async (d) => {
       const center = centerById.get(d.workCenterId.toHexString());
+      let approval: "not_needed" | "needed" | "approved" = "not_needed";
+      if (d.approval) approval = "approved";
+      else if (d.status === "done" && threshold !== null) {
+        const worst = (await varianceOf(store, d)).worstVariancePct;
+        if (worst !== null && worst > threshold) approval = "needed";
+      }
       const a = center ? await actuals(store, d, center.locationId) : { good: 0 };
       return {
         id: d._id.toHexString(),
@@ -180,6 +191,9 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
           expected: r.expected,
         })),
         produced: a.good,
+        approval,
+        approvedBy: d.approval?.userName ?? null,
+        approvedAt: d.approval?.at.toISOString() ?? null,
         createdAt: d.createdAt.toISOString(),
         updatedAt: d.updatedAt.toISOString(),
       };
@@ -301,6 +315,9 @@ export function createProductionRoutes(store: Store) {
       const bad = await productionLocation(orgId, locationId);
       if (bad) return c.json({ error: bad.error }, bad.status as 404 | 422);
     }
+    if (rest.active === false && (await store.workOrders.countDocuments({ orgId, workCenterId: oid(c.req.valid("param").id), status: { $in: ["released", "running"] } }))) {
+      return c.json({ error: "It has released or running work orders. Finish or cancel them first." }, 409);
+    }
     try {
       const doc = await store.workCenters.findOneAndUpdate(
         { _id: oid(c.req.valid("param").id), orgId },
@@ -378,6 +395,28 @@ export function createProductionRoutes(store: Store) {
       snapshot: { version: doc.version, outputQuantity: doc.outputQuantity, yieldPct: doc.yieldPct, inputs: saved.inputs.map((i) => ({ item: i.itemName, quantity: i.quantity, scrapPct: i.scrapPct })) },
     });
     return c.json(saved, 201);
+  });
+
+  // ----- scan lookup -----
+
+  /** Resolve a scanned code: "WO-0001" (or "wo1"), or a work center's code or name. Open orders only for a work center. */
+  r.get("/lookup", zValidator("query", z.object({ code: z.string().trim().max(100).default("") })), async (c) => {
+    const orgId = c.get("org")._id;
+    const { code } = c.req.valid("query");
+    const none: ProductionLookup = { kind: "none" };
+    if (!code) return c.json(none);
+    const wo = /^wo-?(\d+)$/i.exec(code);
+    if (wo) {
+      const doc = await store.workOrders.findOne({ orgId, number: `WO-${wo[1]!.padStart(4, "0")}` });
+      if (doc) return c.json<ProductionLookup>({ kind: "work_order", workOrder: (await toWorkOrder(store, [doc]))[0]! });
+    }
+    const center =
+      (await store.workCenters.findOne({ orgId, code }, { collation: ci })) ?? (await store.workCenters.findOne({ orgId, name: code }, { collation: ci }));
+    if (center) {
+      const open = await store.workOrders.find({ orgId, workCenterId: center._id, status: { $in: ["released", "running"] } }).sort({ _id: 1 }).toArray();
+      return c.json<ProductionLookup>({ kind: "work_center", workCenter: (await toCenters(orgId, [center]))[0]!, workOrders: await toWorkOrder(store, open) });
+    }
+    return c.json(none);
   });
 
   // ----- work orders -----
@@ -470,6 +509,60 @@ export function createProductionRoutes(store: Store) {
       changes: [{ field: "status", from: wo.status, to: to[action] }],
     });
     return c.json((await toWorkOrder(store, [updated]))[0]);
+  });
+
+  // ----- variance approval -----
+
+  r.get("/settings", async (c) => {
+    const org = await store.orgs.findOne({ _id: c.get("org")._id }, { projection: { varianceThresholdPct: 1 } });
+    return c.json({ varianceThresholdPct: org?.varianceThresholdPct ?? null });
+  });
+
+  r.put("/settings", requireRole("admin"), zValidator("json", productionSettingsSchema), async (c) => {
+    const orgId = c.get("org")._id;
+    const { varianceThresholdPct } = c.req.valid("json");
+    const before = (await store.orgs.findOne({ _id: orgId }, { projection: { varianceThresholdPct: 1 } }))?.varianceThresholdPct ?? null;
+    await store.orgs.updateOne({ _id: orgId }, { $set: { varianceThresholdPct } });
+    if (before !== varianceThresholdPct) {
+      await recordAudit(store, {
+        orgId,
+        actor: auditActor(c.get("user")),
+        action: "production.settings_changed",
+        entity: { type: "organization", id: orgId.toHexString(), label: c.get("org").name },
+        summary: varianceThresholdPct === null ? "Turned off variance approval" : `Variance approval over ${varianceThresholdPct}%`,
+        changes: [{ field: "varianceThresholdPct", from: before, to: varianceThresholdPct }],
+      });
+    }
+    return c.json({ varianceThresholdPct });
+  });
+
+  /** An admin signs off a done work order whose variance is over the threshold. */
+  r.post("/work-orders/:id/approve", requireRole("admin"), zValidator("param", idParam), zValidator("json", approveInputSchema), async (c) => {
+    const orgId = c.get("org")._id;
+    const wo = await loadOrder(orgId, c.req.valid("param").id);
+    if (!wo) return c.json({ error: "Work order not found" }, 404);
+    const [view] = await toWorkOrder(store, [wo]);
+    if (wo.status !== "done") return c.json({ error: `${wo.number} isn't done yet` }, 409);
+    if (view!.approval === "approved") return c.json({ error: `${wo.number} is already approved` }, 409);
+    if (view!.approval !== "needed") return c.json({ error: `${wo.number} doesn't need approval` }, 409);
+    const user = c.get("user");
+    const note = c.req.valid("json").note;
+    const res = await store.workOrders.findOneAndUpdate(
+      { _id: wo._id, approval: { $exists: false } },
+      { $set: { approval: { userId: oid(user.id), userName: user.name, at: new Date(), note }, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!res) return c.json({ error: `${wo.number} is already approved` }, 409);
+    const v = await varianceOf(store, res);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(user),
+      action: "work_order.approved",
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: `Approved variance on ${wo.number} (worst ${v.worstVariancePct}%)${note ? `: ${note}` : ""}`,
+      snapshot: { worstVariancePct: v.worstVariancePct, yieldPct: v.yieldPct, note },
+    });
+    return c.json((await toWorkOrder(store, [res]))[0]);
   });
 
   // ----- floor actions -----

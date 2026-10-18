@@ -123,6 +123,10 @@ export interface WorkOrder {
   requirements: WorkOrderRequirement[];
   /** Good output reported so far. */
   produced: number;
+  /** "needed" = done, over the org's variance threshold and not yet signed off. */
+  approval: "not_needed" | "needed" | "approved";
+  approvedBy: string | null;
+  approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -214,3 +218,20 @@ export interface VarianceSummaryRow {
   yieldPct: number | null;
   worstVariancePct: number | null;
 }
+
+// ---------- scan lookup ----------
+
+/** What a scanned production code means: a work order number (WO-0001) or a work center's code or name. */
+export type ProductionLookup =
+  | { kind: "work_order"; workOrder: WorkOrder }
+  | { kind: "work_center"; workCenter: WorkCenter; workOrders: WorkOrder[] }
+  | { kind: "none" };
+
+// ---------- variance approval ----------
+
+/** Org-level: a done work order whose worst variance is over this percentage needs an admin's sign-off. Null turns it off. */
+export const productionSettingsSchema = z.object({ varianceThresholdPct: z.number().min(0).max(1000).nullable() });
+export type ProductionSettings = z.infer<typeof productionSettingsSchema>;
+
+export const approveInputSchema = z.object({ note: z.string().trim().max(300).default("") });
+export type ApproveInput = z.input<typeof approveInputSchema>;

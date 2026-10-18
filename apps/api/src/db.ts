@@ -18,6 +18,8 @@ export interface SessionDoc {
 
 export interface OrgDoc {
   _id: ObjectId;
+  /** Production: variance over this percentage on a done work order needs sign-off. Absent or null means off. */
+  varianceThresholdPct?: number | null;
   name: string;
   joinCode: string;
   createdBy: ObjectId;
@@ -156,6 +158,7 @@ export interface WorkOrderDoc {
   note: string;
   /** Snapshot taken when the order was made, so a later BOM version can't change an open order. */
   requirements: { itemId: ObjectId; expected: number }[];
+  approval?: { userId: ObjectId; userName: string; at: Date; note: string };
   createdAt: Date;
   updatedAt: Date;
 }
