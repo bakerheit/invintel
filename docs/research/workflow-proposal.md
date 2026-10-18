@@ -86,3 +86,38 @@ Two surfaces, one app:
 - **Scope.** This is a multi-year suite. Phases are chosen so each one is useful alone.
 - **Accuracy of backflush.** It's only as good as BOMs and reporting; counts are the safety net (and the first thing to build after production).
 - **Floor ergonomics.** Everything here about gloves, glare and scanners comes from vendor guidance. We need to test with real devices and operators.
+
+## 9. What the competitor research changes (added after Eli's report)
+
+Source: `docs/research/competitors.md` (Eli). Several of its claims are marked unverified there, and it found no public detail on Apex or on how corrugated vendors handle partial rolls, so treat those as questions for Andrew rather than facts.
+
+**It confirms the core design.** The recurring failures across Epicor, Katana, Odoo, Fishbowl and ERPNext are the ones this proposal was built to avoid: stock that only moves when an order completes (Katana), backflush that silently does nothing (Epicor), backflush that can't handle lot/serial-tracked items (Epicor, Infor), production reporting that's desktop-only (Fishbowl Go, Odoo Shop Floor), and free "set quantity" edits that wreck accuracy (Fishbowl). Ledger-first posting, scan-first Floor mode and explicit unit consumption are the right bets.
+
+**What it changes or sharpens:**
+
+| Change to the plan | Why |
+| --- | --- |
+| **Consumption is hybrid, not pure backflush.** Load defines what's at the machine; reporting usage pre-fills the BOM-expected amount and the operator confirms or edits it. Unit-tracked items are always explicit (scan the roll, enter what's left). | ERPNext's "material transferred for manufacture" and Katana's pre-filled actuals work; Epicor's pure backflush is brittle. Rolls are the case where the ledger needs explicit unit usage. |
+| **Outputs are typed lines**: good, scrap, co-product, remnant. Scrap posts to a scrap location like any other movement, and finished goods can be scrapped from the floor. | Odoo, ERPNext and Infor each bolt scrap and by-products on separately. One concept is simpler. |
+| **No silent failures.** Show a posting preview and a plain reason when something didn't consume or post. | The most repeated complaint against Epicor. |
+| **Progressive complexity.** Start as quantities and locations; switch on units, work centers and BOMs per item. Offer templates (roll item, pallet item). | Implementation time and learning curve dominate complaints at every size. |
+| **Design for offline** (queue, idempotent posting, visible sync state) even though full offline is later. | Soft evidence, but expensive to retrofit. |
+| **Open data**: CSV import/export and a documented API for everything. | Lock-in complaints about Katana and Odoo. |
+| **Barcodes on orders and operations**, not only items. | MRPeasy: scan a work order to jump straight to reporting. |
+| **Units can exist before they arrive** ("in transit"), confirmed at receiving. | Amtech's ASN visibility. Not built. |
+
+**Where this stands against what's built (as of the phase 1 branch):**
+
+| Item | Status |
+| --- | --- |
+| Ledger with reversal, reason on every line, audit log, verify tool | Built (audit log, Activity, reversals). Structured reason codes: not built. |
+| Scan-first Floor mode: Receive, Move, Look up | Built, with camera scanning and one-tap undo (not for units yet). |
+| Floor Count | Not built. |
+| Unit-level stock with shrinking quantity | Built: receive, move, use some, retire at zero, labels. |
+| Report usage returns a remnant to stock | Eli's production code does this on the same unit (leftover stays on the roll; moved back via `moveUnit`). Floor UI for it is not built. |
+| Hybrid consumption, variance view, typed outputs, posting preview | Eli's production branch (API). |
+| CSV import/export | Built on main. |
+| Offline queue | Not built. |
+| Barcodes on orders; in-transit units | Not built. |
+
+**Open questions this adds for Andrew:** is a roll's base unit weight, length or area (the research says the choice drives everything downstream), and how do their plants record remnants and trim today?
