@@ -124,6 +124,10 @@ Things to know:
 - Set `ALLOW_REGISTRATION=false` to close sign-ups once your team is in. The very first account can always register.
 - Set `COOKIE_SECURE=true` when serving over HTTPS.
 
+## Demo data
+
+`pnpm --filter @invintel/api seed:demo` loads a small corrugated plant (nested locations, ten items, receipts, moves, an adjustment) into the configured database and creates `demo@invintel.local` (the password is at the top of `apps/api/src/seed-demo.ts`). It refuses to run if that account already exists. Point it at a scratch database with `MONGODB_DB=invintel_demo`.
+
 ## Scripts
 
 - `pnpm dev` run API and web together

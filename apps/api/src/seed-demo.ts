@@ -1,0 +1,95 @@
+// Loads a small corrugated-plant demo into a local database so you can click around.
+//   pnpm --filter @invintel/api seed:demo
+// Signs in as demo@invintel.local with the password below. Local development only: refuses to run
+// twice (it never touches an account that already exists) and prints nothing sensitive.
+import { createApp } from "./app.js";
+import { connect } from "./db.js";
+
+const DEMO_EMAIL = "demo@invintel.local";
+const DEMO_PASSWORD = "invintel-demo-2026";
+
+const store = await connect();
+const app = createApp(store, { allowRegistration: true, cookieSecure: false });
+
+if (await store.users.findOne({ email: DEMO_EMAIL })) {
+  console.log(`The demo account already exists in database "${store.db.databaseName}". Nothing changed.`);
+  await store.close();
+  process.exit(0);
+}
+
+let cookie = "";
+async function call<T = any>(path: string, body?: unknown, method = body === undefined ? "GET" : "POST"): Promise<T> {
+  const res = await app.request(path, {
+    method,
+    headers: { ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${await res.text()}`);
+  const set = res.headers.get("set-cookie");
+  if (set) cookie = set.split(";")[0]!;
+  return (res.status === 204 ? undefined : await res.json()) as T;
+}
+
+const reg = await call("/api/auth/register", {
+  name: "Dana Demo",
+  email: DEMO_EMAIL,
+  password: DEMO_PASSWORD,
+  organization: { mode: "create", name: "Demo Corrugated Co." },
+});
+const base = `/api/orgs/${reg.organization.id}`;
+
+const first = (await call<{ id: string }[]>(`${base}/locations`))[0]!;
+const plant = first.id; // "Main" becomes the plant
+await call(`${base}/locations/${plant}`, { name: "Plant 1", type: "storage" }, "PATCH");
+const loc = async (name: string, type: string, code: string, parentId: string | null = plant) =>
+  (await call<{ id: string }>(`${base}/locations`, { name, type, code, parentId })).id;
+
+const dock = await loc("Receiving dock", "receiving", "DOCK");
+const rolls = await loc("Roll storage", "storage", "ROLLS");
+const rackA = await loc("Rack A", "storage", "RA", rolls);
+const rackB = await loc("Rack B", "storage", "RB", rolls);
+const chem = await loc("Chemical room", "storage", "CHEM");
+const corr = await loc("Corrugator 1", "production", "CORR1");
+const conv = await loc("Converting WIP", "wip", "WIP");
+const fg = await loc("Finished goods", "finished", "FG");
+const ship = await loc("Shipping", "shipping", "SHIP");
+
+const item = (sku: string, name: string, category: string, reorderLevel: number, dollars: number, barcodes: string[] = [], description = "") =>
+  call<{ id: string }>(`${base}/items`, { sku, name, category, reorderLevel, unitCostCents: Math.round(dollars * 100), barcodes, description }).then((i) => i.id);
+
+const kraft = await item("LINER-KR42", "Kraft liner 42 lb, 60 in roll", "Paper", 12, 480, [], "Single-face and double-backer liner");
+const med = await item("MED-26", "Corrugating medium 26 lb, 60 in roll", "Paper", 10, 390);
+const test = await item("LINER-T33", "Test liner 33 lb, 60 in roll", "Paper", 8, 420);
+const starch = await item("STARCH-50", "Corn starch 50 lb bag", "Adhesive", 40, 28, ["0049000050103"]);
+const inkB = await item("INK-BLK", "Flexo ink, black, 5 gal", "Ink", 6, 95);
+const inkW = await item("INK-WHT", "Flexo ink, white, 5 gal", "Ink", 6, 92);
+const strap = await item("STRAP-PP", "Polypropylene strapping coil", "Supplies", 20, 31.5);
+const pallet = await item("PAL-4840", "Pallet 48x40", "Supplies", 100, 9);
+const rsc = await item("RSC-1296", "RSC box 12x9x6 (bundle of 25)", "Finished goods", 50, 21, ["0850012345674"]);
+const rsc2 = await item("RSC-181212", "RSC box 18x12x12 (bundle of 25)", "Finished goods", 40, 34);
+
+const receive = (itemId: string, locationId: string, quantity: number, reference: string) =>
+  call(`${base}/receipts`, { itemId, locationId, quantity, reference });
+const move = (itemId: string, from: string, to: string, quantity: number, reason = "") =>
+  call(`${base}/moves`, { itemId, fromLocationId: from, toLocationId: to, quantity, reason });
+
+await receive(kraft, rackA, 14, "PO 4401");
+await receive(med, rackA, 11, "PO 4402");
+await receive(test, rackB, 5, "PO 4388");
+await receive(starch, chem, 55, "PO 4410");
+await receive(inkB, chem, 4, "PO 4390");
+await receive(inkW, chem, 9, "PO 4390");
+await receive(strap, conv, 26, "PO 4377");
+await receive(pallet, ship, 140, "PO 4350");
+await receive(rsc, fg, 80, "Run 2291");
+await receive(rsc2, fg, 36, "Run 2292");
+await receive(kraft, dock, 6, "PO 4415 (just arrived)");
+await receive(med, dock, 4, "PO 4415 (just arrived)");
+await move(kraft, rackA, corr, 3, "Load for order 2301");
+await move(med, rackA, corr, 2, "Load for order 2301");
+await move(rsc, fg, ship, 25, "Order 8812");
+await call(`${base}/items/${inkB}/adjust`, { locationId: chem, delta: -1, reason: "Spilled during a pail change" });
+
+console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
+await store.close();
+process.exit(0);

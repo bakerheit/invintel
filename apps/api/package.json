@@ -8,7 +8,8 @@
     "build": "tsc --noEmit",
     "start": "tsx --env-file-if-exists=../../.env src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:demo": "tsx --env-file-if-exists=../../.env src/seed-demo.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.0",
