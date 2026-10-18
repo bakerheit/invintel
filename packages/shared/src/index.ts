@@ -193,7 +193,7 @@ export const transferInputSchema = z
   });
 export type TransferInput = z.infer<typeof transferInputSchema>;
 
-export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal"]);
+export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap"]);
 export type MovementType = z.infer<typeof movementTypeSchema>;
 export const MOVEMENT_TYPES = movementTypeSchema.options;
 
@@ -466,3 +466,4 @@ export const importInputSchema = z.object({
   dryRun: z.boolean().default(true),
 });
 export type ImportInput = z.input<typeof importInputSchema>;
+export * from "./production.js";
