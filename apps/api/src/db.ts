@@ -132,6 +132,12 @@ export interface MovementDoc {
   orgId: ObjectId;
   /** The supplier's lot or batch number, on receipts that recorded one. */
   supplierLot?: string;
+  /** The expiry date (YYYY-MM-DD) the receipt recorded. */
+  expiresOn?: string;
+  /** The pallet or carton (SSCC) a receipt line came on. */
+  sscc?: string;
+  /** Lines posted together as one floor document (several items, one place) share this; undo takes the whole batch. */
+  batchId?: ObjectId;
   /** Set on lines that belong to a quality hold; Activity won't reverse them (use the NCR). */
   ncrId?: ObjectId;
   /** The pick-list reason on scrap lines (and holds), so reports can group by it. */
@@ -821,6 +827,7 @@ export async function connect(
     // Trace lookups: lines of one work order, of one unit, and receipts by lot.
     store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),
     store.movements.createIndex({ orgId: 1, supplierLot: 1 }, { sparse: true }),
+    store.movements.createIndex({ orgId: 1, batchId: 1 }, { sparse: true }),
     store.units.createIndex({ orgId: 1, lot: 1 }, { collation: caseInsensitive }),
     store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),

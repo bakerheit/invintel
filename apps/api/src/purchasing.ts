@@ -133,8 +133,10 @@ export async function receiveAgainstOrder(
     if (!lease) return { status: 409 as number, body: { error: "This order was just changed. Reload it." } };
     const actor = actorOf(user);
     const movementIds: ObjectId[] = [];
+    // The lines of this delivery are one document: undo from the floor takes all of it back.
+    const batchId = new ObjectId();
     for (const l of input.lines) {
-      const res = await postAdjustment(store, orgId, actor, { itemId: oid(l.itemId), locationId: oid(input.locationId), delta: l.quantity, reason: `Received: ${doc.number}`, type: "receive", supplierLot: l.supplierLot });
+      const res = await postAdjustment(store, orgId, actor, { itemId: oid(l.itemId), locationId: oid(input.locationId), delta: l.quantity, reason: `Received: ${doc.number}`, type: "receive", supplierLot: l.supplierLot, ...(l.expiresOn ? { expiresOn: l.expiresOn } : {}), batchId });
       if (!res.ok) {
         // Lines before this one are already posted (and counted against the order); the caller is told.
         return { status: res.status as number, body: { error: res.error, partial: movementIds.length > 0 } };
@@ -147,7 +149,7 @@ export async function receiveAgainstOrder(
     if (input.inspect) {
       for (const l of input.lines) {
         const hold = await openHold(store, orgId, actor, { reason: INSPECT_REASON, note: doc.number, source: "receiving", itemId: l.itemId, locationId: input.locationId, quantity: l.quantity, supplierLot: l.supplierLot, purchaseOrderId: doc._id });
-        if (hold.ok) { ncrs.push({ id: hold.ncr._id.toHexString(), number: hold.ncr.number }); movementIds.push(...hold.movementIds); }
+        if (hold.ok) { ncrs.push({ id: hold.ncr._id.toHexString(), number: hold.ncr.number }); await store.movements.updateMany({ _id: { $in: hold.movementIds } }, { $set: { batchId } }); movementIds.push(...hold.movementIds); }
         else {
           await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" } });
           return { status: hold.status as number, body: { error: `Received, but a line could not be put on hold: ${hold.error}`, partial: true } };
@@ -162,7 +164,7 @@ export async function receiveAgainstOrder(
       summary: `Received ${input.lines.reduce((s, l) => s + l.quantity, 0).toLocaleString("en-US")} units against ${doc.number}${overReceived.length ? " (over-received)" : ""}`,
       refs: { movementIds: movementIds.map(String), status: order!.status, from: before!.status },
     });
-    const result: PoReceiveResult = { order: order!, movementIds: movementIds.map(String), overReceived, ...(ncrs.length ? { ncrs } : {}) };
+    const result: PoReceiveResult = { order: order!, batchId: batchId.toHexString(), movementIds: movementIds.map(String), overReceived, ...(ncrs.length ? { ncrs } : {}) };
     return { status: 201, body: result };
 }
 

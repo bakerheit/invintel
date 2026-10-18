@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { altUnitsSchema, decimalsSchema, DEFAULT_UOM, unitLabelSchema, type Uom } from "./units.js";
+import { gs1CheckDigitOk, isRealIsoDate } from "./gs1.js";
+import { altUnitsSchema, decimalsSchema, DEFAULT_UOM, MAX_QTY, unitLabelSchema, type Uom } from "./units.js";
 
 // ---------- ids ----------
 
@@ -247,10 +248,48 @@ export const receiveInputSchema = z.object({
   reference: z.string().trim().max(200).default(""),
   /** The supplier's lot or batch number from the label, kept on the ledger line for traceability. */
   supplierLot: z.string().trim().max(64).default(""),
+  /** The expiry date from the label (YYYY-MM-DD), kept on the ledger line next to the lot. */
+  expiresOn: z.string().refine(isRealIsoDate, "Use a real date (YYYY-MM-DD)").optional(),
   /** Inspect before release: the received stock goes straight on quality hold ("Awaiting inspection"). */
   inspect: z.boolean().default(false),
 });
 export type ReceiveInput = z.infer<typeof receiveInputSchema>;
+
+/** One line of a floor document that carries a lot: what a GS1 label gives us, and what a person can type. */
+export const receiveLineSchema = z.object({
+  itemId: objectIdSchema,
+  quantity: z.number().int().positive().max(MAX_QTY),
+  supplierLot: z.string().trim().max(64).default(""),
+  expiresOn: z.string().refine(isRealIsoDate, "Use a real date (YYYY-MM-DD)").optional(),
+  /** The pallet or carton (SSCC) the line came on: 18 digits with a good check digit. */
+  sscc: z.string().refine((v) => /^\d{18}$/.test(v) && gs1CheckDigitOk(v), "That isn't a valid pallet number (SSCC)").optional(),
+});
+export type ReceiveLine = z.infer<typeof receiveLineSchema>;
+
+/** Receiving several items into one place as one document: scan the place once, then the items. */
+export const receiveBatchSchema = z.object({
+  locationId: objectIdSchema,
+  reference: z.string().trim().max(200).default(""),
+  inspect: z.boolean().default(false),
+  lines: z.array(receiveLineSchema).min(1).max(100),
+});
+export type ReceiveBatchInput = z.infer<typeof receiveBatchSchema>;
+
+export const moveBatchSchema = z.object({
+  toLocationId: objectIdSchema,
+  reason: z.string().trim().max(200).default(""),
+  lines: z.array(z.object({ itemId: objectIdSchema, fromLocationId: objectIdSchema, quantity: z.number().int().positive().max(MAX_QTY) })).min(1).max(100),
+});
+export type MoveBatchInput = z.infer<typeof moveBatchSchema>;
+
+/** The result of a batch document. `batchId` is what undo takes. */
+export interface PostedBatch {
+  batchId: string;
+  lines: { itemId: string; itemName: string; quantity: number; movementIds: string[] }[];
+  movementIds: string[];
+  /** Holds opened by "inspect before release". */
+  ncrs?: { id: string; number: string }[];
+}
 
 export const moveInputSchema = z
   .object({
@@ -301,6 +340,8 @@ export interface ActivityEntry {
   userName: string;
   /** The supplier's lot number, when the receipt recorded one. */
   supplierLot?: string;
+  /** The expiry date (YYYY-MM-DD) the receipt recorded, usually from a GS1 label. */
+  expiresOn?: string;
   /** Set on both halves of a transfer. */
   transferId?: string;
   /** Set on a reversal: the movement it undoes. */
@@ -761,3 +802,4 @@ export * from "./exchange.js";
 export * from "./sales.js";
 export * from "./templates.js";
 export * from "./address.js";
+export * from "./gs1.js";

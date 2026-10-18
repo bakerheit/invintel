@@ -244,7 +244,7 @@ class Trace {
       for (const m of recent) {
         const po = m.purchaseOrderId ? await this.po(m.purchaseOrderId) : null;
         if (po) { this.pos.add(po.number); if (po.supplier) this.suppliers.add(po.supplier); }
-        const r = this.node("receipt", m._id.toHexString(), `Received ${day(m.createdAt)}: ${m.delta.toLocaleString("en-US")}`, [m.supplierLot && `lot ${m.supplierLot}`, po && `${po.number}${po.supplier ? `, ${po.supplier}` : ""}`].filter(Boolean).join(" · ") || "no lot recorded", false);
+        const r = this.node("receipt", m._id.toHexString(), `Received ${day(m.createdAt)}: ${m.delta.toLocaleString("en-US")}`, [m.supplierLot && `lot ${m.supplierLot}`, m.expiresOn && `expires ${m.expiresOn}`, po && `${po.number}${po.supplier ? `, ${po.supplier}` : ""}`].filter(Boolean).join(" · ") || "no lot recorded", false);
         if (r) inputs.children.push(r);
       }
       node.children.push(inputs);

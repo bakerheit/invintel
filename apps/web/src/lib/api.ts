@@ -127,6 +127,9 @@ import type {
   OrgSummary,
   RegisterInput,
   PostedDocument,
+  PostedBatch,
+  ReceiveBatchInput,
+  MoveBatchInput,
   ReceiveInput,
   RegisterResult,
   StockMovement,
@@ -402,6 +405,9 @@ export const api = {
 
   lookup: (orgId: string, code: string) =>
     request<LookupResult>(`/orgs/${orgId}/lookup?code=${encodeURIComponent(code)}`),
+  receiveBatch: (orgId: string, input: ReceiveBatchInput) => request<PostedBatch>(`/orgs/${orgId}/receipts/batch`, post(input)),
+  moveBatch: (orgId: string, input: MoveBatchInput) => request<PostedBatch>(`/orgs/${orgId}/moves/batch`, post(input)),
+  undoBatch: (orgId: string, batchId: string) => request<{ reversedIds: string[]; movementIds: string[] }>(`/orgs/${orgId}/batches/${batchId}/undo`, post({})),
   receive: (orgId: string, input: Partial<ReceiveInput> & Pick<ReceiveInput, "itemId" | "locationId" | "quantity">) =>
     request<PostedDocument>(`/orgs/${orgId}/receipts`, post(input)),
   move: (orgId: string, input: Partial<MoveInput> & Pick<MoveInput, "itemId" | "fromLocationId" | "toLocationId" | "quantity">) =>

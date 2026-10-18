@@ -19,6 +19,77 @@ import { changeStock } from "./stock-service.js";
 /** Members can take back their own mistakes for a short while. Anything else needs an admin. */
 export const UNDO_WINDOW_MS = 15 * 60 * 1000;
 
+export const canReverse = (m: MovementDoc, role: keyof typeof ROLE_RANK, userId: string, now = Date.now()) => {
+  if (movementType(m) === "reversal" || m.reversedBy) return false;
+  if (ROLE_RANK[role] >= ROLE_RANK.admin) return true;
+  return !!m.userId && m.userId.toHexString() === userId && now - m.createdAt.getTime() <= UNDO_WINDOW_MS;
+};
+
+export type ReverseFailure = { ok: false; status: 409 | 422; error: string };
+export type Reversed = { ok: true; pairs: { original: MovementDoc; reversalId: ObjectId }[] };
+
+/**
+ * Takes back a set of movements together: claims every original so two people can't reverse the same entry at once,
+ * puts the stock back (removals first, since those can fail), then records the reversals. Either all of it happens or
+ * none of it does. Callers decide whether the person may do this; this only checks that it can be done.
+ */
+export async function reverseGroup(store: Store, orgId: ObjectId, user: { id: string; name: string }, group: MovementDoc[], reason?: string): Promise<Reversed | ReverseFailure> {
+  const pairs = group.map((m) => ({ original: m, reversalId: new ObjectId() }));
+
+  // 1. Claim each original.
+  const claimed: typeof pairs = [];
+  const release = () =>
+    Promise.all(claimed.map((p) => store.movements.updateOne({ _id: p.original._id }, { $unset: { reversedBy: "" } })));
+  for (const pair of pairs) {
+    const res = await store.movements.updateOne({ _id: pair.original._id, reversedBy: { $exists: false } }, { $set: { reversedBy: pair.reversalId } });
+    if (!res.matchedCount) {
+      await release();
+      return { ok: false, status: 409, error: "That entry has already been reversed" };
+    }
+    claimed.push(pair);
+  }
+
+  // 2. Undo the stock change.
+  const applied: typeof pairs = [];
+  const unwind = () => Promise.all(applied.map((p) => changeStock(store, orgId, p.original.itemId, p.original.locationId, p.original.delta)));
+  try {
+    const ordered = [...pairs].sort((a, b) => b.original.delta - a.original.delta);
+    for (const pair of ordered) {
+      const { itemId, locationId, delta } = pair.original;
+      if ((await changeStock(store, orgId, itemId, locationId, -delta)) === null) {
+        await unwind();
+        await release();
+        const loc = await store.locations.findOne({ _id: locationId });
+        return { ok: false, status: 422, error: `Can't reverse this: not enough stock left at ${loc?.name ?? "that location"}. It may have been used or moved already.` };
+      }
+      applied.push(pair);
+    }
+  } catch (e) {
+    await unwind();
+    await release();
+    throw e;
+  }
+
+  // 3. Record the reversals.
+  const now = new Date();
+  await store.movements.insertMany(
+    pairs.map(({ original: o, reversalId }) => ({
+      _id: reversalId,
+      orgId,
+      type: "reversal" as const,
+      itemId: o.itemId,
+      locationId: o.locationId,
+      delta: -o.delta,
+      reason: reason ? `Reversal: ${reason}` : "Reversal",
+      userId: new ObjectId(user.id),
+      userName: user.name,
+      reversalOf: o._id,
+      createdAt: now,
+    })),
+  );
+  return { ok: true, pairs };
+}
+
 const idParam = z.object({ id: objectIdSchema });
 const listQuery = z.object({
   itemId: objectIdSchema.optional(),
@@ -33,12 +104,6 @@ const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function createActivityRoutes(store: Store) {
   const r = new Hono<OrgEnv>();
-
-  const canReverse = (m: MovementDoc, role: keyof typeof ROLE_RANK, userId: string, now = Date.now()) => {
-    if (movementType(m) === "reversal" || m.reversedBy) return false;
-    if (ROLE_RANK[role] >= ROLE_RANK.admin) return true;
-    return !!m.userId && m.userId.toHexString() === userId && now - m.createdAt.getTime() <= UNDO_WINDOW_MS;
-  };
 
   r.get("/", zValidator("query", listQuery), async (c) => {
     const orgId = c.get("org")._id;
@@ -126,6 +191,7 @@ export function createActivityRoutes(store: Store) {
         reason: m.reason,
         userName: m.userName,
         ...(m.supplierLot ? { supplierLot: m.supplierLot } : {}),
+        ...(m.expiresOn ? { expiresOn: m.expiresOn } : {}),
         ...(m.transferId ? { transferId: m.transferId.toHexString() } : {}),
         ...(m.reversalOf ? { reversalOf: m.reversalOf.toHexString() } : {}),
         reversed: !!m.reversedBy,
@@ -170,66 +236,9 @@ export function createActivityRoutes(store: Store) {
       : [original];
     if (group.some((m) => m.reversedBy)) return c.json({ error: "That entry has already been reversed" }, 409);
 
-    const pairs = group.map((m) => ({ original: m, reversalId: new ObjectId() }));
-
-    // 1. Claim each original so two people can't reverse the same entry at once.
-    const claimed: typeof pairs = [];
-    const release = () =>
-      Promise.all(claimed.map((p) => store.movements.updateOne({ _id: p.original._id }, { $unset: { reversedBy: "" } })));
-    for (const pair of pairs) {
-      const res = await store.movements.updateOne(
-        { _id: pair.original._id, reversedBy: { $exists: false } },
-        { $set: { reversedBy: pair.reversalId } },
-      );
-      if (!res.matchedCount) {
-        await release();
-        return c.json({ error: "That entry has already been reversed" }, 409);
-      }
-      claimed.push(pair);
-    }
-
-    // 2. Undo the stock change. Removals first: they're the ones that can fail.
-    const applied: typeof pairs = [];
-    const unwind = () =>
-      Promise.all(applied.map((p) => changeStock(store, orgId, p.original.itemId, p.original.locationId, p.original.delta)));
-    try {
-      const ordered = [...pairs].sort((a, b) => b.original.delta - a.original.delta);
-      for (const pair of ordered) {
-        const { itemId, locationId, delta } = pair.original;
-        if ((await changeStock(store, orgId, itemId, locationId, -delta)) === null) {
-          await unwind();
-          await release();
-          const loc = await store.locations.findOne({ _id: locationId });
-          return c.json(
-            { error: `Can't reverse this: not enough stock left at ${loc?.name ?? "that location"}. It may have been used or moved already.` },
-            422,
-          );
-        }
-        applied.push(pair);
-      }
-    } catch (e) {
-      await unwind();
-      await release();
-      throw e;
-    }
-
-    // 3. Record the reversals.
-    const now = new Date();
-    await store.movements.insertMany(
-      pairs.map(({ original: o, reversalId }) => ({
-        _id: reversalId,
-        orgId,
-        type: "reversal" as const,
-        itemId: o.itemId,
-        locationId: o.locationId,
-        delta: -o.delta,
-        reason: reason ? `Reversal: ${reason}` : "Reversal",
-        userId: new ObjectId(user.id),
-        userName: user.name,
-        reversalOf: o._id,
-        createdAt: now,
-      })),
-    );
+    const reversed = await reverseGroup(store, orgId, { id: user.id, name: user.name }, group, reason);
+    if (!reversed.ok) return c.json({ error: reversed.error }, reversed.status);
+    const { pairs } = reversed;
 
     const places = await store.locations.find({ _id: { $in: group.map((m) => m.locationId) } }).toArray();
     const placeName = (id: ObjectId) => places.find((l) => l._id.equals(id))?.name ?? "a deleted location";

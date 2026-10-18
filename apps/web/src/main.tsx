@@ -25,6 +25,7 @@ import DocumentsPage from "./pages/documents";
 import ExchangePage from "./pages/exchange";
 import SupplierPortalPage from "./pages/supplier-portal";
 import ReceivePage from "./pages/floor/receive";
+import ReceivePoPage from "./pages/floor/receive-po";
 import InventoryPage from "./pages/inventory";
 import ItemDetailPage from "./pages/item-detail";
 import OverviewPage from "./pages/overview";
@@ -121,6 +122,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="floor" element={<FloorLayout />}>
               <Route index element={<FloorHome />} />
               <Route path="receive" element={<ReceivePage />} />
+              <Route path="receive-po" element={<ReceivePoPage />} />
               <Route path="move" element={<MovePage />} />
               <Route path="production" element={<ProductionFloorPage />} />
               <Route path="quality" element={<QualityFloorPage />} />

@@ -1,11 +1,12 @@
 import type { OrgModules } from "@invintel/shared";
-import { ArrowLeftRight, ClipboardCheck, Factory, PackagePlus, PowerOff, ScanSearch, ShieldAlert, type LucideIcon } from "lucide-react";
+import { ArrowLeftRight, ClipboardCheck, Factory, PackagePlus, PowerOff, ScanSearch, ShieldAlert, Truck, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { useCurrentOrg } from "@/lib/org";
 import { cn } from "@/lib/utils";
 
 const TILES: { to: string; label: string; hint: string; icon: LucideIcon; wide: boolean; module?: keyof OrgModules }[] = [
   { to: "receive", label: "Receive", hint: "Stock coming in", icon: PackagePlus, wide: false },
+  { to: "receive-po", label: "Receive a PO", hint: "Check a delivery against its order", icon: Truck, wide: false, module: "purchasing" },
   { to: "move", label: "Move", hint: "Item to a new place", icon: ArrowLeftRight, wide: false },
   { to: "production", label: "Production", hint: "Load, report usage, report output", icon: Factory, wide: true, module: "production" },
   { to: "quality", label: "Quality hold", hint: "Stop a roll or stock being used", icon: ShieldAlert, wide: false },

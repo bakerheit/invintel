@@ -40,18 +40,24 @@ async function openCamera(): Promise<MediaStream> {
   }
 }
 
-function Viewfinder({ onFound, onClose }: { onFound: (code: string) => void; onClose: () => void }) {
+/** In continuous mode the same code isn't reported again for this long, so a label held in view counts once. */
+const REPEAT_MS = 2500;
+
+function Viewfinder({ onFound, onClose, continuous }: { onFound: (code: string) => void; onClose: () => void; continuous?: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const track = useRef<MediaStreamTrack | null>(null);
   const [status, setStatus] = useState<"starting" | "scanning" | "error">("starting");
   const [error, setError] = useState<string | null>(null);
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [last, setLast] = useState<{ code: string; count: number } | null>(null);
 
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
     let stream: MediaStream | null = null;
+    let lastHit = { value: "", at: 0 };
+    let count = 0;
 
     (async () => {
       try {
@@ -83,9 +89,17 @@ function Viewfinder({ onFound, onClose }: { onFound: (code: string) => void; onC
             ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
             const hit = await detector.detect(ctx.getImageData(0, 0, canvas.width, canvas.height)).catch(() => null);
             if (hit && !stopped) {
-              stopped = true;
-              onFound(hit.value);
-              return;
+              if (!continuous) {
+                stopped = true;
+                onFound(hit.value);
+                return;
+              }
+              const now = Date.now();
+              if (hit.value !== lastHit.value || now - lastHit.at > REPEAT_MS) {
+                onFound(hit.value);
+                setLast({ code: hit.value, count: ++count });
+              }
+              lastHit = { value: hit.value, at: now };
             }
           }
           timer = window.setTimeout(tick, SCAN_INTERVAL_MS);
@@ -130,8 +144,8 @@ function Viewfinder({ onFound, onClose }: { onFound: (code: string) => void; onC
                 <div className="absolute inset-x-3 top-0 h-0.5 animate-[scan_1.8s_ease-in-out_infinite] rounded bg-primary shadow-[0_0_8px_var(--primary)] motion-reduce:animate-none" />
               </div>
             </div>
-            <p className="absolute inset-x-0 bottom-4 text-center text-base font-medium text-white drop-shadow">
-              Point at a barcode
+            <p className="absolute inset-x-0 bottom-4 px-3 text-center text-base font-medium text-white drop-shadow">
+              {last ? <>Scanned {last.count}: <span className="font-mono">{last.code.length > 28 ? `${last.code.slice(0, 28)}…` : last.code}</span></> : "Point at a barcode"}
             </p>
           </>
         )}
@@ -155,18 +169,19 @@ function Viewfinder({ onFound, onClose }: { onFound: (code: string) => void; onC
           </Button>
         )}
         <Button type="button" variant={status === "error" ? "default" : "outline"} className="h-14 flex-1 text-base" onClick={onClose}>
-          {status === "error" ? "Close" : "Cancel"}
+          {status === "error" ? "Close" : continuous ? "Done" : "Cancel"}
         </Button>
       </div>
     </>
   );
 }
 
-/** Full-screen-ish camera view that reads one barcode, then closes. */
-export function CameraScanner({ open, onOpenChange, onScan }: {
+/** Full-screen-ish camera view that reads one barcode, then closes. With `continuous` it stays open and reports each new code until Done. */
+export function CameraScanner({ open, onOpenChange, onScan, continuous }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onScan: (code: string) => void;
+  continuous?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -175,9 +190,10 @@ export function CameraScanner({ open, onOpenChange, onScan }: {
         <DialogDescription className="sr-only">Point the camera at a barcode or QR code.</DialogDescription>
         {open && (
           <Viewfinder
+            continuous={continuous}
             onClose={() => onOpenChange(false)}
             onFound={(code) => {
-              onOpenChange(false);
+              if (!continuous) onOpenChange(false);
               onScan(code);
             }}
           />

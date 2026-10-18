@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  * The on-screen keyboard is off by default so it doesn't cover the screen on a handheld; the
  * keyboard button turns it on for typing a code by hand.
  */
-export function ScanInput({ label, placeholder = "Scan or type", onScan, disabled, error, errorAction }: {
+export function ScanInput({ label, placeholder = "Scan or type", onScan, disabled, error, errorAction, continuousCamera }: {
   label: string;
   placeholder?: string;
   onScan: (code: string) => void;
@@ -19,6 +19,8 @@ export function ScanInput({ label, placeholder = "Scan or type", onScan, disable
   error?: string | null;
   /** Shown under the error, e.g. a way out of "nothing matches". */
   errorAction?: ReactNode;
+  /** The camera stays open and keeps reading until Done (for scanning a list of items). */
+  continuousCamera?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [typing, setTyping] = useState(false);
@@ -92,6 +94,7 @@ export function ScanInput({ label, placeholder = "Scan or type", onScan, disable
       <CameraScanner
         open={cameraOpen}
         onOpenChange={setCameraOpen}
+        continuous={continuousCamera}
         onScan={(code) => {
           feedback("scan");
           onScan(code);

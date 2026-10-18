@@ -295,12 +295,21 @@ Limits, so nobody over-trusts it:
 Every scan field in Floor mode accepts three kinds of input, and they all behave the same:
 
 1. **A hardware scanner** (the usual choice on a plant floor). Most work as a keyboard ("wedge"): set the suffix to Enter and the field takes it.
-2. **The camera** (button next to the scan field). It reads one code, then closes.
+2. **The camera** (button next to the scan field). It reads one code, then closes (on the multi-scan Receive and Move screens it stays open until Done).
 3. **Typing** (keyboard button), for labels that won't scan.
 
 How the camera works: it uses the browser's own `BarcodeDetector` when the device has one and it can read Code 128 (Chrome on Android, and Chrome on macOS). Otherwise it falls back to [ZXing-C++ compiled to WebAssembly](https://github.com/Sec-ant/barcode-detector) (iOS Safari, Firefox, Windows and Linux Chrome). The WASM binary (about 1 MB) is served from our own origin, not a CDN, and only downloads the first time someone opens the camera, so it works on a plant network with no internet. To force the WASM path on a device whose native detector misbehaves, run `localStorage.setItem("invintel.scanner", "wasm")` in that browser.
 
 Formats read: Code 128, Code 39, ITF, EAN-13, EAN-8, UPC-A, UPC-E, QR and Data Matrix (the list is in `apps/web/src/lib/scan-formats.ts`). Print SKUs as Code 128 and location codes as QR or Code 128.
+
+### Floor speed: scan the place once, then the items; GS1 labels
+
+INV-20. **Floor mode > Receive** and **Move** are one document with many lines: **scan the place once, then scan each item**. Every scan of a counted item adds one; the same item (and lot, expiry, pallet) merges into one line of a running list you can nudge (+/-), type over (tap the number) or remove; **Undo** next to the last scan steps back; **one button at the end** posts the whole list as one document, and **one Undo** takes all of it back (same rule as a single entry: your own, within 15 minutes, or an admin; a receipt put on hold is decided from Quality). Things measured in kilos, metres or litres ask for a quantity instead of adding one. Rolls and pallets (tracked by unit) still go through their own label flow, from the same screen. The phone camera stays open in this mode and reads each new code (the same label held in view counts once).
+
+- **Receive a PO** (new tile, Purchasing feature switch): pick the open order or type its number, scan where the delivery goes once, then scan what is on the truck. Each scan counts against that order's line; it shows "5 of 20 (3 came before)", flags anything over what was ordered, refuses an item that isn't on the order, and **All arrived** counts everything still owed. One receipt, one Undo.
+- **GS1-128 labels** (also GS1 Data Matrix and QR): scan a pallet or carton label and the item (by GTIN), **lot (10)**, **expiry (17)**, **count (37/30)** and **pallet number (00)** fill themselves in; the expiry is stored on the receipt line next to the lot (`expiresOn`, shown in Activity and lot traces). Check digits (GTIN, SSCC), dates, field lengths and the GS1 character set are all checked; a label that doesn't read is **refused with the reason** (e.g. "GTIN (01) has a wrong check digit"), never half-read. A pallet label with no product (an SSCC alone) is remembered and attached to the next item scanned; the same pallet twice is refused. Plain SKUs, EANs and location codes work exactly as before; digits that happen to look like a label are looked up as typed first.
+- **Scanner settings that matter:** set a hardware scanner to send the GS1 symbology identifier (`]C1`) and the group separator (ASCII 29), or have it print the bracketed form `(01)...(10)...`. If a scanner drops the separators, a lot in the middle of a label can't be told apart from the fields after it (see the report).
+- **Code.** `packages/shared/src/gs1.ts` (parser; no dependencies), `apps/api/src/floor.ts` (`/receipts/batch`, `/moves/batch`, `/batches/:id/undo`), `activity.ts` (`reverseGroup`), web `lib/scan-session.ts` (the list rules), `lib/scan-resolve.ts`, `pages/floor/{receive,move,receive-po}.tsx`; tests in `gs1.test.ts`, `floor-batch.test.ts`, `scan-session.test.ts`, `scan-resolve.test.ts`.
 
 ### Barcodes on items
 
