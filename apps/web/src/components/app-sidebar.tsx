@@ -172,7 +172,7 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
   return (
     <Sidebar variant="inset" collapsible="offcanvas">
       <SidebarHeader className="gap-3">
-        <Link to={`/o/${org.id}`} className="px-2 pt-1" aria-label="Invintel home">
+        <Link to={`/o/${org.id}`} className="px-2 pt-1" aria-label="Princess home">
           <Wordmark />
         </Link>
         <OrgSwitcher org={org} orgs={orgs} />
