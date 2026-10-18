@@ -2,6 +2,7 @@
 //   pnpm --filter @invintel/api seed:demo
 // Signs in as demo@invintel.local with the password below. Local development only: refuses to run
 // twice (it never touches an account that already exists) and prints nothing sensitive.
+import { deflateSync } from "node:zlib";
 import { createApp } from "./app.js";
 import { connect } from "./db.js";
 
@@ -144,6 +145,88 @@ await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, sc
 await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, scrap: 1, scrapReason: "Setup" });
 await call(`${prod}/work-orders/${wo3.id}/output`, { good: 44, scrap: 6, scrapReason: "Damaged", toLocationId: fg });
 await call(`${prod}/work-orders/${wo3.id}/action`, { action: "complete" });
+
+// Email exchange: Midwest Paper Mill is a trading partner reached by email (a test partner: nothing leaves this machine, mail
+// goes to an outbox folder), and an invoice from them has arrived as a file for checking (Documents > Incoming invoices).
+const mailPartner = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Midwest Paper Mill", kind: "supplier", supplierId: supplier.id, bridge: "email", bridgeConfig: { to: "orders@midwestpaper.example" }, mode: "test" });
+const poNumber = (await call<{ number: string }>(`${base}/purchasing/orders/${po.id}`)).number;
+await call(`${base}/b2b/invoices/upload`, {
+  partnerId: mailPartner.id, filename: "MWP-20418.json", contentType: "application/json",
+  contentBase64: Buffer.from(JSON.stringify({ invoiceNumber: "MWP-20418", issueDate: new Date().toISOString().slice(0, 10), poNumber, total: "3280.00", lines: [{ description: "Test liner 33 lb, 60 in roll", quantity: "6", unitPrice: "420.00" }, { description: "Flexo ink, black, 5 gal", quantity: "8", unitPrice: "95.00" }] })).toString("base64"),
+});
+
+// EDI: Lakeshore Film & Resin takes orders as X12 (a test partner on the built-in test transport: nothing leaves this machine).
+// Open its order, "Send as X12 (850)", then Documents > the sent order > "Let it answer" to play the supplier's side.
+const ediSupplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Lakeshore Film & Resin", contact: "Dee Park" });
+await call(`${base}/b2b/partners`, {
+  name: "Lakeshore Film & Resin", kind: "supplier", supplierId: ediSupplier.id, bridge: "x12", mode: "test",
+  bridgeConfig: { ourQual: "ZZ", ourId: "DEMOCORRUG", theirQual: "ZZ", theirId: "LAKESHORE", version: "004010", transport: "loopback" },
+});
+const ediPo = await call<{ id: string }>(`${base}/purchasing/orders`, {
+  supplierId: ediSupplier.id, expectedDate: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10), note: "Dock 2, call before arrival",
+  lines: [{ itemId: inkB, quantity: 10, unitCostCents: 9500 }],
+});
+await call(`${base}/purchasing/orders/${ediPo.id}/place`, {});
+
+// Documents: the letterhead and a small logo (made here, so no file is needed) for the PDFs: Settings > Documents. Try the preview, then
+// Purchasing > a PO > Preview PDF, or Sales > an order > Order confirmation / Packing slip / Make invoice.
+const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = (b: Buffer) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 255]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+const pngChunk = (type: string, data: Buffer) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type), data]); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body)); return Buffer.concat([len, body, crc]); };
+const logoPng = (() => {
+  const w = 160, h = 48;
+  const rows: Buffer[] = [];
+  for (let y = 0; y < h; y++) {
+    const row = Buffer.alloc(1 + w * 3);
+    for (let x = 0; x < w; x++) {
+      const inBox = x < 44;
+      const stripe = x >= 56 && x < 150 && y >= 10 && y < 38 && (Math.floor((x - 56) / 6) % 2 === 0);
+      const c = inBox ? [30, 64, 175] : stripe ? [51, 65, 85] : [255, 255, 255];
+      row[1 + x * 3] = c[0]!; row[2 + x * 3] = c[1]!; row[3 + x * 3] = c[2]!;
+    }
+    rows.push(row);
+  }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk("IHDR", ihdr), pngChunk("IDAT", deflateSync(Buffer.concat(rows))), pngChunk("IEND", Buffer.alloc(0))]);
+})();
+await call(`${base}/documents/settings`, {
+  company: { name: "Demo Corrugated Co.", addressLines: ["1200 Mill Road", "Springfield, IL 62701"], phone: "555-0100", email: "orders@democorrugated.example", website: "democorrugated.example", taxId: "Reg. 12-3456789", paper: "letter", taxLabel: "Sales tax", taxRateBps: 625, paymentTermsDays: 30 },
+  templates: { invoice: { title: "", accent: "#1d4ed8", showLogo: true, columns: ["sku", "description", "quantity", "unitPrice", "amount"], terms: "Payment due within 30 days. Late balances may be charged 1.5% a month.", footer: "Thank you for your business." }, purchase_order: { title: "", accent: "#334155", showLogo: true, columns: ["sku", "description", "quantity", "unitPrice", "amount"], terms: "Please confirm receipt of this order and quote the PO number on all documents.", footer: "" } },
+}, "PUT");
+await call(`${base}/documents/logo`, { contentBase64: logoPng.toString("base64") });
+
+// Sales: Bluebird Packaging is a customer (an email test partner: when a shipment goes, it gets a ship notice by email into the outbox folder). One order is confirmed (its stock is reserved: look at RSC-1296 in Inventory, "promised"
+// and "free"), one is part shipped from Finished goods, and one is a draft waiting to be confirmed (Sales).
+const customer = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Bluebird Packaging", kind: "customer", bridge: "email", bridgeConfig: { to: "purchasing@bluebird.example" }, mode: "test" });
+const soBase = `${base}/sales/orders`;
+const dateIn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+const so1 = await call<{ id: string }>(soBase, { customerPartnerId: customer.id, customerRef: "BP-5521", requestedDate: dateIn(6), note: "Deliver to dock 3", lines: [{ itemId: rsc, quantity: 30, unitPriceCents: 2600 }] });
+await call(`${soBase}/${so1.id}/confirm`, {});
+const so2 = await call<{ id: string }>(soBase, { customerPartnerId: customer.id, customerRef: "BP-5498", requestedDate: dateIn(2), lines: [{ itemId: rsc2, quantity: 20, unitPriceCents: 4200 }, { itemId: rsc, quantity: 10, unitPriceCents: 2600 }] });
+await call(`${soBase}/${so2.id}/confirm`, {});
+await call(`${soBase}/${so2.id}/ship`, { carrier: "Demo Freight", trackingNumber: "DEMO-5498-1", lines: [{ itemId: rsc2, quantity: 12, locationId: fg }] });
+const so3 = await call<{ id: string }>(soBase, { customerName: "Walk-in customer", requestedDate: dateIn(10), note: "Pick up", lines: [{ itemId: rsc2, quantity: 8, unitPriceCents: 4200 }] });
+void so3;
+
+// Exchange: a second organization on the same server (a paper supplier) is connected to the demo plant, so you can play both
+// sides: switch organizations in the sidebar. The plant has a placed order for the supplier waiting to be sent from the order's dialog.
+const sunrise = await call<{ id: string }>("/api/orgs", { name: "Sunrise Paper Co." });
+const sBase = `/api/orgs/${sunrise.id}`;
+const sMain = (await call<{ id: string }[]>(`${sBase}/locations`))[0]!.id;
+for (const [sku, name, qty, cost] of [["LINER-KR42", "Kraft liner 42 lb, 60 in roll", 60, 31000], ["MED-26", "Corrugating medium 26 lb, 60 in roll", 25, 26000]] as const) {
+  await call(`${sBase}/items`, { sku, name, unitCostCents: cost, reorderLevel: 10, initialStock: { locationId: sMain, quantity: qty } });
+}
+const theirInvitation = await call<unknown>(`${sBase}/exchange/invitation`);
+await call(`${base}/exchange/connect`, { invitation: theirInvitation, kind: "supplier" });
+const sunriseSupplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Sunrise Paper Co.", contact: "Sol Reyes" });
+const sunrisePo = await call<{ id: string }>(`${base}/purchasing/orders`, {
+  supplierId: sunriseSupplier.id, expectedDate: new Date(Date.now() + 9 * 86_400_000).toISOString().slice(0, 10),
+  lines: [{ itemId: kraft, quantity: 12, unitCostCents: 48000 }, { itemId: med, quantity: 6, unitCostCents: 39000 }],
+});
+await call(`${base}/purchasing/orders/${sunrisePo.id}/place`, {});
+// The supplier lets the plant ask about stock and order status (off by default for every partner).
+const theirPartners = await call<{ id: string }[]>(`${sBase}/exchange/partners`);
+await call(`${sBase}/exchange/partners/${theirPartners[0]!.id}/permissions`, { shareStock: true, shareStockQuantities: true, shareOrderStatus: true }, "PATCH");
 
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();

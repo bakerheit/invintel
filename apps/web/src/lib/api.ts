@@ -1,4 +1,33 @@
 import type {
+  CompanyProfile,
+  DocKind,
+  DocPreview,
+  DocTemplate,
+  DocumentSettings,
+  PickLine,
+  SalesOrder,
+  SalesOrderInput,
+  SalesOrderUpdate,
+  SoShipInput,
+  SoShipResult,
+  B2BAckInput,
+  B2BMessage,
+  B2BMessageDetail,
+  CapturedInvoice,
+  CapturedInvoiceUpdate,
+  InvoiceUpload,
+  OrderExchange,
+  PortalOrder,
+  SupplierAnswer,
+  TradingPartner,
+  TradingPartnerInput,
+  TradingPartnerUpdate,
+  ExchangeIdentity,
+  ExchangeInvitation,
+  ExchangePermissions,
+  OrderBody,
+  QueryBody,
+  QueryResponseBody,
   RecallDrill,
   TraceQuery,
   TraceResult,
@@ -278,6 +307,46 @@ export const api = {
   saveAlertSettings: (orgId: string, s: AlertSettings) => request<AlertSettings>(`/orgs/${orgId}/alerts/settings`, { method: "PUT", body: body(s) }),
   alertAction: (orgId: string, action: "acknowledge" | "reopen" | { snooze: number }, key: string) =>
     typeof action === "string" ? request<Alert>(`/orgs/${orgId}/alerts/${action}`, post({ key })) : request<Alert>(`/orgs/${orgId}/alerts/snooze`, post({ key, days: action.snooze })),
+  exIdentity: (orgId: string) => request<ExchangeIdentity>(`/orgs/${orgId}/exchange/identity`),
+  exInvitation: (orgId: string) => request<ExchangeInvitation>(`/orgs/${orgId}/exchange/invitation`),
+  exSetAddress: (orgId: string, baseUrl: string) => request<ExchangeIdentity>(`/orgs/${orgId}/exchange/identity`, { method: "PUT", body: body({ baseUrl }) }),
+  exPartners: (orgId: string) => request<ExPartner[]>(`/orgs/${orgId}/exchange/partners`),
+  exConnect: (orgId: string, invitation: unknown, kind: "supplier" | "customer") =>
+    request<{ partner: ExPartner; connectedBack: boolean }>(`/orgs/${orgId}/exchange/connect`, post({ invitation, kind })),
+  exPermissions: (orgId: string, id: string, p: ExchangePermissions) => request<ExPartner>(`/orgs/${orgId}/exchange/partners/${id}/permissions`, patch(p)),
+  exOrders: (orgId: string) => request<ExIncomingOrder[]>(`/orgs/${orgId}/exchange/orders`),
+  exRespond: (orgId: string, id: string, v: { status: "accepted" | "rejected" | "changed"; promisedDate: string | null; note: string; backorder?: boolean }) =>
+    request<{ state?: string; approvalRequired?: true; approval?: ApprovalRequest; salesOrder?: { id: string; number: string } }>(`/orgs/${orgId}/exchange/orders/${id}/respond`, post(v)),
+  documentSettings: (orgId: string) => request<DocumentSettings>(`/orgs/${orgId}/documents/settings`),
+  saveDocumentSettings: (orgId: string, input: { company: CompanyProfile; templates: Partial<Record<DocKind, DocTemplate>> }) => request<DocumentSettings>(`/orgs/${orgId}/documents/settings`, { method: "PUT", body: body(input) }),
+  uploadLogo: (orgId: string, contentBase64: string) => request<DocumentSettings>(`/orgs/${orgId}/documents/logo`, post({ contentBase64 })),
+  removeLogo: (orgId: string) => request<DocumentSettings>(`/orgs/${orgId}/documents/logo`, { method: "DELETE" }),
+  logoUrl: (orgId: string, v: string | number) => `/api/orgs/${orgId}/documents/logo?v=${v}`,
+  /** A sample document drawn with these values (saved or not), as a PDF to show. */
+  previewDocument: async (orgId: string, input: DocPreview): Promise<Blob> => {
+    const res = await fetch(`/api/orgs/${orgId}/documents/preview`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: body(input) });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(errorMessage(d, "Couldn't make the preview")); }
+    return res.blob();
+  },
+  salesDocUrl: (orgId: string, id: string, what: "confirmation" | { shipment: string; doc: "packing-slip" | "invoice" }) =>
+    what === "confirmation" ? `/api/orgs/${orgId}/sales/orders/${id}/confirmation.pdf` : `/api/orgs/${orgId}/sales/orders/${id}/shipments/${encodeURIComponent(what.shipment)}/${what.doc}.pdf`,
+  sendSalesConfirmation: (orgId: string, id: string) => request<{ state: string; alreadySent: boolean }>(`/orgs/${orgId}/sales/orders/${id}/send-confirmation`, post({})),
+  sendSalesInvoice: (orgId: string, id: string, shipment: string) => request<{ state: string; alreadySent: boolean; invoiceNumber: string }>(`/orgs/${orgId}/sales/orders/${id}/shipments/${encodeURIComponent(shipment)}/send-invoice`, post({})),
+  salesOrders: (orgId: string) => request<SalesOrder[]>(`/orgs/${orgId}/sales/orders`),
+  createSalesOrder: (orgId: string, input: SalesOrderInput) => request<SalesOrder>(`/orgs/${orgId}/sales/orders`, post(input)),
+  confirmSalesOrder: (orgId: string, id: string, allowShortage: boolean) => request<SalesOrder | ApprovalRequired>(`/orgs/${orgId}/sales/orders/${id}/confirm`, post({ allowShortage })),
+  updateSalesOrder: (orgId: string, id: string, input: SalesOrderUpdate) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}`, patch(input)),
+  rewriteSalesOrder: (orgId: string, id: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/rewrite`, post({})),
+  cancelSalesOrder: (orgId: string, id: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/cancel`, post({})),
+  closeSalesOrder: (orgId: string, id: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/close`, post({})),
+  salesPick: (orgId: string, id: string) => request<PickLine[]>(`/orgs/${orgId}/sales/orders/${id}/pick`),
+  shipSalesOrder: (orgId: string, id: string, input: SoShipInput) => request<SoShipResult>(`/orgs/${orgId}/sales/orders/${id}/ship`, post(input)),
+  resendShipNotice: (orgId: string, id: string, number: string) => request<SalesOrder>(`/orgs/${orgId}/sales/orders/${id}/shipments/${encodeURIComponent(number)}/notice`, post({})),
+  exShip: (orgId: string, id: string, v: { carrier: string; tracking: string }) => request<{ state: string }>(`/orgs/${orgId}/exchange/orders/${id}/ship`, post(v)),
+  exAsk: (orgId: string, partnerId: string, question: QueryBody) => request<{ messageId: string }>(`/orgs/${orgId}/exchange/ask`, post({ partnerId, question })),
+  exAnswers: (orgId: string) => request<ExAnswer[]>(`/orgs/${orgId}/exchange/answers`),
+  exSendPo: (orgId: string, poId: string, partnerId: string) => request<{ state: string; alreadySent: boolean }>(`/orgs/${orgId}/exchange/purchase-orders/${poId}/send`, post({ partnerId })),
+  exTimeline: (orgId: string, poId: string) => request<ExTimelineItem[]>(`/orgs/${orgId}/exchange/purchase-orders/${poId}/timeline`),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
@@ -387,4 +456,39 @@ export const api = {
     request<ScrapReport>(`/orgs/${orgId}/production/scrap?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`),
   scrapCsvUrl: (orgId: string, days: number, workCenterId?: string) =>
     `/api/orgs/${orgId}/production/scrap/lines.csv?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`,
+
+  // Business-to-business exchange: partners, messages, supplier orders, captured invoices.
+  b2bBridges: (orgId: string) => request<{ id: string; carries: string[] }[]>(`/orgs/${orgId}/b2b/bridges`),
+  b2bPartners: (orgId: string) => request<TradingPartner[]>(`/orgs/${orgId}/b2b/partners`),
+  createB2bPartner: (orgId: string, input: TradingPartnerInput) => request<TradingPartner>(`/orgs/${orgId}/b2b/partners`, post(input)),
+  updateB2bPartner: (orgId: string, id: string, input: TradingPartnerUpdate) => request<TradingPartner>(`/orgs/${orgId}/b2b/partners/${id}`, patch(input)),
+  b2bMessages: (orgId: string, q: { direction?: string; state?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
+    return request<B2BMessage[]>(`/orgs/${orgId}/b2b/messages?${qs}`);
+  },
+  b2bMessage: (orgId: string, id: string) => request<B2BMessageDetail>(`/orgs/${orgId}/b2b/messages/${id}`),
+  retryB2bMessage: (orgId: string, id: string) => request<B2BMessage>(`/orgs/${orgId}/b2b/messages/${id}/retry`, post({})),
+  testPartnerAnswers: (orgId: string, id: string, scenario: string) => request<B2BMessage[]>(`/orgs/${orgId}/b2b/messages/${id}/test-partner`, post({ scenario })),
+  ackB2bMessage: (orgId: string, id: string, input: B2BAckInput) => request<B2BMessage>(`/orgs/${orgId}/b2b/messages/${id}/ack`, post(input)),
+  orderExchange: (orgId: string, poId: string) => request<OrderExchange>(`/orgs/${orgId}/b2b/orders/${poId}`),
+  sendOrderToSupplier: (orgId: string, poId: string) => request<B2BMessage>(`/orgs/${orgId}/b2b/orders/${poId}/send`, post({})),
+  orderPreviewUrl: (orgId: string, poId: string) => `/api/orgs/${orgId}/b2b/orders/${poId}/preview.pdf`,
+  capturedInvoices: (orgId: string, status = "captured") => request<CapturedInvoice[]>(`/orgs/${orgId}/b2b/invoices?status=${status}`),
+  updateCapturedInvoice: (orgId: string, id: string, input: CapturedInvoiceUpdate) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/${id}`, patch(input)),
+  discardCapturedInvoice: (orgId: string, id: string, note: string) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/${id}/discard`, post({ note })),
+  capturedInvoiceInput: (orgId: string, id: string) =>
+    request<{ supplierId: string | null; purchaseOrderId: string | null; invoiceNumber: string; issueDate: string | null; dueDate: string | null; currency: string; lines: { itemId: string | null; description: string; quantity: number; unitPriceCents: number; taxCents: number }[]; freightCents: number; statedTotalCents: number | null; note: string }>(`/orgs/${orgId}/b2b/invoices/${id}/invoice-input`),
+  markCaptureConverted: (orgId: string, id: string, invoiceId: string) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/${id}/converted`, post({ invoiceId })),
+  uploadInvoice: (orgId: string, input: InvoiceUpload) => request<CapturedInvoice>(`/orgs/${orgId}/b2b/invoices/upload`, post(input)),
+  b2bFileUrl: (orgId: string, id: string) => `/api/orgs/${orgId}/b2b/files/${id}`,
+  // The supplier's page: no session, the token in the link is the key.
+  portalOrder: (token: string) => request<PortalOrder>(`/b2b/portal/${token}`),
+  portalAnswer: (token: string, answer: SupplierAnswer) => request<{ ok: true }>(`/b2b/portal/${token}/answer`, post(answer)),
+  updateOrderDate: (orgId: string, id: string, expectedDate: string) =>
+    request<unknown>(`/orgs/${orgId}/purchasing/orders/${id}`, patch({ expectedDate })),
 };
+
+export interface ExPartner { id: string; name: string; kind: "supplier" | "customer"; enabled: boolean; mode: string; exchangeId: string; fingerprint: string; baseUrl: string; permissions: ExchangePermissions }
+export interface ExIncomingOrder { messageId: string; partner: string; receivedAt: string; order: OrderBody | null; response: { status: string; promisedDate: string | null } | null; shipped: boolean; salesOrder?: { id: string; number: string; state: string } | null }
+export interface ExAnswer { messageId: string; partner: string; askedAt: string; question: QueryBody; state: string; answer: QueryResponseBody | null }
+export interface ExTimelineItem { messageId: string; at: string; direction: "in" | "out"; docType: string; state: string; partner: string; summary: Record<string, unknown> | null; acks: { level: string; result: string; detail: string }[] }

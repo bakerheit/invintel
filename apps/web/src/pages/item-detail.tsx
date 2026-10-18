@@ -1,4 +1,4 @@
-import { formatQty, lineValueCents } from "@invintel/shared";
+import { formatQty, lineValueCents, positionOfItem, stockWhy } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowLeftRight, History, Package, Pencil, Printer, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Link, useParams } from "react-router";
@@ -82,9 +82,17 @@ export default function ItemDetailPage() {
         }
       />
 
+      <p className={cn("text-sm", stockStatus(item) === "ok" ? "text-muted-foreground" : "font-medium text-warning")}>
+        {stockWhy(positionOfItem(item), (n) => formatQty(n, item, { unit: false }))}
+        {stockStatus(item) === "low" && (item.available ?? item.quantity) < 0 ? ": promised more than there is" : stockStatus(item) === "low" ? ": what is free is at or under the reorder level" : ""}.
+      </p>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           ["On hand", formatQty(item.quantity, item)],
+          ...((item.reserved ?? 0) > 0 || (item.available ?? item.quantity) !== item.quantity
+            ? [[`Available${(item.reserved ?? 0) > 0 ? ` (${formatQty(item.reserved ?? 0, item, { unit: false })} promised)` : " (not on hold)"}`, formatQty(item.available ?? item.quantity, item)]]
+            : []),
           ["Value", formatCents(lineValueCents(item.quantity, item.unitCostCents, item.decimals))],
           [item.unit === "ea" ? "Unit cost" : `Cost per ${item.unit}`, formatCents(item.unitCostCents)],
           ["Reorder at", item.reorderLevel > 0 ? formatQty(item.reorderLevel, item) : "Not tracked"],

@@ -28,6 +28,7 @@ const SOURCES: Record<ArchiveCollection, (s: Store) => Collection<Document>> = {
   shipments: (s) => s.shipments as unknown as Collection<Document>,
   invoices: (s) => s.invoices as unknown as Collection<Document>,
   payments: (s) => s.payments as unknown as Collection<Document>,
+  salesOrders: (s) => s.salesOrders as unknown as Collection<Document>,
   workCenters: (s) => s.workCenters as unknown as Collection<Document>,
   boms: (s) => s.boms as unknown as Collection<Document>,
   workOrders: (s) => s.workOrders as unknown as Collection<Document>,
@@ -45,7 +46,7 @@ const NAMES = Object.keys(ARCHIVE_COLLECTIONS) as ArchiveCollection[];
  */
 const SETTINGS: Record<string, z.ZodType> = {
   varianceThresholdPct: z.number().min(0).max(1000).nullable(),
-  modules: z.object({ purchasing: z.boolean().optional(), production: z.boolean().optional() }).strict(),
+  modules: z.object({ purchasing: z.boolean().optional(), production: z.boolean().optional(), sales: z.boolean().optional() }).strict(),
   scrapReasons: z.array(z.string().max(100)).max(100),
   holdReasons: z.array(z.string().max(100)).max(100),
   downtimeReasons: z.array(z.string().max(100)).max(100),
@@ -53,13 +54,14 @@ const SETTINGS: Record<string, z.ZodType> = {
   alertSettings: z.object({ daysOfSupply: z.number().min(0).max(10000), machineDownMinutes: z.number().min(0).max(100000) }).strict(),
   invoiceSettings: invoiceSettingsSchema,
   approvalRules: z
-    .array(z.object({ kind: z.enum(["adjustment", "purchase_order"]), thresholdCents: z.number().int().min(0).max(1_000_000_000), appliesTo: z.enum(["members", "everyone"]) }).strict())
+    .array(z.object({ kind: z.enum(["adjustment", "purchase_order", "sales_order"]), thresholdCents: z.number().int().min(0).max(1_000_000_000), appliesTo: z.enum(["members", "everyone"]) }).strict())
     .max(10),
 };
 
 /** Numbering that must carry on after a restore, so the next PO or roll label can't repeat one that came back. */
 const COUNTERS: { kind: string; collection: ArchiveCollection; field: string }[] = [
   { kind: "po", collection: "purchaseOrders", field: "number" },
+  { kind: "so", collection: "salesOrders", field: "number" },
   { kind: "wo", collection: "workOrders", field: "number" },
   { kind: "count", collection: "counts", field: "number" },
   { kind: "ncr", collection: "ncrs", field: "number" },
@@ -82,6 +84,7 @@ const REQUIRED: Partial<Record<ArchiveCollection, Record<string, "string" | "num
   shipments: { number: "string", supplierId: "id", lines: "array", createdAt: "date" },
   invoices: { number: "string", supplierId: "id", lines: "array", createdAt: "date", updatedAt: "date" },
   payments: { number: "string", supplierId: "id", allocations: "array", createdAt: "date" },
+  salesOrders: { number: "string", state: "string", lines: "array", createdAt: "date", updatedAt: "date" },
   workCenters: { name: "string", locationId: "id", createdAt: "date" },
   boms: { outputItemId: "id", inputs: "array", createdAt: "date" },
   workOrders: { number: "string", bomId: "id", outputItemId: "id", workCenterId: "id", requirements: "array", createdAt: "date", updatedAt: "date" },

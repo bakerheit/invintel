@@ -21,6 +21,9 @@ import ProductionFloorPage from "./pages/floor/production";
 import ProductionPage from "./pages/production";
 import QualityFloorPage from "./pages/floor/quality";
 import QualityPage from "./pages/quality";
+import DocumentsPage from "./pages/documents";
+import ExchangePage from "./pages/exchange";
+import SupplierPortalPage from "./pages/supplier-portal";
 import ReceivePage from "./pages/floor/receive";
 import InventoryPage from "./pages/inventory";
 import ItemDetailPage from "./pages/item-detail";
@@ -43,6 +46,8 @@ import AlertsPage from "./pages/alerts";
 import PayablesPage from "./pages/payables";
 import RemittancePage from "./pages/remittance";
 import PurchasingPage from "./pages/purchasing";
+import SalesPage from "./pages/sales";
+import DocumentSettingsPage from "./pages/document-settings";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
 import { useAuth } from "./stores/auth";
@@ -79,6 +84,7 @@ createRoot(document.getElementById("root")!).render(
     <Providers>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/b2b/s/:token" element={<SupplierPortalPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route element={<RequireAuth />}>
           <Route path="/" element={<OrgRedirect />} />
@@ -90,6 +96,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="inventory/:itemId" element={<ItemDetailPage />} />
               <Route path="counts" element={<CountsPage />} />
               <Route path="alerts" element={<AlertsPage />} />
+              <Route path="exchange" element={<ExchangePage />} />
               <Route path="approvals" element={<ApprovalsPage />} />
               <Route path="reports" element={<ReportsHome />} />
               <Route path="reports/aging" element={<AgingReportPage />} />
@@ -99,13 +106,16 @@ createRoot(document.getElementById("root")!).render(
               <Route path="reports/scrap" element={<ScrapReportPage />} />
               <Route path="purchasing" element={<PurchasingPage />} />
               <Route path="payables" element={<PayablesPage />} />
+              <Route path="sales" element={<SalesPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />
               <Route path="labels" element={<LabelsPage />} />
               <Route path="production" element={<ProductionPage />} />
               <Route path="quality" element={<QualityPage />} />
+              <Route path="documents" element={<DocumentsPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="settings/documents" element={<DocumentSettingsPage />} />
             </Route>
             <Route path="remittance/:paymentId" element={<RemittancePage />} />
             <Route path="floor" element={<FloorLayout />}>

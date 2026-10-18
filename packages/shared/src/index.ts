@@ -32,10 +32,10 @@ export const registrationOrganizationSchema = z.discriminatedUnion("mode", [
 export type RegistrationOrganization = z.infer<typeof registrationOrganizationSchema>;
 
 /** Parts of the app an organization can switch off, so a small shop only sees what it uses. Everything is on by default. */
-export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean() });
+export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean(), sales: z.boolean() });
 export type OrgModules = z.infer<typeof orgModulesSchema>;
 export const orgModulesUpdateSchema = orgModulesSchema.partial().refine((m) => Object.keys(m).length > 0, "Nothing to change");
-export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true };
+export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true, sales: true };
 
 export interface OrgSummary {
   id: string;
@@ -191,6 +191,10 @@ export interface Item extends ItemInput {
   quantity: number;
   /** Only locations that hold stock. */
   stock: StockLevel[];
+  /** Promised to customers on confirmed sales orders and not yet shipped (INV-15). Absent on older responses. */
+  reserved?: number;
+  /** What can still be promised: on hand, minus what sits on quality hold, minus reserved. Negative means over-promised. */
+  available?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -215,7 +219,7 @@ export const transferInputSchema = z
   });
 export type TransferInput = z.infer<typeof transferInputSchema>;
 
-export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap"]);
+export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap", "ship"]);
 export type MovementType = z.infer<typeof movementTypeSchema>;
 export const MOVEMENT_TYPES = movementTypeSchema.options;
 
@@ -337,7 +341,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "count", "approval", "alert", "invoice", "payment", "shipment"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "sales_order", "trading_partner", "b2b_message", "captured_invoice", "count", "approval", "alert", "invoice", "payment", "shipment"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -350,6 +354,7 @@ export const AUDIT_ACTIONS = [
   "organization.created",
   "organization.renamed",
   "organization.modules_changed",
+  "organization.documents_changed",
   "organization.join_code_rotated",
   "member.joined",
   "member.role_changed",
@@ -368,12 +373,27 @@ export const AUDIT_ACTIONS = [
   "downtime.settings_changed",
   "reasons.changed",
   "traceability.drill",
+  "b2b.partner_created",
+  "b2b.partner_updated",
+  "b2b.message_sent",
+  "b2b.message_received",
+  "b2b.message_failed",
+  "b2b.message_acknowledged",
+  "b2b.order_answered",
+  "b2b.invoice_captured",
+  "b2b.invoice_edited",
+  "b2b.invoice_discarded",
   "ncr.opened",
   "ncr.dispositioned",
   "alert.acknowledged",
   "alert.snoozed",
   "alert.reopened",
   "alert.settings_changed",
+  "exchange.identity_created",
+  "exchange.connected",
+  "exchange.permissions_changed",
+  "exchange.order_answered",
+  "exchange.order_shipped",
   "supplier.created",
   "supplier.updated",
   "purchase_order.created",
@@ -382,6 +402,12 @@ export const AUDIT_ACTIONS = [
   "purchase_order.received",
   "purchase_order.cancelled",
   "purchase_order.closed",
+  "sales_order.created",
+  "sales_order.updated",
+  "sales_order.confirmed",
+  "sales_order.shipped",
+  "sales_order.cancelled",
+  "sales_order.closed",
   "stock.received",
   "stock.adjusted",
   "stock.moved",
@@ -508,7 +534,11 @@ export interface AttentionItem {
   name: string;
   /** How this item's whole-number quantities read. */
   uom: Uom;
+  /** On hand. */
   quantity: number;
+  /** Promised on sales orders, and what is free to promise (on hand - quality hold - reserved). Low is judged on `available`. */
+  reserved: number;
+  available: number;
   reorderLevel: number;
   status: AttentionStatus;
 }
@@ -711,6 +741,9 @@ export interface UnitsPosted {
 }
 export * from "./production.js";
 export * from "./quality.js";
+export * from "./b2b.js";
+export * from "./b2bcapture.js";
+export * from "./b2bdocs.js";
 export * from "./reasons.js";
 export * from "./traceability.js";
 export * from "./scrap.js";
@@ -724,3 +757,6 @@ export * from "./units.js";
 export * from "./archive.js";
 export * from "./integrations.js";
 export * from "./invoices.js";
+export * from "./exchange.js";
+export * from "./sales.js";
+export * from "./templates.js";

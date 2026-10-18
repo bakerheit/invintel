@@ -243,6 +243,8 @@ export function createActivityRoutes(store: Store) {
           ? `${movementType(original)} entry of ${group.length} lines (${item.name})`
           : movementType(original) === "receive"
             ? `receipt of ${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`
+            : movementType(original) === "ship"
+              ? `shipment of ${amount(original.delta)} × ${item.name} from ${placeName(original.locationId)}`
             : `adjustment of ${original.delta > 0 ? "+" : "-"}${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`;
     await recordAudit(store, {
       orgId,

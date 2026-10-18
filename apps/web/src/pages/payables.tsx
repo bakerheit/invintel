@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { InvoiceDetail, INVOICE_STATUS } from "@/components/payables/invoice-detail";
-import { InvoiceForm } from "@/components/payables/invoice-form";
+import { InvoiceForm, type InvoicePrefill } from "@/components/payables/invoice-form";
 import { PaymentDialog } from "@/components/payables/payment-dialog";
 import { ShipmentDetail, ShipmentForm, SHIPMENT_STATUS } from "@/components/payables/shipments";
 import { EmptyState } from "@/components/empty-state";
@@ -104,6 +104,7 @@ export default function PayablesPage() {
   const [status, setStatus] = useState("open");
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Invoice | "new" | null>(null);
+  const [capture, setCapture] = useState<{ id: string; prefill: InvoicePrefill } | null>(null);
   const [openInvoice, setOpenInvoice] = useState<string | null>(null);
   const [paying, setPaying] = useState<{ supplierId: string; invoiceId?: string } | null>(null);
   const [newShipment, setNewShipment] = useState(false);
@@ -112,8 +113,19 @@ export default function PayablesPage() {
   const [paySupplier, setPaySupplier] = useState("");
   const suppliers = useQuery({ queryKey: orgKey(org.id, "suppliers"), queryFn: () => api.listSuppliers(org.id) });
   const invoices = useQuery({ queryKey: orgKey(org.id, "invoices", status, search), queryFn: () => api.listInvoices(org.id, { status, q: search }), enabled: admin && tab === "invoices" });
+  const captured = useQuery({ queryKey: orgKey(org.id, "captured-invoices", "captured"), queryFn: () => api.capturedInvoices(org.id, "captured"), enabled: admin && tab === "invoices" });
   const shipments = useQuery({ queryKey: orgKey(org.id, "shipments"), queryFn: () => api.listShipments(org.id), enabled: tab === "shipments" });
   const goTab = (t: Tab) => setParams({ tab: t });
+  const qc = useQueryClient();
+  /** Start an invoice from one that arrived by email or upload. The capture closes when the invoice is saved. */
+  const fromCapture = async (id: string) => {
+    try {
+      const [prefill] = await Promise.all([api.capturedInvoiceInput(org.id, id), qc.fetchQuery({ queryKey: orgKey(org.id, "items"), queryFn: () => api.listItems(org.id) }), qc.fetchQuery({ queryKey: orgKey(org.id, "suppliers"), queryFn: () => api.listSuppliers(org.id) })]);
+      setCapture({ id, prefill });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
 
   return (
     <>
@@ -130,7 +142,7 @@ export default function PayablesPage() {
       />
       <div role="tablist" aria-label="Payables" className="flex gap-1 border-b">
         {(admin ? (["invoices", "shipments", "payments"] as Tab[]) : (["shipments"] as Tab[])).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} onClick={() => goTab(t)} className={cn("-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{t}</button>
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => goTab(t)} className={cn("-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{t === "shipments" ? "incoming shipments" : t}</button>
         ))}
       </div>
 
@@ -149,6 +161,20 @@ export default function PayablesPage() {
               <Button onClick={() => setEditing("new")}><Plus /> Enter invoice</Button>
             </div>
           </div>
+          {(captured.data?.length ?? 0) > 0 && (
+            <div className="space-y-1 rounded-lg border border-accent bg-accent/30 p-3 text-sm">
+              <p className="font-medium">{captured.data!.length} {captured.data!.length === 1 ? "invoice has" : "invoices have"} arrived and {captured.data!.length === 1 ? "isn't" : "aren't"} entered yet</p>
+              <ul className="divide-y">
+                {captured.data!.slice(0, 5).map((c) => (
+                  <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                    <span><span className="font-medium">{c.invoiceNumber || "(no number)"}</span> <span className="text-muted-foreground">from {c.partnerName} · {c.source}{c.totalCents != null ? ` · ${formatMoney(c.totalCents, c.currency)}` : ""}{c.poNumber ? ` · ${c.poNumber}` : ""}</span></span>
+                    <Button size="sm" variant="outline" onClick={() => void fromCapture(c.id)}>Enter as invoice</Button>
+                  </li>
+                ))}
+              </ul>
+              {captured.data!.length > 5 && <p className="text-xs text-muted-foreground">And {captured.data!.length - 5} more in Documents.</p>}
+            </div>
+          )}
           {invoices.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : !invoices.data?.length ? (
             <EmptyState icon={FileText} title="No invoices here" description="Enter an invoice from a supplier, and it is matched against the order and what arrived." />
           ) : (
@@ -201,7 +227,21 @@ export default function PayablesPage() {
       {tab === "payments" && admin && <PaymentsTab orgId={org.id} />}
 
       {editing && <InvoiceForm orgId={org.id} invoice={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={(i) => { setEditing(null); setOpenInvoice(i.id); }} />}
-      {openInvoice && !editing && !paying && <InvoiceDetail orgId={org.id} id={openInvoice} onClose={() => setOpenInvoice(null)} onEdit={(i) => setEditing(i)} onPay={(i) => setPaying({ supplierId: i.supplierId, invoiceId: i.id })} />}
+      {capture && (
+        <InvoiceForm
+          orgId={org.id}
+          prefill={capture.prefill}
+          onClose={() => setCapture(null)}
+          onSaved={async (i) => {
+            const id = capture.id;
+            setCapture(null);
+            setOpenInvoice(i.id);
+            try { await api.markCaptureConverted(org.id, id, i.id); } catch (e) { toast.error(`Saved, but the capture couldn't be closed: ${(e as Error).message}`); }
+            await qc.invalidateQueries({ queryKey: orgKey(org.id, "captured-invoices", "captured") });
+          }}
+        />
+      )}
+      {openInvoice && !editing && !paying && !capture && <InvoiceDetail orgId={org.id} id={openInvoice} onClose={() => setOpenInvoice(null)} onEdit={(i) => setEditing(i)} onPay={(i) => setPaying({ supplierId: i.supplierId, invoiceId: i.id })} />}
       {paying && <PaymentDialog orgId={org.id} supplierId={paying.supplierId} invoiceId={paying.invoiceId} onClose={() => setPaying(null)} />}
       {newShipment && <ShipmentForm orgId={org.id} onClose={() => setNewShipment(false)} onSaved={(s) => { setNewShipment(false); setOpenShipment(s.id); }} />}
       {openShipment && <ShipmentDetail orgId={org.id} id={openShipment} admin={admin} onClose={() => setOpenShipment(null)} />}

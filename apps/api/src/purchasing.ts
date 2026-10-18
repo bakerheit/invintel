@@ -8,6 +8,7 @@ import {
   purchaseOrderInputSchema,
   purchaseOrderUpdateSchema,
   supplierInputSchema,
+  suggestedOrderQty,
   supplierUpdateSchema,
   type PoReceiveResult,
   type PoStatus,
@@ -22,7 +23,7 @@ import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.j
 import { createApproval, isSoleApprover, ruleFor, toApproval } from "./approvals-core.js";
 import { duplicateField, isDuplicateKey, type PurchaseOrderDoc, type Store, type SupplierDoc } from "./db.js";
 import { nextNumber } from "./counters.js";
-import { loadItems } from "./item-queries.js";
+import { loadItems, positionOf } from "./item-queries.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { INSPECT_REASON, openHold } from "./quality.js";
@@ -245,15 +246,15 @@ export function createPurchasingRoutes(store: Store) {
     for (const o of open) for (const l of o.lines) onOrder.set(l.itemId, (onOrder.get(l.itemId) ?? 0) + Math.max(0, l.quantity - l.received));
     const out: ReorderSuggestion[] = [];
     for (const i of items) {
-      const quantity = i.stock.reduce((s, x) => s + x.quantity, 0);
-      if (i.reorderLevel <= 0 || quantity > i.reorderLevel) continue;
+      // Judged on what is free to promise (INV-16): get back to twice the reorder level, or cover what is over-promised, counting what is already coming.
+      const pos = positionOf(i);
       const coming = onOrder.get(i._id.toHexString()) ?? 0;
-      // Order enough to get back to twice the reorder level, counting what is already on its way.
-      const suggestedQuantity = Math.max(0, i.reorderLevel * 2 - quantity - coming);
+      const suggestedQuantity = suggestedOrderQty(pos, coming);
       if (suggestedQuantity === 0) continue;
-      out.push({ itemId: i._id.toHexString(), sku: i.sku, name: i.name, uom: uomOf(i), quantity, reorderLevel: i.reorderLevel, onOrder: coming, suggestedQuantity, unitCostCents: i.unitCostCents });
+      out.push({ itemId: i._id.toHexString(), sku: i.sku, name: i.name, uom: uomOf(i), quantity: pos.onHand, reserved: pos.reserved, available: pos.available, reorderLevel: i.reorderLevel, onOrder: coming, suggestedQuantity, unitCostCents: i.unitCostCents });
     }
-    out.sort((a, b) => a.quantity / a.reorderLevel - b.quantity / b.reorderLevel || a.name.localeCompare(b.name, "en"));
+    const urgency = (s: ReorderSuggestion) => (s.reorderLevel > 0 ? s.available / s.reorderLevel : s.available);
+    out.sort((a, b) => urgency(a) - urgency(b) || a.name.localeCompare(b.name, "en"));
     return c.json(out);
   });
 
@@ -304,9 +305,7 @@ export function createPurchasingRoutes(store: Store) {
     for (const o of (await toOrders(store, openDocs)).filter(isOpen)) for (const l of o.lines) onOrder.set(l.itemId, (onOrder.get(l.itemId) ?? 0) + Math.max(0, l.quantity - l.received));
     for (const i of items) {
       if (!wanted.has(i._id.toHexString())) continue;
-      const have = i.stock.reduce((s, x) => s + x.quantity, 0);
-      if (i.reorderLevel <= 0 || have > i.reorderLevel) continue; // only what the screen suggests
-      const qty = Math.max(0, i.reorderLevel * 2 - have - (onOrder.get(i._id.toHexString()) ?? 0));
+      const qty = suggestedOrderQty(positionOf(i), onOrder.get(i._id.toHexString()) ?? 0); // exactly what the screen suggests
       if (qty > 0) lines.push({ itemId: i._id.toHexString(), quantity: qty, unitCostCents: i.unitCostCents });
     }
     if (!lines.length) return c.json({ error: "Nothing to order for those items" }, 400);

@@ -9,7 +9,9 @@ import type { ApprovalDoc, Store } from "./db.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { approveInvoiceDirect, applyPaymentDetails } from "./invoices.js";
+import { loadIncomingOrder, sendOrderResponse } from "./exchange.js";
 import { placeOrderDirect } from "./purchasing.js";
+import { confirmOrderDirect } from "./sales-core.js";
 import { postAdjustment } from "./stock-service.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -93,6 +95,16 @@ export function createApprovalRoutes(store: Store) {
     } else if (doc.kind === "supplier_payment_details") {
       const res = await applyPaymentDetails(store, org._id, doc.payload.supplierId!, doc.payload.paymentDetails!, me, `(approved ${doc.number}, asked by ${doc.requestedBy.name})`);
       if (!res.ok) failure = res.error;
+    } else if (doc.kind === "sales_order") {
+      const p = doc.payload;
+      const res = await confirmOrderDirect(store, org._id, { id: doc.requestedBy.id, name: doc.requestedBy.name }, p.orderId!, { allowShortage: p.allowShortage, via: `approved by ${me.name}, ${doc.number}` });
+      if (!res.ok) failure = res.error;
+      else if (p.respond) {
+        // The order came from a customer: now that the stock is promised, tell them.
+        const got = await loadIncomingOrder(store, org._id, p.respond.messageId.toHexString());
+        const sent = got ? await sendOrderResponse(store, org._id, asker, got, p.respond) : null;
+        if (!sent || !sent.ok) failure = `The stock is reserved, but the answer to the customer could not be sent${sent && !sent.ok ? `: ${sent.error}` : ""}`;
+      }
     } else {
       const res = await placeOrderDirect(store, org._id, doc.payload.orderId!, { id: doc.requestedBy.id.toHexString(), name: doc.requestedBy.name }, `approved by ${me.name}, ${doc.number}`);
       if (!res.ok) failure = res.error;

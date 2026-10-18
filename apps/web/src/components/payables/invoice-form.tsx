@@ -24,27 +24,44 @@ export const parseDollars = (text: string): number | null => {
   return /^\d+(\.\d{1,2})?$/.test(t) ? Math.round(Number(t) * 100) : null;
 };
 
+/** What a captured invoice (one that arrived by email or upload) offers as a starting point. */
+export interface InvoicePrefill {
+  supplierId: string | null;
+  purchaseOrderId: string | null;
+  invoiceNumber: string;
+  issueDate: string | null;
+  dueDate: string | null;
+  currency: string;
+  lines: { itemId: string | null; description: string; quantity: number; unitPriceCents: number; taxCents: number }[];
+  freightCents: number;
+  statedTotalCents: number | null;
+  note: string;
+}
+
 /** Enter a supplier's invoice, or fix one that is still a draft or waiting for review. */
-export function InvoiceForm({ orgId, invoice, onClose, onSaved }: { orgId: string; invoice?: Invoice; onClose: () => void; onSaved: (i: Invoice) => void }) {
+export function InvoiceForm({ orgId, invoice, prefill, onClose, onSaved }: { orgId: string; invoice?: Invoice; prefill?: InvoicePrefill; onClose: () => void; onSaved: (i: Invoice) => void }) {
   const qc = useQueryClient();
   const suppliers = useQuery({ queryKey: orgKey(orgId, "suppliers"), queryFn: () => api.listSuppliers(orgId) });
   const items = useQuery({ queryKey: orgKey(orgId, "items"), queryFn: () => api.listItems(orgId) });
   const orders = useQuery({ queryKey: orgKey(orgId, "orders"), queryFn: () => api.listOrders(orgId) });
   const settings = useQuery({ queryKey: orgKey(orgId, "invoice-settings"), queryFn: () => api.invoiceSettings(orgId) });
   const today = new Date().toISOString().slice(0, 10);
-  const [supplierId, setSupplierId] = useState(invoice?.supplierId ?? "");
-  const [poId, setPoId] = useState(invoice?.purchaseOrderId ?? NONE);
-  const [number, setNumber] = useState(invoice?.invoiceNumber ?? "");
-  const [issueDate, setIssueDate] = useState(invoice?.issueDate ?? today);
-  const [dueDate, setDueDate] = useState(invoice?.dueDate ?? "");
-  const [currency, setCurrency] = useState(invoice?.currency ?? "");
-  const [freight, setFreight] = useState(invoice ? centsToDollars(invoice.freightCents) : "0.00");
-  const [stated, setStated] = useState(invoice?.statedTotalCents != null ? centsToDollars(invoice.statedTotalCents) : "");
-  const [note, setNote] = useState(invoice?.note ?? "");
+  const start = invoice ?? prefill;
+  const [supplierId, setSupplierId] = useState(start?.supplierId ?? "");
+  const [poId, setPoId] = useState(start?.purchaseOrderId ?? NONE);
+  const [number, setNumber] = useState(start?.invoiceNumber ?? "");
+  const [issueDate, setIssueDate] = useState(start?.issueDate ?? today);
+  const [dueDate, setDueDate] = useState(start?.dueDate ?? "");
+  const [currency, setCurrency] = useState(start?.currency ?? "");
+  const [freight, setFreight] = useState(start ? centsToDollars(start.freightCents) : "0.00");
+  const [stated, setStated] = useState(start?.statedTotalCents != null ? centsToDollars(start.statedTotalCents) : "");
+  const [note, setNote] = useState(start?.note ?? "");
   const [seq, setSeq] = useState(1000);
   const itemById = useMemo(() => new Map((items.data ?? []).map((i: Item) => [i.id, i])), [items.data]);
   const [lines, setLines] = useState<LineDraft[]>(() =>
-    invoice
+    prefill && !invoice
+      ? prefill.lines.map((l, i) => ({ key: i, itemId: l.itemId ?? NONE, description: l.itemId ? "" : l.description, qty: qtyText(l.quantity, uomOf(l.itemId ? items.data?.find((x: Item) => x.id === l.itemId) : undefined)), price: centsToDollars(l.unitPriceCents), tax: centsToDollars(l.taxCents) }))
+      : invoice
       ? invoice.lines.map((l, i) => ({ key: i, itemId: l.itemId ?? NONE, description: l.itemId ? "" : l.description, qty: qtyText(l.quantity, l.uom), price: centsToDollars(l.unitPriceCents), tax: centsToDollars(l.taxCents) }))
       : [{ key: 0, itemId: NONE, description: "", qty: "", price: "", tax: "0.00" }],
   );
@@ -115,7 +132,7 @@ export function InvoiceForm({ orgId, invoice, onClose, onSaved }: { orgId: strin
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-4xl">
-        <DialogHeader><DialogTitle>{invoice ? `Edit ${invoice.number}` : "Enter a supplier invoice"}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{invoice ? `Edit ${invoice.number}` : prefill ? "Enter the captured invoice" : "Enter a supplier invoice"}</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="grid max-h-[70vh] gap-4 overflow-auto pr-1">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="grid gap-1.5">

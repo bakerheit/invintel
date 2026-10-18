@@ -1,5 +1,5 @@
-import { MongoClient, type Collection, type Db, type ObjectId } from "mongodb";
-import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
+import { MongoClient, type Binary, type Collection, type Db, type ObjectId } from "mongodb";
+import type { AuditAction, AuditChange, AuditEntityType, CompanyProfile, DocKind, DocTemplate, DocTemplateOverride, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -24,7 +24,9 @@ export interface OrgDoc {
   joinCode: string;
   createdBy: ObjectId;
   /** Absent means everything is on. */
-  modules?: Partial<{ purchasing: boolean; production: boolean }>;
+  modules?: Partial<{ purchasing: boolean; production: boolean; sales: boolean }>;
+  /** The letterhead and templates for the documents we produce (INV-17). Absent: the organization's name and each kind's own look. */
+  documentProfile?: { company: CompanyProfile; templates: Partial<Record<DocKind, DocTemplate>> };
   /** Absent means nothing needs a second person. */
   /** Downtime: the pick-list and the hours a machine is meant to run each day. Defaults apply when absent. */
   /** Pick-lists for scrap and quality-hold reasons. Defaults apply when absent. */
@@ -35,7 +37,7 @@ export interface OrgDoc {
   alertSettings?: { daysOfSupply: number; machineDownMinutes: number };
   /** Invoice matching rules and the currency the books are kept in. Defaults apply when absent. */
   invoiceSettings?: { currency: string; priceTolerancePct: number; qtyTolerancePct: number; totalToleranceCents: number };
-  approvalRules?: { kind: "adjustment" | "purchase_order" | "invoice" | "supplier_payment_details"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
+  approvalRules?: { kind: "adjustment" | "purchase_order" | "sales_order" | "invoice" | "supplier_payment_details"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
 
@@ -156,7 +158,39 @@ export interface MovementDoc {
   purchaseOrderId?: ObjectId;
   /** Receipts made against a shipment (an advance ship notice) carry it too. */
   shipmentId?: ObjectId;
+  /** Shipments made against a sales order carry it, so what has gone out can be read back from the ledger. */
+  salesOrderId?: ObjectId;
   createdAt: Date;
+}
+
+/** A customer's order (INV-15). What has shipped is read from the ledger (movements with salesOrderId), never stored here. */
+export interface SalesOrderDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** SO-0001, in order per organization. */
+  number: string;
+  /** draft: being written. confirmed: stock reserved. closed: ended early (unshipped rest released). cancelled: ended before anything shipped. */
+  state: "draft" | "confirmed" | "closed" | "cancelled";
+  customerPartnerId: ObjectId | null;
+  customerName: string;
+  customerRef: string;
+  source: "manual" | "exchange";
+  /** For an exchange order: the incoming message it was made from (one order per message). */
+  messageId?: ObjectId;
+  requestedDate: string | null;
+  note: string;
+  /** Each item at most once; quantities are stored whole numbers in the item's own unit. */
+  lines: { itemId: ObjectId; quantity: number; unitPriceCents: number }[];
+  /** Taken while a shipment is being posted, so two people can't ship the same thing twice. */
+  shippingUntil?: Date;
+  /** Set while a confirmation is being checked against stock, so nothing is shipped, cancelled or closed in that moment. Expires on its own. */
+  confirmingUntil?: Date;
+  /** One entry per shipment, for history. Quantities that count come from the ledger. */
+  shipments: { number: string; at: Date; shippedDate?: string; /** The invoice made for this shipment, numbered the first time it is asked for. */ invoiceNumber?: string; invoicedAt?: Date; /** The invoice as issued (a canonical invoice), kept so it never changes. */ invoice?: Record<string, unknown>; by: { id: ObjectId | null; name: string }; carrier: string; trackingNumber: string; movementIds: ObjectId[]; lines: { itemId: ObjectId; quantity: number }[]; notice: "sent" | "failed" | null }[];
+  confirmedAt?: Date;
+  createdBy: { id: ObjectId | null; name: string };
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export const movementType = (m: MovementDoc): MovementType =>
@@ -271,13 +305,20 @@ export interface ApprovalDoc {
   _id: ObjectId;
   orgId: ObjectId;
   number: string;
-  kind: "adjustment" | "purchase_order" | "invoice" | "supplier_payment_details";
+  kind: "adjustment" | "purchase_order" | "sales_order" | "invoice" | "supplier_payment_details";
   status: "pending" | "approved" | "rejected" | "cancelled" | "failed";
   summary: string;
   valueCents: number;
   /** What to do when approved. Kept as plain ids and numbers. */
-  payload: { itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId; invoiceId?: ObjectId; supplierId?: ObjectId; paymentDetails?: NonNullable<SupplierDoc["paymentDetails"]>; overrideReason?: string };
-  subject: { type: "item" | "purchase_order" | "invoice" | "supplier"; id: string; label: string };
+  payload: {
+    itemId?: ObjectId; locationId?: ObjectId; delta?: number; reason?: string; orderId?: ObjectId;
+    /** A sales order accepted from an incoming Exchange order: the answer to send once it is approved and the stock reserved. */
+    respond?: { messageId: ObjectId; status: "accepted" | "changed"; promisedDate: string | null; note: string };
+    /** Carry the confirmation out even if stock is short (a back-order), because the approver was told. */
+    allowShortage?: boolean;
+    invoiceId?: ObjectId; supplierId?: ObjectId; paymentDetails?: NonNullable<SupplierDoc["paymentDetails"]>; overrideReason?: string;
+  };
+  subject: { type: "item" | "purchase_order" | "sales_order" | "invoice" | "supplier"; id: string; label: string };
   requestedBy: { id: ObjectId; name: string };
   requestedAt: Date;
   decidedBy?: { id: ObjectId; name: string };
@@ -500,6 +541,118 @@ export interface DrillDoc {
   hasInferred: boolean;
 }
 
+export interface TradingPartnerDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  kind: "supplier" | "customer";
+  supplierId: ObjectId | null;
+  identifiers: { scheme: string; value: string }[];
+  bridge: string;
+  bridgeConfig: Record<string, string>;
+  mode: "test" | "live";
+  enabled: boolean;
+  contactEmail: string;
+  note: string;
+  /** Document look for this partner, on top of the organization's templates (INV-17). */
+  docTemplates?: Partial<Record<DocKind, DocTemplateOverride>>;
+  createdAt: Date;
+}
+
+/** The one logo an organization puts on its documents (PNG or JPEG, validated; INV-17). */
+export interface DocLogoDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  contentType: "image/png" | "image/jpeg";
+  width: number;
+  height: number;
+  bytes: Binary;
+  hash: string;
+  uploadedBy: { id: ObjectId | null; name: string };
+  createdAt: Date;
+}
+
+export interface B2BMessageDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  partnerId: ObjectId;
+  direction: "out" | "in";
+  docType: import("@invintel/shared").B2BDocType;
+  state: import("@invintel/shared").B2BState;
+  idempotencyKey: string;
+  correlation: { poId?: string; poNumber?: string; invoiceId?: string; shipmentId?: string; partnerRef?: string; controlNumber?: string };
+  /** The document exactly as carried. Never changed after it is written. */
+  raw: { body: string; contentType: string; hash: string; bytes: number };
+  providerMessageId?: string;
+  attempts: { at: Date; ok: boolean; error: string; retryable: boolean }[];
+  acks: { level: "transport" | "functional" | "business"; result: "accepted" | "rejected"; detail: string; at: Date }[];
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExchangeIdentityDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  exchangeId: string;
+  publicKey: string;
+  /** Sealed with EXCHANGE_KEY_SECRET when that is set. */
+  privateKey: string;
+  baseUrl: string;
+  createdAt: Date;
+}
+
+export interface PortalLinkDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  partnerId: ObjectId;
+  poId: ObjectId;
+  /** The message that carried the link; set once it exists. */
+  messageId?: ObjectId;
+  /** Only a hash is kept: the link itself exists in the sent document and the supplier's inbox. */
+  tokenHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  revokedAt?: Date;
+}
+
+export interface CapturedInvoiceDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  status: "captured" | "converted" | "discarded";
+  partnerId: ObjectId;
+  messageId: ObjectId;
+  source: "email" | "upload" | "json" | "ubl" | "x12";
+  from: string;
+  subject: string;
+  invoiceNumber: string;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  poNumber: string;
+  totalCents: number | null;
+  taxCents: number;
+  currency: string;
+  lines: { description: string; quantity: string; unitPriceCents: number; lineTotalCents: number }[];
+  confidence: Record<"invoiceNumber" | "invoiceDate" | "dueDate" | "poNumber" | "totalCents", "read" | "guess" | "entered" | "missing">;
+  fileIds: ObjectId[];
+  note: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** An attachment kept with a captured invoice. Served only as a download, never rendered. */
+export interface B2BFileDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  messageId: ObjectId;
+  filename: string;
+  contentType: string;
+  data: import("mongodb").Binary;
+  bytes: number;
+  hash: string;
+  createdAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -518,6 +671,7 @@ export interface Store {
   workOrders: Collection<WorkOrderDoc>;
   suppliers: Collection<SupplierDoc>;
   purchaseOrders: Collection<PurchaseOrderDoc>;
+  salesOrders: Collection<SalesOrderDoc>;
   counts: Collection<CountDoc>;
   approvals: Collection<ApprovalDoc>;
   downtime: Collection<DowntimeDoc>;
@@ -531,6 +685,13 @@ export interface Store {
   webhookDeliveries: Collection<WebhookDeliveryDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
+  tradingPartners: Collection<TradingPartnerDoc>;
+  exchangeIdentities: Collection<ExchangeIdentityDoc>;
+  b2bMessages: Collection<B2BMessageDoc>;
+  portalLinks: Collection<PortalLinkDoc>;
+  capturedInvoices: Collection<CapturedInvoiceDoc>;
+  b2bFiles: Collection<B2BFileDoc>;
+  docLogos: Collection<DocLogoDoc>;
   drills: Collection<DrillDoc>;
   close: () => Promise<void>;
 }
@@ -563,6 +724,7 @@ export async function connect(
     workOrders: db.collection("work_orders"),
     suppliers: db.collection("suppliers"),
     purchaseOrders: db.collection("purchase_orders"),
+    salesOrders: db.collection("sales_orders"),
     counts: db.collection("counts"),
     approvals: db.collection("approvals"),
     downtime: db.collection("downtime"),
@@ -576,6 +738,13 @@ export async function connect(
     webhookDeliveries: db.collection("webhook_deliveries"),
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
+    tradingPartners: db.collection("trading_partners"),
+    exchangeIdentities: db.collection("exchange_identities"),
+    b2bMessages: db.collection("b2b_messages"),
+    portalLinks: db.collection("b2b_portal_links"),
+    capturedInvoices: db.collection("captured_invoices"),
+    b2bFiles: db.collection("b2b_files"),
+    docLogos: db.collection("doc_logos"),
     drills: db.collection("recall_drills"),
     close: () => client.close(),
   };
@@ -627,6 +796,19 @@ export async function connect(
     store.ncrs.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.ncrs.createIndex({ orgId: 1, status: 1, heldAt: -1 }),
     store.ncrs.createIndex({ unitId: 1 }, { sparse: true }),
+    store.tradingPartners.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.exchangeIdentities.createIndex({ orgId: 1 }, { unique: true }),
+    store.exchangeIdentities.createIndex({ exchangeId: 1 }, { unique: true }),
+    // The same key from the same partner in the same direction is the same document.
+    store.b2bMessages.createIndex({ orgId: 1, partnerId: 1, direction: 1, idempotencyKey: 1 }, { unique: true }),
+    store.b2bMessages.createIndex({ orgId: 1, createdAt: -1 }),
+    store.b2bMessages.createIndex({ orgId: 1, "correlation.poId": 1 }, { sparse: true }),
+    store.portalLinks.createIndex({ tokenHash: 1 }, { unique: true }),
+    store.portalLinks.createIndex({ orgId: 1, poId: 1 }),
+    store.capturedInvoices.createIndex({ orgId: 1, status: 1, createdAt: -1 }),
+    store.capturedInvoices.createIndex({ orgId: 1, partnerId: 1, invoiceNumber: 1 }),
+    store.b2bFiles.createIndex({ orgId: 1, messageId: 1 }),
+    store.docLogos.createIndex({ orgId: 1 }, { unique: true }),
     store.drills.createIndex({ orgId: 1, at: -1 }),
     // Trace lookups: lines of one work order, of one unit, and receipts by lot.
     store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),
@@ -635,6 +817,11 @@ export async function connect(
     store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
+    store.salesOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.salesOrders.createIndex({ orgId: 1, state: 1 }),
+    // One sales order per incoming order message, so accepting twice can't reserve twice.
+    store.salesOrders.createIndex({ orgId: 1, messageId: 1 }, { unique: true, partialFilterExpression: { messageId: { $exists: true } } }),
+    store.movements.createIndex({ salesOrderId: 1 }, { sparse: true }),
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, at: -1 }),

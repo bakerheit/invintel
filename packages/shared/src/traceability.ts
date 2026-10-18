@@ -19,7 +19,7 @@ export const traceQuerySchema = z
   .refine((q) => [q.lot, q.unit, q.workOrder].filter(Boolean).length === 1, { message: "Give a lot, a label or a work order (just one)" });
 export type TraceQuery = z.input<typeof traceQuerySchema>;
 
-export type TraceNodeKind = "lot" | "receipt" | "unit" | "work_order" | "output" | "inputs";
+export type TraceNodeKind = "lot" | "receipt" | "unit" | "work_order" | "output" | "inputs" | "shipment";
 
 export interface TraceNode {
   id: string;
@@ -55,6 +55,8 @@ export interface TraceSummary {
   workOrders: string[];
   purchaseOrders: string[];
   suppliers: string[];
+  /** Customers who were shipped any of it (INV-15): who to call in a recall. */
+  customers: string[];
   locations: { path: string; units: number; quantity: number }[];
   /** True when some links are inferred rather than exact (plain stock has no lot after receiving). */
   hasInferred: boolean;

@@ -18,7 +18,9 @@ import { createItemRoutes } from "./items.js";
 import { createAlertRoutes } from "./alerts.js";
 import { createApprovalRoutes } from "./approvals.js";
 import { createCountRoutes } from "./counts.js";
+import { createB2BRoutes } from "./b2b-routes.js";
 import { createDataRoutes } from "./data.js";
+import { createExchangeRoutes } from "./exchange.js";
 import { createDowntimeRoutes } from "./downtime.js";
 import { createLocationRoutes } from "./locations.js";
 import { createMemberRoutes } from "./members.js";
@@ -35,6 +37,8 @@ import { createWebhookRoutes } from "./webhook-routes.js";
 import { createInvoiceRoutes } from "./invoices.js";
 import { createPaymentRoutes } from "./payments.js";
 import { createShipmentRoutes } from "./shipments.js";
+import { createDocumentRoutes } from "./doc-settings.js";
+import { createSalesRoutes } from "./sales.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
 import {
   createOrganization,
@@ -182,11 +186,12 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/webhooks", createWebhookRoutes(store));
   scoped.route("/alerts", createAlertRoutes(store));
   scoped.route("/approvals", createApprovalRoutes(store));
+  scoped.route("/exchange", createExchangeRoutes(store));
   scoped.route("/counts", createCountRoutes(store));
   scoped.route("/data", createDataRoutes(store));
   scoped.route("/members", createMemberRoutes(store));
   // A switched-off module refuses its API too, so "off" means off for scripts as well as the menu.
-  for (const module of ["purchasing", "production"] as const) {
+  for (const module of ["purchasing", "production", "sales"] as const) {
     scoped.use(`/${module}/*`, async (c, next) => {
       if ({ ...DEFAULT_MODULES, ...c.get("org").modules }[module] === false) {
         return c.json({ error: `${module[0]!.toUpperCase()}${module.slice(1)} is switched off for this organization` }, 403);
@@ -197,8 +202,11 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/reports", createReportRoutes(store));
   scoped.route("/reasons", createReasonRoutes(store));
   scoped.route("/quality", createQualityRoutes(store));
+  scoped.route("/b2b", createB2BRoutes(store));
   scoped.route("/traceability", createTraceabilityRoutes(store));
   scoped.route("/purchasing", createPurchasingRoutes(store));
+  scoped.route("/sales", createSalesRoutes(store));
+  scoped.route("/documents", createDocumentRoutes(store));
   scoped.route("/overview", createOverviewRoutes(store));
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));

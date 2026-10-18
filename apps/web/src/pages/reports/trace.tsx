@@ -20,10 +20,10 @@ type StartBy = "lot" | "unit" | "workOrder";
 const START_LABEL: Record<StartBy, string> = { lot: "Lot number", unit: "Roll or pallet label", workOrder: "Work order" };
 const START_HINT: Record<StartBy, string> = { lot: "e.g. SUP-A", unit: "e.g. U-000123", workOrder: "e.g. WO-0001" };
 
-const STATUS_LABEL: Record<string, string> = { available: "Available", consumed: "Used up", quarantined: "On hold", produced: "Made" };
+const STATUS_LABEL: Record<string, string> = { available: "Available", consumed: "Used up", quarantined: "On hold", produced: "Made", shipped: "Shipped" };
 
 const KIND_LABEL: Record<TraceNode["kind"], string> = {
-  lot: "Lot", receipt: "Received", unit: "Roll or pallet", work_order: "Work order", output: "Made", inputs: "Material used",
+  lot: "Lot", receipt: "Received", unit: "Roll or pallet", work_order: "Work order", output: "Made", inputs: "Material used", shipment: "Shipped",
 };
 
 function Tree({ nodes, depth = 0 }: { nodes: TraceNode[]; depth?: number }) {
@@ -57,6 +57,7 @@ function Result({ r, orgId, q }: { r: TraceResult; orgId: string; q: TraceQuery 
         <Card className="gap-0 p-4"><div className="text-sm text-muted-foreground">Places</div><div className="mt-1 text-2xl font-semibold tabular-nums">{s.locations.length}</div></Card>
       </div>
       {r.notes.map((n) => <p key={n} role="note" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning">{n}</p>)}
+      {s.customers?.length > 0 && <p className="text-sm font-medium text-warning">Shipped to customers: {s.customers.join(", ")}</p>}
       {(s.purchaseOrders.length > 0 || s.suppliers.length > 0) && (
         <p className="text-sm text-muted-foreground">Orders: {s.purchaseOrders.join(", ") || "none"} · Suppliers: {s.suppliers.join(", ") || "none"}</p>
       )}

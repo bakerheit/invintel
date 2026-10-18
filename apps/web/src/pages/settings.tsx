@@ -72,6 +72,7 @@ function FeaturesForm({ org }: { org: OrgSummary }) {
   const rows = [
     ["purchasing", "Purchasing", "Suppliers, purchase orders and reorder suggestions."],
     ["production", "Production", "Work centers, bills of materials and work orders, with their Floor mode tile."],
+    ["sales", "Sales", "Customer orders that reserve stock, pick and ship through the ledger, and the Exchange orders that become them."],
   ] as const;
   return (
     <div className="space-y-3">
@@ -98,6 +99,7 @@ function ApprovalRulesForm({ orgId }: { orgId: string }) {
     ["purchase_order", "Purchase orders", "Placing an order worth at least this much waits for another admin."],
     ["invoice", "Supplier invoices", "Approving an invoice worth at least this much waits for another admin."],
     ["supplier_payment_details", "Changes to how a supplier is paid", "Any change to a supplier's payment details waits for another admin. This is the classic invoice-fraud route."],
+    ["sales_order", "Sales orders", "Confirming an order worth at least this much (and accepting a customer's order from the Exchange) waits for another admin before stock is reserved."],
   ] as const;
   const state = draft ?? Object.fromEntries(kinds.map(([k]) => {
     const r = rules.data?.rules.find((x) => x.kind === k);
@@ -292,6 +294,10 @@ export default function SettingsPage() {
             <FeaturesForm org={org} />
           </Section>
         )}
+
+        <Section title="Documents" description="The letterhead, logo and look of the purchase orders, confirmations, packing slips and invoices you send.">
+          <Link to={`/o/${org.id}/settings/documents`} className={buttonVariants({ variant: "outline" })}>Document templates</Link>
+        </Section>
 
         {admin && (
           <Section title="Approvals" description="Ask for a second person's OK on the actions that matter. Off until you switch a rule on.">

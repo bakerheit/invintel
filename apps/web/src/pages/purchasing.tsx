@@ -1,4 +1,4 @@
-import { formatQty, qtyErrorMessage, type PoStatus, type PurchaseOrder, type Supplier } from "@invintel/shared";
+import { formatQty, qtyErrorMessage, stockWhy, type PoStatus, type PurchaseOrder, type Supplier } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Mail, PackageCheck, Phone, Plus, ShoppingCart, Trash2, Truck } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { PoExchange } from "@/components/po-exchange";
+import { PoSupplierMail } from "@/components/po-supplier-mail";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -203,6 +205,8 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
             </label>
           </div>
         )}
+        <PoExchange order={order} />
+        <PoSupplierMail order={order} />
         <DialogFooter className="sm:justify-between">
           <div className="flex gap-2">
             {admin && (order.status === "draft" || order.status === "ordered") && <Button variant="ghost" className="text-destructive" onClick={() => void ask("cancel")}>Cancel order</Button>}
@@ -234,14 +238,14 @@ function Suggestions({ suppliers }: { suppliers: Supplier[] }) {
   if (!rows.length) return null;
   return (
     <Card>
-      <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="size-4" /> Running low <span className="text-sm font-normal text-muted-foreground">· order enough to get back to twice the reorder level</span></CardTitle></CardHeader>
+      <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="size-4" /> Running low <span className="text-sm font-normal text-muted-foreground">· order enough to get back to twice the reorder level (judged on what is free to promise)</span></CardTitle></CardHeader>
       <CardContent className="space-y-3">
         <ul className="divide-y">
           {rows.map((r) => (
             <li key={r.itemId} className="flex items-center gap-3 py-2 text-sm">
               <input type="checkbox" className="size-4" aria-label={`Include ${r.name}`} checked={!skip.has(r.itemId)}
                 onChange={(e) => setSkip((s) => { const n = new Set(s); if (e.target.checked) n.delete(r.itemId); else n.add(r.itemId); return n; })} />
-              <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.name}</p><p className="truncate text-xs text-muted-foreground">{r.sku} · {formatQty(r.quantity, r.uom)} on hand, reorder at {formatQty(r.reorderLevel, r.uom, { unit: false })}{r.onOrder ? `, ${formatQty(r.onOrder, r.uom, { unit: false })} already on order` : ""}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.name}</p><p className="truncate text-xs text-muted-foreground">{r.sku} · {stockWhy({ onHand: r.quantity, reserved: r.reserved, onHold: Math.max(0, r.quantity - r.reserved - r.available), available: r.available, reorderLevel: r.reorderLevel }, (n) => formatQty(n, r.uom, { unit: false }))}{r.onOrder ? `, ${formatQty(r.onOrder, r.uom, { unit: false })} already on order` : ""}</p></div>
               <span className="shrink-0 tabular-nums font-medium">+{formatQty(r.suggestedQuantity, r.uom)}</span>
             </li>
           ))}
