@@ -10,6 +10,9 @@ export interface Actor {
   userName: string;
 }
 
+/** Stock in a quality hold area is managed from Quality, not by ordinary moves and adjustments. */
+export const ON_HOLD_AREA = "That place is for stock on quality hold. Use Quality to hold or release stock.";
+
 export type Failure = { ok: false; status: 404 | 409 | 422; error: string };
 export type Posted = { ok: true; movementIds: ObjectId[] };
 
@@ -79,6 +82,7 @@ export async function postAdjustment(
   if (item.tracking === "unit") return { ok: false, status: 409, error: UNIT_TRACKED };
   const location = await store.locations.findOne({ _id: locationId, orgId });
   if (!location) return { ok: false, status: 404, error: "Location not found" };
+  if (location.type === "quarantine") return { ok: false, status: 409, error: ON_HOLD_AREA };
 
   if ((await changeStock(store, orgId, itemId, locationId, delta)) === null) {
     const have = await quantityAt(store, orgId, itemId, locationId);
@@ -120,6 +124,7 @@ export async function postMove(
     store.locations.findOne({ _id: to, orgId }),
   ]);
   if (!fromLoc || !toLoc) return { ok: false, status: 404, error: "Location not found" };
+  if (fromLoc.type === "quarantine" || toLoc.type === "quarantine") return { ok: false, status: 409, error: ON_HOLD_AREA };
 
   if ((await changeStock(store, orgId, itemId, from, -quantity)) === null) {
     const have = await quantityAt(store, orgId, itemId, from);

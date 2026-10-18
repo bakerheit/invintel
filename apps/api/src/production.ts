@@ -628,6 +628,7 @@ export function createProductionRoutes(store: Store) {
     if (oid(fromId).equals(center.locationId)) return c.json({ error: "That material is already at the machine" }, 422);
     const from = await store.locations.findOne({ _id: oid(fromId), orgId });
     if (!from) return c.json({ error: "Location not found" }, 404);
+    if (from.type === "quarantine") return c.json({ error: "That stock is on quality hold, so it can't be loaded." }, 422);
     const itemId = oid(input.itemId);
     const itemName = await nameOf(itemId);
     const note = `Loaded to ${center.name} for ${wo.number}`;

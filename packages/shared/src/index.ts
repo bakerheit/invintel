@@ -86,7 +86,7 @@ export interface RegisterResult {
 // ---------- locations ----------
 
 /** What a place is for. Drives floor workflows (receive into receiving, load from production, etc). */
-export const locationTypeSchema = z.enum(["receiving", "storage", "wip", "production", "finished", "shipping"]);
+export const locationTypeSchema = z.enum(["receiving", "storage", "wip", "production", "finished", "shipping", "quarantine"]);
 export type LocationType = z.infer<typeof locationTypeSchema>;
 export const LOCATION_TYPES = locationTypeSchema.options;
 
@@ -231,6 +231,8 @@ export const receiveInputSchema = z.object({
   reference: z.string().trim().max(200).default(""),
   /** The supplier's lot or batch number from the label, kept on the ledger line for traceability. */
   supplierLot: z.string().trim().max(64).default(""),
+  /** Inspect before release: the received stock goes straight on quality hold ("Awaiting inspection"). */
+  inspect: z.boolean().default(false),
 });
 export type ReceiveInput = z.infer<typeof receiveInputSchema>;
 
@@ -252,6 +254,8 @@ export type MoveInput = z.infer<typeof moveInputSchema>;
 export interface PostedDocument {
   item: Item;
   movementIds: string[];
+  /** Holds opened by "inspect before release". */
+  ncrs?: { id: string; number: string }[];
 }
 
 /** What a scanned code resolved to. Items match by SKU; locations by code or name. */
@@ -319,7 +323,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order", "supplier", "purchase_order", "count", "approval", "alert"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "count", "approval", "alert"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -349,6 +353,8 @@ export const AUDIT_ACTIONS = [
   "downtime.ended",
   "downtime.settings_changed",
   "reasons.changed",
+  "ncr.opened",
+  "ncr.dispositioned",
   "alert.acknowledged",
   "alert.snoozed",
   "alert.reopened",
@@ -554,6 +560,8 @@ export const receiveUnitsInputSchema = z
     /** Pre-printed labels to use, one per unit. Otherwise codes are generated. */
     codes: z.array(z.string().trim().min(1).max(64)).max(200).optional(),
     reference: z.string().trim().max(200).default(""),
+    /** Inspect before release: every unit received goes straight on quality hold. */
+    inspect: z.boolean().default(false),
   })
   .refine((v) => !v.codes || v.codes.length === v.count, { message: "Give one code per unit", path: ["codes"] });
 export type ReceiveUnitsInput = z.infer<typeof receiveUnitsInputSchema>;
@@ -578,8 +586,10 @@ export interface UnitsPage {
 export interface UnitsPosted {
   units: StockUnit[];
   movementIds: string[];
+  ncrs?: { id: string; number: string }[];
 }
 export * from "./production.js";
+export * from "./quality.js";
 export * from "./reasons.js";
 export * from "./purchasing.js";
 export * from "./counts.js";

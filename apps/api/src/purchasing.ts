@@ -23,6 +23,7 @@ import { nextNumber } from "./counters.js";
 import { loadItems } from "./item-queries.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
+import { INSPECT_REASON, openHold } from "./quality.js";
 import { postAdjustment } from "./stock-service.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -353,6 +354,18 @@ export function createPurchasingRoutes(store: Store) {
       await store.movements.updateMany({ _id: { $in: res.movementIds } }, { $set: { purchaseOrderId: doc._id } });
       movementIds.push(...res.movementIds);
     }
+    // Inspect before release: each line goes straight on quality hold, tied to this order and its supplier lot.
+    const ncrs: { id: string; number: string }[] = [];
+    if (input.inspect) {
+      for (const l of input.lines) {
+        const hold = await openHold(store, orgId, actor, { reason: INSPECT_REASON, note: doc.number, source: "receiving", itemId: l.itemId, locationId: input.locationId, quantity: l.quantity, supplierLot: l.supplierLot, purchaseOrderId: doc._id });
+        if (hold.ok) { ncrs.push({ id: hold.ncr._id.toHexString(), number: hold.ncr.number }); movementIds.push(...hold.movementIds); }
+        else {
+          await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" } });
+          return c.json({ error: `Received, but a line could not be put on hold: ${hold.error}`, partial: true }, hold.status);
+        }
+      }
+    }
     await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" }, $set: { updatedAt: new Date() } });
     const [order] = await toOrders(store, [doc]);
     const overReceived = order!.lines.filter((l) => l.received > l.quantity).map((l) => ({ itemId: l.itemId, itemName: l.itemName, over: l.received - l.quantity }));
@@ -361,7 +374,7 @@ export function createPurchasingRoutes(store: Store) {
       summary: `Received ${input.lines.reduce((s, l) => s + l.quantity, 0).toLocaleString("en-US")} units against ${doc.number}${overReceived.length ? " (over-received)" : ""}`,
       refs: { movementIds: movementIds.map(String), status: order!.status, from: before!.status },
     });
-    const result: PoReceiveResult = { order: order!, movementIds: movementIds.map(String), overReceived };
+    const result: PoReceiveResult = { order: order!, movementIds: movementIds.map(String), overReceived, ...(ncrs.length ? { ncrs } : {}) };
     return c.json(result, 201);
   });
 

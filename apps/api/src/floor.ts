@@ -15,6 +15,7 @@ import { actorOf } from "./items.js";
 import { indexLocations, loadLocations, toLocation } from "./locations.js";
 import type { OrgEnv } from "./org-access.js";
 import { postAdjustment, postMove } from "./stock-service.js";
+import { INSPECT_REASON, openHold } from "./quality.js";
 import { presentUnits } from "./units.js";
 
 const ci = { locale: "en", strength: 2 } as const;
@@ -44,6 +45,14 @@ export function createFloorRoutes(store: Store) {
       supplierLot: input.supplierLot,
     });
     if (!result.ok) return c.json({ error: result.error }, result.status);
+    if (input.inspect) {
+      // Inspect before release: what just arrived goes straight on quality hold.
+      const hold = await openHold(store, orgId, actorOf(c.get("user")), {
+        reason: INSPECT_REASON, note: input.reference, source: "receiving", itemId: input.itemId, locationId: input.locationId, quantity: input.quantity, supplierLot: input.supplierLot,
+      });
+      if (!hold.ok) return c.json({ error: `Received, but it could not be put on hold: ${hold.error}` }, hold.status);
+      return c.json({ ...(await posted(orgId, itemId, [...result.movementIds, ...hold.movementIds])), ncrs: [{ id: hold.ncr._id.toHexString(), number: hold.ncr.number }] }, 201);
+    }
     return c.json(await posted(orgId, itemId, result.movementIds), 201);
   });
 

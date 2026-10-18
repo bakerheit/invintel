@@ -22,6 +22,7 @@ const TYPE_LABEL: Record<LocationType, string> = {
   production: "At the machines",
   finished: "Finished goods",
   shipping: "Shipping",
+  quarantine: "On quality hold",
 };
 
 /** A short list for a new organization. Hides itself once everything is done, or when dismissed. */

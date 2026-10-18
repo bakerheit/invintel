@@ -105,6 +105,10 @@ export interface MovementDoc {
   orgId: ObjectId;
   /** The supplier's lot or batch number, on receipts that recorded one. */
   supplierLot?: string;
+  /** Set on lines that belong to a quality hold; Activity won't reverse them (use the NCR). */
+  ncrId?: ObjectId;
+  /** The pick-list reason on scrap lines (and holds), so reports can group by it. */
+  reasonCode?: string;
   /** The work order that caused this movement, if any. */
   workOrderId?: ObjectId;
   /** Set when the movement is about one specific roll or pallet. */
@@ -277,6 +281,39 @@ export interface AlertStateDoc {
   at: Date;
 }
 
+export interface NcrDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  status: "open" | "closed";
+  source: "manual" | "receiving";
+  itemId: ObjectId;
+  unitId?: ObjectId;
+  unitCode?: string;
+  /** Where the stock was before the hold. */
+  fromLocationId: ObjectId;
+  /** Where it is held: the hold area for plain stock, the unit's own place for a labelled unit. */
+  heldLocationId: ObjectId;
+  quantity: number;
+  remaining: number;
+  supplierLot: string;
+  purchaseOrderId?: ObjectId;
+  reason: string;
+  note: string;
+  heldBy: { id: ObjectId; name: string };
+  heldAt: Date;
+  closedAt?: Date;
+  dispositions: {
+    type: "use" | "rework" | "scrap" | "return";
+    quantity: number;
+    toLocationId?: ObjectId;
+    reason: string;
+    note: string;
+    by: { id: ObjectId; name: string };
+    at: Date;
+  }[];
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -300,6 +337,7 @@ export interface Store {
   downtime: Collection<DowntimeDoc>;
   alertStates: Collection<AlertStateDoc>;
   counters: Collection<{ _id: string; seq: number }>;
+  ncrs: Collection<NcrDoc>;
   close: () => Promise<void>;
 }
 
@@ -336,6 +374,7 @@ export async function connect(
     downtime: db.collection("downtime"),
     alertStates: db.collection("alert_states"),
     counters: db.collection("counters"),
+    ncrs: db.collection("ncrs"),
     close: () => client.close(),
   };
 
@@ -383,6 +422,9 @@ export async function connect(
     store.boms.createIndex({ orgId: 1, outputItemId: 1, version: 1 }, { unique: true }),
     store.workOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.workOrders.createIndex({ orgId: 1, status: 1 }),
+    store.ncrs.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.ncrs.createIndex({ orgId: 1, status: 1, heldAt: -1 }),
+    store.ncrs.createIndex({ unitId: 1 }, { sparse: true }),
     store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
