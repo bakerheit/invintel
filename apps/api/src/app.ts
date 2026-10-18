@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { createAuth, type AuthEnv, type AuthOptions } from "./auth.js";
 import type { Store } from "./db.js";
+import { createB2BInboundRoutes } from "./b2b-routes.js";
 import { createOrgRoutes } from "./orgs.js";
 
 export function createApp(store: Store, authOptions: AuthOptions) {
@@ -13,6 +14,8 @@ export function createApp(store: Store, authOptions: AuthOptions) {
 
   app.get("/api/health", (c) => c.json({ ok: true }));
   app.route("/api/auth", auth.routes);
+  // Partners post documents here without a session; each partner's bridge verifies the request itself.
+  app.route("/api/b2b/inbound", createB2BInboundRoutes(store));
 
   // Everything else needs a session. Inventory lives under /api/orgs/:orgId.
   const api = new Hono<AuthEnv>();

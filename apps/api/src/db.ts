@@ -352,6 +352,41 @@ export interface DrillDoc {
   hasInferred: boolean;
 }
 
+export interface TradingPartnerDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  kind: "supplier" | "customer";
+  supplierId: ObjectId | null;
+  identifiers: { scheme: string; value: string }[];
+  bridge: string;
+  bridgeConfig: Record<string, string>;
+  mode: "test" | "live";
+  enabled: boolean;
+  contactEmail: string;
+  note: string;
+  createdAt: Date;
+}
+
+export interface B2BMessageDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  partnerId: ObjectId;
+  direction: "out" | "in";
+  docType: import("@invintel/shared").B2BDocType;
+  state: import("@invintel/shared").B2BState;
+  idempotencyKey: string;
+  correlation: { poId?: string; poNumber?: string; invoiceId?: string; shipmentId?: string; partnerRef?: string };
+  /** The document exactly as carried. Never changed after it is written. */
+  raw: { body: string; contentType: string; hash: string; bytes: number };
+  providerMessageId?: string;
+  attempts: { at: Date; ok: boolean; error: string; retryable: boolean }[];
+  acks: { level: "transport" | "functional" | "business"; result: "accepted" | "rejected"; detail: string; at: Date }[];
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -377,6 +412,8 @@ export interface Store {
   importBatches: Collection<ImportBatchDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
+  tradingPartners: Collection<TradingPartnerDoc>;
+  b2bMessages: Collection<B2BMessageDoc>;
   drills: Collection<DrillDoc>;
   close: () => Promise<void>;
 }
@@ -416,6 +453,8 @@ export async function connect(
     importBatches: db.collection("import_batches"),
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
+    tradingPartners: db.collection("trading_partners"),
+    b2bMessages: db.collection("b2b_messages"),
     drills: db.collection("recall_drills"),
     close: () => client.close(),
   };
@@ -467,6 +506,10 @@ export async function connect(
     store.ncrs.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.ncrs.createIndex({ orgId: 1, status: 1, heldAt: -1 }),
     store.ncrs.createIndex({ unitId: 1 }, { sparse: true }),
+    store.tradingPartners.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    // The same key from the same partner in the same direction is the same document.
+    store.b2bMessages.createIndex({ orgId: 1, partnerId: 1, direction: 1, idempotencyKey: 1 }, { unique: true }),
+    store.b2bMessages.createIndex({ orgId: 1, createdAt: -1 }),
     store.drills.createIndex({ orgId: 1, at: -1 }),
     // Trace lookups: lines of one work order, of one unit, and receipts by lot.
     store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),
