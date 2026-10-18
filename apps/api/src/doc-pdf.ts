@@ -1,4 +1,4 @@
-import { DOC_LABELS, DEFAULT_TITLES, type CompanyProfile, type DocKind, type DocTemplate } from "@invintel/shared";
+import { DOC_LABELS, DEFAULT_TITLES, addressLines, type CompanyProfile, type DocKind, type DocTemplate } from "@invintel/shared";
 import { PdfDoc, parseColor, textWidth, type PdfImage } from "./pdf.js";
 
 // INV-17: the layout engine behind every document PDF. A document is described (who it is from and to, facts, a table, totals,
@@ -65,7 +65,9 @@ export function renderDocPdf(spec: DocSpec, ctx: DocContext): Buffer {
     }
     pdf.text(x, yy + 10, company.name, { size: 12, bold: true });
     yy += 15;
-    for (const a of company.addressLines.filter(Boolean)) { pdf.text(x, yy + 10, a, { size: 8.5, color: GREY }); yy += 11; }
+    // The structured address when there is one; the older printed lines otherwise.
+    const own = addressLines(company.address);
+    for (const a of (own.length ? own : company.addressLines).filter(Boolean)) { pdf.text(x, yy + 10, a, { size: 8.5, color: GREY }); yy += 11; }
     const contact = [company.phone, company.email, company.website].filter(Boolean).join("  ·  ");
     if (contact) for (const l of pdf.wrap(contact, W * 0.56, 8.5).slice(0, 3)) { pdf.text(x, yy + 10, l, { size: 8.5, color: GREY }); yy += 11; }
     if (company.taxId) { pdf.text(x, yy + 10, company.taxId, { size: 8.5, color: GREY }); yy += 11; }

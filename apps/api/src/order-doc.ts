@@ -1,4 +1,4 @@
-import { canonicalOrderSchema, formatQty, lineValueCents, type CanonicalOrder, type PurchaseOrder } from "@invintel/shared";
+import { canonicalOrderSchema, formatQty, isBlankAddress, lineValueCents, type Address, type CanonicalOrder, type PurchaseOrder } from "@invintel/shared";
 import type { DocContext } from "./doc-pdf.js";
 import { plainContext, renderDocument } from "./doc-render.js";
 import { textWidth } from "./pdf.js";
@@ -11,15 +11,17 @@ const day = (iso: string) => iso.slice(0, 10);
 /** Quantity as decimal text in the item's own unit, without the unit: 12500 on {kg, 3 decimals} -> "12.500". */
 const qtyText = (stored: number, uom: { unit: string; decimals: number }) => formatQty(stored, uom, { unit: false, group: false });
 
-export function buildCanonicalOrder(order: PurchaseOrder, opts: { buyerName: string; supplierContact?: string; supplierEmail?: string; portalUrl: string | null; revision?: number; now?: Date }): CanonicalOrder {
+export function buildCanonicalOrder(order: PurchaseOrder, opts: { buyerName: string; supplierContact?: string; supplierEmail?: string; portalUrl: string | null; revision?: number; now?: Date; supplierAddress?: Address | null; buyerAddress?: Address | null }): CanonicalOrder {
   return canonicalOrderSchema.parse({
     kind: "order",
     version: 1,
     poNumber: order.number,
     revision: opts.revision ?? 1,
     issuedAt: day((opts.now ?? new Date()).toISOString()),
-    buyer: { name: opts.buyerName },
-    supplier: { name: order.supplierName, contact: opts.supplierContact ?? "", email: opts.supplierEmail ?? "" },
+    buyer: { name: opts.buyerName, ...(opts.buyerAddress && !isBlankAddress(opts.buyerAddress) ? { address: opts.buyerAddress } : {}) },
+    supplier: { name: order.supplierName, contact: opts.supplierContact ?? "", email: opts.supplierEmail ?? "", ...(opts.supplierAddress && !isBlankAddress(opts.supplierAddress) ? { address: opts.supplierAddress } : {}) },
+    // The goods are delivered to us: our own address.
+    ...(opts.buyerAddress && !isBlankAddress(opts.buyerAddress) ? { shipTo: opts.buyerAddress } : {}),
     currency: "USD",
     expectedDate: order.expectedDate,
     note: order.note,

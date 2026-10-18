@@ -1,4 +1,4 @@
-import { canonicalInvoiceSchema, canonicalOrderSchema, canonicalSalesConfirmationSchema, canonicalShipNoticeSchema, supplierAnswerSchema, type CanonicalInvoice, type CanonicalOrder, type CanonicalSalesConfirmation, type CanonicalShipNotice, type OrderExchange, type PortalOrder } from "@invintel/shared";
+import { type Address, canonicalInvoiceSchema, canonicalOrderSchema, canonicalSalesConfirmationSchema, canonicalShipNoticeSchema, supplierAnswerSchema, type CanonicalInvoice, type CanonicalOrder, type CanonicalSalesConfirmation, type CanonicalShipNotice, type OrderExchange, type PortalOrder } from "@invintel/shared";
 import { zValidator } from "@hono/zod-validator";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Hono } from "hono";
@@ -168,6 +168,12 @@ async function newLink(store: Store, orgId: ObjectId, partnerId: ObjectId, poId:
   return { link, url: `${publicUrl()}/b2b/s/${token}` };
 }
 
+/** The supplier's address and ours (the letterhead's), for the order document. */
+async function addresses(store: Store, orgId: ObjectId, supplier: { address?: Address | null } | null) {
+  const org = await store.orgs.findOne({ _id: orgId }, { projection: { documentProfile: 1 } });
+  return { supplierAddress: supplier?.address ?? null, buyerAddress: org?.documentProfile?.company?.address ?? null };
+}
+
 const latestOut = (store: Store, orgId: ObjectId, poId: ObjectId) =>
   store.b2bMessages.find({ orgId, direction: "out", docType: "order", "correlation.poId": poId.toHexString() }).sort({ createdAt: -1 }).limit(1).toArray().then((x) => x[0] ?? null);
 
@@ -185,11 +191,11 @@ export async function sendPurchaseOrder(store: Store, orgId: ObjectId, actor: Ac
   const supplier = await store.suppliers.findOne({ _id: po.supplierId });
   if (partner.bridge === X12_BRIDGE) {
     // EDI partners get an 850 and no supplier page; their system answers with a 997 and an 855.
-    const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: "", portalUrl: null, revision });
+    const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: "", portalUrl: null, revision, ...(await addresses(store, orgId, supplier)) });
     return sendX12Order(store, orgId, actor, partner, canonical, poId);
   }
   const { link, url } = await newLink(store, orgId, partner._id, poId);
-  const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: partner.bridgeConfig.to ?? supplier?.email ?? "", portalUrl: url, revision });
+  const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: partner.bridgeConfig.to ?? supplier?.email ?? "", portalUrl: url, revision, ...(await addresses(store, orgId, supplier)) });
   const res = await sendMessage(store, orgId, actor, partner._id, {
     docType: "order", body: JSON.stringify(canonical), contentType: "application/json", correlation: { poId: poId.toHexString(), poNumber: po.number }, idempotencyKey: `po:${poId.toHexString()}:rev:${revision}`,
   });
@@ -203,7 +209,7 @@ export async function previewPurchaseOrder(store: Store, orgId: ObjectId, poId: 
   if (!po) return { ok: false, status: 404, error: "Order not found" };
   const [order] = await toOrders(store, [po]);
   const supplier = await store.suppliers.findOne({ _id: po.supplierId });
-  const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: supplier?.email ?? "", portalUrl: null });
+  const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: supplier?.email ?? "", portalUrl: null, ...(await addresses(store, orgId, supplier)) });
   const partner = await store.tradingPartners.findOne({ orgId, supplierId: po.supplierId, kind: "supplier" }, { projection: { _id: 1 } });
   return { ok: true, pdf: renderOrderPdf(canonical, await loadDocContext(store, orgId, "purchase_order", partner?._id ?? null)), canonical };
 }

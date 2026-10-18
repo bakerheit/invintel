@@ -1,0 +1,19 @@
+ISA*00*          *00*          *ZZ*NWCORR         *ZZ*SUNRISEPM      *261018*0930*U*00401*000000013*0*T*>~
+GS*IN*NWCORR*SUNRISEPM*20261018*0930*13*X*004010~
+ST*810*0001~
+BIG*20261103*INV-1**PO-1~
+CUR*BY*USD~
+N1*BT*Accounts payable~
+N3*88 Commerce Way*Suite 300~
+N4*Madison*WI*53703*US~
+N1*ST*Plant 2, dock 4~
+N3*5100 Industrial Parkway~
+N4*Janesville*WI*53546*US~
+ITD*05*3****20261203~
+IT1*1*1*EA*1.00**BP*A~
+PID*F****A~
+TDS*100~
+CTT*1~
+SE*15*0001~
+GE*1*13~
+IEA*1*000000013~

@@ -1,5 +1,5 @@
 import {
-  DEFAULT_COMPANY, DOC_COLUMNS, defaultTemplate, type CanonicalInvoice, type CanonicalOrder, type CanonicalSalesConfirmation, type CanonicalShipNotice, type CompanyProfile, type DocKind, type DocTemplate,
+  DEFAULT_COMPANY, DOC_COLUMNS, addressLines, isBlankAddress, sameAddress, type Address, defaultTemplate, type CanonicalInvoice, type CanonicalOrder, type CanonicalSalesConfirmation, type CanonicalShipNotice, type CompanyProfile, type DocKind, type DocTemplate,
 } from "@invintel/shared";
 import { renderDocPdf, type DocColumn, type DocContext, type DocSpec } from "./doc-pdf.js";
 import type { PdfImage } from "./pdf.js";
@@ -14,11 +14,22 @@ const columnsOf = (kind: DocKind): DocColumn[] => DOC_COLUMNS[kind].map((c) => (
 const qty = (q: string, unit: string) => `${q} ${unit}`.trim();
 const item = (sku: string, name: string) => name || sku;
 
+/** A business and its address, as the lines of one block on a document. */
+const block = (name: string, a?: Address | null) => [name, ...addressLines(a)];
+
+/** The customer's blocks: "Customer" when there is one place (or none), "Bill to" and "Ship to" when they differ. */
+function customerParties(name: string, billTo?: Address | null, shipTo?: Address | null): DocSpec["parties"] {
+  const bill = isBlankAddress(billTo) ? null : billTo!;
+  const ship = isBlankAddress(shipTo) ? null : shipTo!;
+  if (bill && ship && !sameAddress(bill, ship)) return [{ heading: "Bill to", lines: block(name, bill) }, { heading: "Ship to", lines: block(name, ship) }];
+  return [{ heading: "Customer", lines: block(name, bill ?? ship) }];
+}
+
 export function purchaseOrderSpec(o: CanonicalOrder): DocSpec {
   return {
     number: o.poNumber,
     meta: [["Issued", o.issuedAt], ...(o.revision > 1 ? [["Revision", String(o.revision)] as [string, string]] : [])],
-    parties: [{ heading: "To (supplier)", lines: [o.supplier.name, o.supplier.contact, o.supplier.email] }],
+    parties: [{ heading: "To (supplier)", lines: [o.supplier.name, o.supplier.contact, o.supplier.email, ...addressLines(o.supplier.address)] }, ...(o.shipTo && !isBlankAddress(o.shipTo) ? [{ heading: "Deliver to", lines: block(o.buyer.name, o.shipTo) }] : [])],
     facts: [["Requested delivery date", o.expectedDate ?? ""]],
     note: o.note,
     ...(o.portalUrl ? { link: { label: "Please confirm this order, give a ship date and tracking here (no account needed):", url: o.portalUrl } } : {}),
@@ -32,7 +43,7 @@ export function salesConfirmationSpec(c: CanonicalSalesConfirmation): DocSpec {
   return {
     number: c.number,
     meta: [["Date", c.issuedAt]],
-    parties: [{ heading: "Customer", lines: [c.customerName] }],
+    parties: customerParties(c.customerName, c.billTo, c.shipTo),
     facts: [["Your order number", c.customerRef], ["Wanted by", c.requestedDate ?? ""]],
     note: c.note,
     columns: columnsOf("sales_order"),
@@ -45,7 +56,7 @@ export function packingSlipSpec(n: CanonicalShipNotice): DocSpec {
   return {
     number: n.shipmentNo,
     meta: [["Ship date", n.shipDate]],
-    parties: [{ heading: "Ship to", lines: [n.customerName ?? ""] }],
+    parties: [{ heading: "Ship to", lines: block(n.customerName ?? "", n.shipTo ?? n.billTo) }],
     facts: [["Order number", n.poNumber], ["Carrier", n.carrier], ["Tracking number", n.trackingNumber]],
     columns: columnsOf("packing_slip"),
     rows: n.lines.map((l) => ({ sku: l.sku, description: item(l.sku, l.name ?? ""), ordered: l.orderedQuantity ? qty(l.orderedQuantity, l.unit) : "", shipped: qty(l.quantity, l.unit), toDate: l.shippedToDate ? qty(l.shippedToDate, l.unit) : "" })),
@@ -58,7 +69,7 @@ export function invoiceSpec(i: CanonicalInvoice): DocSpec {
   return {
     number: i.invoiceNumber,
     meta: [["Invoice date", i.invoiceDate], ...(i.dueDate ? [["Due", i.dueDate] as [string, string]] : [])],
-    parties: [{ heading: "Bill to", lines: [i.billTo ?? ""] }],
+    parties: customerParties(i.billTo ?? "", i.billToAddress, i.shipToAddress).map((p, k, all) => (all.length === 1 ? { ...p, heading: "Bill to" } : p)),
     facts: [["Your order number", i.poNumber], ["Shipment", i.shipmentNo ?? ""]],
     columns: columnsOf("invoice"),
     rows: i.lines.map((l) => ({ sku: l.sku, description: l.name || l.sku, quantity: qty(l.quantity, l.unit), unitPrice: money(l.unitPriceCents, i.currency), amount: money(l.lineTotalCents, i.currency) })),
@@ -93,6 +104,11 @@ export function plainContext(kind: DocKind, name: string, extra: { company?: Par
 
 // ---------- sample documents (fictional) for the live preview ----------
 
+const SAMPLE_MILL: Address = { name: "", line1: "400 River Street", line2: "", city: "Dayton", region: "OH", postal: "45402", country: "US" };
+const SAMPLE_HERE: Address = { name: "Receiving dock 2", line1: "1200 Mill Road", line2: "", city: "Springfield", region: "IL", postal: "62701", country: "US" };
+const SAMPLE_BILL: Address = { name: "Accounts payable", line1: "88 Commerce Way", line2: "Suite 300", city: "Madison", region: "WI", postal: "53703", country: "US" };
+const SAMPLE_SHIP: Address = { name: "Plant 2, dock 4", line1: "5100 Industrial Parkway", line2: "", city: "Janesville", region: "WI", postal: "53546", country: "US" };
+
 export function sampleDoc(kind: DocKind, company: { name: string; taxRateBps?: number; paymentTermsDays?: number; taxLabel?: string }): DocData {
   const lines = [
     { lineNo: 1, sku: "KRAFT-42", name: "Kraft liner 42 lb, 60 in roll", quantity: "6", unit: "roll", unitPriceCents: 48000, lineTotalCents: 288000 },
@@ -104,15 +120,15 @@ export function sampleDoc(kind: DocKind, company: { name: string; taxRateBps?: n
   const tax = Math.round((total * rate) / 10_000);
   switch (kind) {
     case "purchase_order":
-      return { kind, doc: { kind: "order", version: 1, poNumber: "PO-0042", revision: 1, issuedAt: "2026-11-02", buyer: { name: company.name }, supplier: { name: "Sample Paper Mill", contact: "Sam Ortiz", email: "orders@samplemill.example" }, currency: "USD", expectedDate: "2026-11-20", note: "Deliver to dock 2. Call before arrival.", lines, totalCents: total, portalUrl: null } };
+      return { kind, doc: { kind: "order", version: 1, poNumber: "PO-0042", revision: 1, issuedAt: "2026-11-02", buyer: { name: company.name }, supplier: { name: "Sample Paper Mill", contact: "Sam Ortiz", email: "orders@samplemill.example", address: SAMPLE_MILL }, shipTo: SAMPLE_HERE, currency: "USD", expectedDate: "2026-11-20", note: "Deliver to dock 2. Call before arrival.", lines, totalCents: total, portalUrl: null } };
     case "sales_order":
-      return { kind, doc: { kind: "sales_confirmation", version: 1, number: "SO-0108", issuedAt: "2026-11-02", customerName: "Sample Packaging Co.", customerRef: "BP-5521", requestedDate: "2026-11-24", note: "Pallets stretch-wrapped.", currency: "USD", lines, totalCents: total, shipper: company.name } };
+      return { kind, doc: { kind: "sales_confirmation", version: 1, number: "SO-0108", issuedAt: "2026-11-02", customerName: "Sample Packaging Co.", customerRef: "BP-5521", billTo: SAMPLE_BILL, shipTo: SAMPLE_SHIP, requestedDate: "2026-11-24", note: "Pallets stretch-wrapped.", currency: "USD", lines, totalCents: total, shipper: company.name } };
     case "packing_slip":
-      return { kind, doc: { kind: "despatch_advice", version: 1, shipmentNo: "SO-0108-1", poNumber: "BP-5521", shipDate: "2026-11-10", carrier: "Sample Freight", trackingNumber: "SMP-123456", shipper: company.name, customerName: "Sample Packaging Co.", lines: lines.map((l, i) => ({ lineNo: l.lineNo, sku: l.sku, name: l.name, quantity: i === 0 ? "4" : l.quantity, unit: l.unit, orderedQuantity: l.quantity, shippedToDate: i === 0 ? "4" : l.quantity })) } };
+      return { kind, doc: { kind: "despatch_advice", version: 1, shipmentNo: "SO-0108-1", poNumber: "BP-5521", shipDate: "2026-11-10", carrier: "Sample Freight", trackingNumber: "SMP-123456", shipper: company.name, customerName: "Sample Packaging Co.", shipTo: SAMPLE_SHIP, lines: lines.map((l, i) => ({ lineNo: l.lineNo, sku: l.sku, name: l.name, quantity: i === 0 ? "4" : l.quantity, unit: l.unit, orderedQuantity: l.quantity, shippedToDate: i === 0 ? "4" : l.quantity })) } };
     case "invoice": {
       const terms = company.paymentTermsDays ?? 30;
       const due = new Date(Date.UTC(2026, 10, 10 + terms)).toISOString().slice(0, 10);
-      return { kind, doc: { kind: "invoice", version: 1, invoiceNumber: "INV-0007", invoiceDate: "2026-11-10", dueDate: due, poNumber: "BP-5521", currency: "USD", lines, taxCents: tax, totalCents: total + tax, billTo: "Sample Packaging Co.", taxLabel: company.taxLabel || "Tax", shipmentNo: "SO-0108-1", shipper: company.name } };
+      return { kind, doc: { kind: "invoice", version: 1, invoiceNumber: "INV-0007", invoiceDate: "2026-11-10", dueDate: due, poNumber: "BP-5521", currency: "USD", lines, taxCents: tax, totalCents: total + tax, billTo: "Sample Packaging Co.", billToAddress: SAMPLE_BILL, shipToAddress: SAMPLE_SHIP, taxLabel: company.taxLabel || "Tax", shipmentNo: "SO-0108-1", shipper: company.name } };
     }
   }
 }

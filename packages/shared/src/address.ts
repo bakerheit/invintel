@@ -22,7 +22,10 @@ export type Address = z.infer<typeof addressSchema>;
 export const BLANK_ADDRESS: Address = { name: "", line1: "", line2: "", city: "", region: "", postal: "", country: "" };
 
 /** An address that may be absent: blank counts as absent, so a half-filled form doesn't create an empty address. */
-export const optionalAddressSchema = addressSchema.nullable().optional().transform((a) => (a && !isBlankAddress(a) ? a : null));
+export const optionalAddressSchema = z.preprocess(
+  (v) => (v && typeof v === "object" && isBlankAddress(v as Partial<Address>) ? null : v),
+  addressSchema.nullable().optional(),
+);
 
 export const isBlankAddress = (a?: Partial<Address> | null): boolean => !a || Object.values(a).every((v) => !String(v ?? "").trim());
 

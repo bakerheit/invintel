@@ -115,7 +115,7 @@ await call(`${base}/units`, { itemId: rollItem.id, locationId: rackB, quantity: 
 await call(`${base}/units`, { itemId: rollItem.id, locationId: dock, quantity: 640, count: 1, lot: "MILL-7802" });
 
 // A supplier and an order that has been placed, so Purchasing has something in it.
-const supplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Midwest Paper Mill", contact: "Sam Ortiz", email: "orders@midwestpaper.example", phone: "555-0142" });
+const supplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Midwest Paper Mill", contact: "Sam Ortiz", email: "orders@midwestpaper.example", phone: "555-0142", address: { name: "", line1: "400 River Street", line2: "", city: "Dayton", region: "OH", postal: "45402", country: "US" } });
 const po = await call<{ id: string }>(`${base}/purchasing/orders`, {
   supplierId: supplier.id, expectedDate: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10),
   lines: [{ itemId: test, quantity: 6, unitCostCents: 42000 }, { itemId: inkB, quantity: 8, unitCostCents: 9500 }],
@@ -157,7 +157,7 @@ await call(`${base}/b2b/invoices/upload`, {
 
 // EDI: Lakeshore Film & Resin takes orders as X12 (a test partner on the built-in test transport: nothing leaves this machine).
 // Open its order, "Send as X12 (850)", then Documents > the sent order > "Let it answer" to play the supplier's side.
-const ediSupplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Lakeshore Film & Resin", contact: "Dee Park" });
+const ediSupplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Lakeshore Film & Resin", contact: "Dee Park", address: { name: "", line1: "77 Harbor Drive", line2: "Building C", city: "Erie", region: "PA", postal: "16501", country: "US" } });
 await call(`${base}/b2b/partners`, {
   name: "Lakeshore Film & Resin", kind: "supplier", supplierId: ediSupplier.id, bridge: "x12", mode: "test",
   bridgeConfig: { ourQual: "ZZ", ourId: "DEMOCORRUG", theirQual: "ZZ", theirId: "LAKESHORE", version: "004010", transport: "loopback" },
@@ -190,14 +190,16 @@ const logoPng = (() => {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk("IHDR", ihdr), pngChunk("IDAT", deflateSync(Buffer.concat(rows))), pngChunk("IEND", Buffer.alloc(0))]);
 })();
 await call(`${base}/documents/settings`, {
-  company: { name: "Demo Corrugated Co.", addressLines: ["1200 Mill Road", "Springfield, IL 62701"], phone: "555-0100", email: "orders@democorrugated.example", website: "democorrugated.example", taxId: "Reg. 12-3456789", paper: "letter", taxLabel: "Sales tax", taxRateBps: 625, paymentTermsDays: 30 },
+  company: { name: "Demo Corrugated Co.", address: { name: "", line1: "1200 Mill Road", line2: "", city: "Springfield", region: "IL", postal: "62701", country: "US" }, phone: "555-0100", email: "orders@democorrugated.example", website: "democorrugated.example", taxId: "Reg. 12-3456789", paper: "letter", taxLabel: "Sales tax", taxRateBps: 625, paymentTermsDays: 30 },
   templates: { invoice: { title: "", accent: "#1d4ed8", showLogo: true, columns: ["sku", "description", "quantity", "unitPrice", "amount"], terms: "Payment due within 30 days. Late balances may be charged 1.5% a month.", footer: "Thank you for your business." }, purchase_order: { title: "", accent: "#334155", showLogo: true, columns: ["sku", "description", "quantity", "unitPrice", "amount"], terms: "Please confirm receipt of this order and quote the PO number on all documents.", footer: "" } },
 }, "PUT");
 await call(`${base}/documents/logo`, { contentBase64: logoPng.toString("base64") });
 
 // Sales: Bluebird Packaging is a customer (an email test partner: when a shipment goes, it gets a ship notice by email into the outbox folder). One order is confirmed (its stock is reserved: look at RSC-1296 in Inventory, "promised"
 // and "free"), one is part shipped from Finished goods, and one is a draft waiting to be confirmed (Sales).
-const customer = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Bluebird Packaging", kind: "customer", bridge: "email", bridgeConfig: { to: "purchasing@bluebird.example" }, mode: "test" });
+const customer = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Bluebird Packaging", kind: "customer", bridge: "email", bridgeConfig: { to: "purchasing@bluebird.example" }, mode: "test",
+  billTo: { name: "Accounts payable", line1: "88 Commerce Way", line2: "Suite 300", city: "Madison", region: "WI", postal: "53703", country: "US" },
+  shipTo: { name: "Plant 2, dock 4", line1: "5100 Industrial Parkway", line2: "", city: "Janesville", region: "WI", postal: "53546", country: "US" } });
 const soBase = `${base}/sales/orders`;
 const dateIn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const so1 = await call<{ id: string }>(soBase, { customerPartnerId: customer.id, customerRef: "BP-5521", requestedDate: dateIn(6), note: "Deliver to dock 3", lines: [{ itemId: rsc, quantity: 30, unitPriceCents: 2600 }] });

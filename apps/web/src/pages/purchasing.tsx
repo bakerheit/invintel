@@ -1,9 +1,10 @@
-import { formatQty, qtyErrorMessage, stockWhy, type PoStatus, type PurchaseOrder, type Supplier } from "@invintel/shared";
+import { addressOneLine, formatQty, qtyErrorMessage, stockWhy, type PoStatus, type PurchaseOrder, type Supplier } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Mail, PackageCheck, Phone, Plus, ShoppingCart, Trash2, Truck } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
+import { AddressFields, addressOrNull, orBlank } from "@/components/address-fields";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { PoExchange } from "@/components/po-exchange";
@@ -42,25 +43,31 @@ function SupplierSelect({ value, onChange, suppliers }: { value: string; onChang
   );
 }
 
-function SupplierDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+/** A new supplier, or (with `supplier`) the edit of one. */
+function SupplierDialog({ open, onOpenChange, supplier }: { open: boolean; onOpenChange: (o: boolean) => void; supplier?: Supplier }) {
   const { id: orgId } = useCurrentOrg();
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [address, setAddress] = useState(orBlank(supplier?.address));
   const save = useMutation({
-    mutationFn: (f: FormData) => api.createSupplier(orgId, { name: String(f.get("name")), contact: String(f.get("contact") ?? ""), email: String(f.get("email") ?? ""), phone: String(f.get("phone") ?? "") }),
-    onSuccess: async (s) => { await invalidateOrg(qc, orgId); toast.success(`Added ${s.name}`); onOpenChange(false); },
+    mutationFn: (f: FormData) => {
+      const input = { name: String(f.get("name")), contact: String(f.get("contact") ?? ""), email: String(f.get("email") ?? ""), phone: String(f.get("phone") ?? ""), address: addressOrNull(address) };
+      return supplier ? api.updateSupplier(orgId, supplier.id, input) : api.createSupplier(orgId, input);
+    },
+    onSuccess: async (s) => { await invalidateOrg(qc, orgId); toast.success(supplier ? `Saved ${s.name}` : `Added ${s.name}`); onOpenChange(false); },
     onError: (e: Error) => setError(e.message),
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>New supplier</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{supplier ? `Edit ${supplier.name}` : "New supplier"}</DialogTitle></DialogHeader>
         <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); setError(null); save.mutate(new FormData(e.currentTarget)); }}>
           {([["name", "Name", true], ["contact", "Contact person"], ["email", "Email"], ["phone", "Phone"]] as const).map(([name, label, req]) => (
-            <div key={name} className="grid gap-1.5"><Label htmlFor={`s-${name}`}>{label}</Label><Input id={`s-${name}`} name={name} required={!!req} maxLength={name === "name" ? 100 : 200} /></div>
+            <div key={name} className="grid gap-1.5"><Label htmlFor={`s-${name}`}>{label}</Label><Input id={`s-${name}`} name={name} required={!!req} maxLength={name === "name" ? 100 : 200} defaultValue={supplier ? String(supplier[name]) : ""} /></div>
           ))}
+          <fieldset className="space-y-2"><legend className="text-sm font-medium">Their address <span className="font-normal text-muted-foreground">(optional: printed on purchase orders)</span></legend><AddressFields idPrefix="sup" value={address} onChange={setAddress} /></fieldset>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-          <DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button type="submit" disabled={save.isPending}>Add supplier</Button></DialogFooter>
+          <DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button type="submit" disabled={save.isPending}>{supplier ? "Save" : "Add supplier"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -267,6 +274,7 @@ export default function PurchasingPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [newOrder, setNewOrder] = useState(false);
   const [newSupplier, setNewSupplier] = useState(false);
+  const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
   const list = orders.data ?? [];
   const sup: Supplier[] = suppliers.data ?? [];
   const current = list.find((o) => o.id === selected);
@@ -311,11 +319,12 @@ export default function PurchasingPage() {
             <ul className="divide-y">
               {sup.map((s) => (
                 <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-                  <div><p className="font-medium">{s.name}</p><p className="text-xs text-muted-foreground">{s.contact}</p></div>
+                  <div><p className="font-medium">{s.name}</p><p className="text-xs text-muted-foreground">{s.contact}{s.address ? `${s.contact ? " · " : ""}${addressOneLine(s.address)}` : ""}</p></div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     {s.email && <span className="flex items-center gap-1"><Mail className="size-3.5" />{s.email}</span>}
                     {s.phone && <span className="flex items-center gap-1"><Phone className="size-3.5" />{s.phone}</span>}
                     {s.openOrders > 0 && <Badge variant="secondary">{s.openOrders} open</Badge>}
+                    {admin && <Button size="sm" variant="ghost" onClick={() => setEditSupplier(s)}>Edit</Button>}
                   </div>
                 </li>
               ))}
@@ -326,6 +335,7 @@ export default function PurchasingPage() {
       {current && <OrderDetail key={current.id + current.updatedAt} order={current} onClose={() => setSelected(null)} />}
       <OrderDialog open={newOrder} onOpenChange={setNewOrder} suppliers={sup} />
       <SupplierDialog open={newSupplier} onOpenChange={setNewSupplier} />
+      {editSupplier && <SupplierDialog key={editSupplier.id} open supplier={editSupplier} onOpenChange={(o) => !o && setEditSupplier(null)} />}
     </>
   );
 }

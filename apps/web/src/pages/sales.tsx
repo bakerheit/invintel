@@ -1,10 +1,11 @@
-import { formatQty, qtyErrorMessage, type PickLine, type SalesOrder, type SoShipInput, type SoStatus } from "@invintel/shared";
+import { addressOneLine, formatQty, qtyErrorMessage, sameAddress, type PickLine, type SalesOrder, type SoShipInput, type SoStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, FileText, Mail, PackageCheck, Pencil, Plus, Receipt, Trash2, Truck } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
+import { AddressFields, addressOrNull, orBlank } from "@/components/address-fields";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +51,9 @@ function OrderFormDialog({ open, onOpenChange, order }: { open: boolean; onOpenC
   const [name, setName] = useState(order && !order.customer.partnerId ? order.customer.name : "");
   const [ref, setRef] = useState(order?.customerRef ?? "");
   const [date, setDate] = useState(order?.requestedDate ?? "");
+  const [billTo, setBillTo] = useState(orBlank(order?.billTo));
+  const [shipTo, setShipTo] = useState(orBlank(order?.shipTo));
+  const [sameShip, setSameShip] = useState(!order?.shipTo || sameAddress(order.shipTo, order.billTo));
   const [lines, setLines] = useState<Draft[]>(order ? order.lines.map((l) => ({ itemId: l.itemId, quantity: qtyText(l.quantity, l.uom), price: centsToDollars(l.unitPriceCents) })) : [{ ...blank }]);
   const [error, setError] = useState<string | null>(null);
   const item = (id: string) => items.data?.find((x) => x.id === id);
@@ -62,6 +66,7 @@ function OrderFormDialog({ open, onOpenChange, order }: { open: boolean; onOpenC
     mutationFn: () => {
       const input = {
         customerPartnerId: customer === FREE_TEXT ? null : customer, customerName: customer === FREE_TEXT ? name : "", customerRef: ref, requestedDate: date || null,
+        billTo: addressOrNull(billTo), shipTo: sameShip ? addressOrNull(billTo) : addressOrNull(shipTo),
         lines: lines.map((l) => ({ itemId: l.itemId, quantity: read(l).stored, unitPriceCents: dollarsToCents(l.price) })),
       };
       return order ? api.updateSalesOrder(orgId, order.id, input) : api.createSalesOrder(orgId, input);
@@ -84,7 +89,13 @@ function OrderFormDialog({ open, onOpenChange, order }: { open: boolean; onOpenC
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid min-w-0 gap-1.5">
               <Label>Customer</Label>
-              <Select value={customer} onValueChange={(v) => v && setCustomer(v)} items={picks}>
+              <Select value={customer} onValueChange={(v) => {
+                if (!v) return;
+                setCustomer(v);
+                // A customer's own addresses fill in the order's (copied, so a later change to the customer can't change this order).
+                const p = customers.find((x) => x.id === v);
+                if (p) { setBillTo(orBlank(p.billTo)); setShipTo(orBlank(p.shipTo ?? p.billTo)); setSameShip(!p.shipTo || sameAddress(p.shipTo, p.billTo)); }
+              }} items={picks}>
                 <SelectTrigger aria-label="Customer" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>{picks.map((p) => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
               </Select>
@@ -93,6 +104,14 @@ function OrderFormDialog({ open, onOpenChange, order }: { open: boolean; onOpenC
             <div className="grid gap-1.5"><Label htmlFor="so-ref">Their order number</Label><Input id="so-ref" value={ref} maxLength={80} onChange={(e) => setRef(e.target.value)} /></div>
             <div className="grid gap-1.5"><Label htmlFor="so-date">Wanted by</Label><Input id="so-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
           </div>
+          <details className="rounded-md border p-3" open={!!(order?.billTo || order?.shipTo)}>
+            <summary className="cursor-pointer text-sm font-medium">Addresses <span className="font-normal text-muted-foreground">(optional: printed on the confirmation, packing slip and invoice)</span></summary>
+            <div className="mt-3 space-y-3">
+              <div className="space-y-2"><p className="text-sm font-medium">Bill to</p><AddressFields idPrefix="so-bill" value={billTo} onChange={setBillTo} /></div>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={sameShip} onChange={(e) => setSameShip(e.target.checked)} /> Ship to the same address</label>
+              {!sameShip && <div className="space-y-2"><p className="text-sm font-medium">Ship to</p><AddressFields idPrefix="so-ship" value={shipTo} onChange={setShipTo} /></div>}
+            </div>
+          </details>
           <div className="space-y-2">
             <Label>Lines</Label>
             {lines.map((l, i) => {
@@ -276,6 +295,12 @@ function OrderDetail({ order, onClose, onShip, onEdit, onRewritten }: { order: S
             {order.customer.name}{order.customerRef ? ` · their order ${order.customerRef}` : ""}{order.requestedDate ? ` · wanted by ${order.requestedDate}` : ""}{order.note ? ` · ${order.note}` : ""}
           </DialogDescription>
         </DialogHeader>
+        {(order.billTo || order.shipTo) && (
+          <p className="text-xs text-muted-foreground">
+            {order.billTo && <>Bill to: {addressOneLine(order.billTo)}. </>}
+            {order.shipTo && !sameAddress(order.shipTo, order.billTo) && <>Ship to: {addressOneLine(order.shipTo)}.</>}
+          </p>
+        )}
         {order.source === "exchange" && <p className="text-xs text-muted-foreground">Made from an order they sent over the <Link className="underline" to={`/o/${orgId}/exchange`}>Exchange</Link>.</p>}
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">

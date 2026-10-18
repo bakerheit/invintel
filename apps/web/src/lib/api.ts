@@ -262,6 +262,7 @@ export const api = {
     throw new Error(`${typeof data.error === "string" ? data.error : "Undo failed"}${problems}`);
   },
   listSuppliers: (orgId: string) => request<Supplier[]>(`/orgs/${orgId}/purchasing/suppliers`),
+  updateSupplier: (orgId: string, id: string, input: Partial<SupplierInput>) => request<Supplier>(`/orgs/${orgId}/purchasing/suppliers/${id}`, patch(input)),
   createSupplier: (orgId: string, input: SupplierInput) => request<Supplier>(`/orgs/${orgId}/purchasing/suppliers`, post(input)),
   suggestions: (orgId: string) => request<ReorderSuggestion[]>(`/orgs/${orgId}/purchasing/suggestions`),
   listOrders: (orgId: string) => request<PurchaseOrder[]>(`/orgs/${orgId}/purchasing/orders`),

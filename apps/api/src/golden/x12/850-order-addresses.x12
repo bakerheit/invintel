@@ -1,0 +1,21 @@
+ISA*00*          *00*          *ZZ*NWCORR         *ZZ*SUNRISEPM      *261018*0930*U*00401*000000011*0*T*>~
+GS*PO*NWCORR*SUNRISEPM*20261018*0930*11*X*004010~
+ST*850*0001~
+BEG*00*SA*PO-1**20261018~
+CUR*BY*USD~
+N1*BY*Northwind Corrugated Co.~
+N3*1200 Mill Road~
+N4*Springfield*IL*62701*US~
+N1*SE*Sunrise Paper Mill~
+N3*400 River Street*Dock 3~
+N4*Dayton*OH*45402*US~
+N1*ST*Plant 2, dock 4~
+N3*5100 Industrial Parkway~
+N4*Janesville*WI*53546*US~
+PO1*1*1*EA*1.00**BP*A~
+PID*F****A~
+CTT*1*1~
+AMT*TT*1.00~
+SE*17*0001~
+GE*1*11~
+IEA*1*000000011~

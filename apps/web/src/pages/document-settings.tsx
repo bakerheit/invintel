@@ -4,6 +4,7 @@ import { ArrowLeft, ExternalLink, ImagePlus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { AddressFields, addressOrNull, orBlank } from "@/components/address-fields";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -121,7 +122,14 @@ export default function DocumentSettingsPage() {
               <LogoCard orgId={orgId} settings={q.data} admin={admin} />
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="c-name">Company name</Label><Input id="c-name" disabled={ro} value={company.name} placeholder={q.data.orgName} maxLength={100} onChange={(e) => setC({ name: e.target.value })} /></div>
-                <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="c-addr">Address (one line each, up to 5)</Label><textarea id="c-addr" disabled={ro} rows={3} className={field} value={company.addressLines.join("\n")} onChange={(e) => setC({ addressLines: e.target.value.split("\n").slice(0, 5).map((l) => l.slice(0, 80)) })} /></div>
+                <div className="space-y-2 sm:col-span-2">
+                  <p className="text-sm font-medium">Address</p>
+                  <AddressFields idPrefix="co" disabled={ro} withName={false} value={orBlank(company.address)} onChange={(a) => setC({ address: a, ...(addressOrNull(a) ? { addressLines: [] } : {}) })} />
+                  <p className="text-xs text-muted-foreground">Printed on every document, and written into EDI orders as your address (use the state or province code and a two-letter country code for EDI).</p>
+                </div>
+                {company.addressLines.length > 0 && !addressOrNull(orBlank(company.address)) && (
+                  <div className="grid gap-1.5 sm:col-span-2"><Label htmlFor="c-addr">Printed address lines (older way: fill in the address above to replace them)</Label><textarea id="c-addr" disabled={ro} rows={3} className={field} value={company.addressLines.join("\n")} onChange={(e) => setC({ addressLines: e.target.value.split("\n").slice(0, 5).map((l) => l.slice(0, 80)) })} /></div>
+                )}
                 <div className="grid gap-1.5"><Label htmlFor="c-phone">Phone</Label><Input id="c-phone" disabled={ro} value={company.phone} maxLength={40} onChange={(e) => setC({ phone: e.target.value })} /></div>
                 <div className="grid gap-1.5"><Label htmlFor="c-email">Email</Label><Input id="c-email" disabled={ro} value={company.email} maxLength={120} onChange={(e) => setC({ email: e.target.value })} /></div>
                 <div className="grid gap-1.5"><Label htmlFor="c-web">Website</Label><Input id="c-web" disabled={ro} value={company.website} maxLength={120} onChange={(e) => setC({ website: e.target.value })} /></div>

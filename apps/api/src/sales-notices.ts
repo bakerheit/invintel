@@ -75,7 +75,7 @@ export async function buildCanonical(store: Store, doc: SalesOrderDoc, s: Shipme
         name: i?.name ?? "", ...(ordered ? { orderedQuantity: text(ordered.quantity) } : {}), shippedToDate: text(toDate.get(`${doc._id.toHexString()}:${l.itemId.toHexString()}`) ?? l.quantity),
       };
     }),
-    shipper: issuerName(org), customerName: partner?.name ?? doc.customerName,
+    shipper: issuerName(org), customerName: partner?.name ?? doc.customerName, ...(doc.shipTo ? { shipTo: doc.shipTo } : {}), ...(doc.billTo ? { billTo: doc.billTo } : {}),
   };
 }
 

@@ -1,4 +1,4 @@
-import type { CanonicalFunctionalAck, CanonicalInvoice, CanonicalOrder, CanonicalOrderResponse, CanonicalShipNotice } from "@invintel/shared";
+import { BLANK_ADDRESS, isBlankAddress, type Address, type CanonicalFunctionalAck, type CanonicalInvoice, type CanonicalOrder, type CanonicalOrderResponse, type CanonicalShipNotice } from "@invintel/shared";
 import {
   buildInterchange, centsToDecimal, decimalToCents, find, findAll, fromX12Date, mulCents, parseX12, seg, sumQty, toX12Date, X12Errors,
   type ParsedInterchange, type Segment, type X12Profile,
@@ -52,6 +52,69 @@ function unitName(code: string, o: Pick<MapOpts, "uomMap"> | undefined, e: X12Er
 }
 
 const el = (s: Segment | undefined, i: number) => s?.[i] ?? "";
+
+// ---------- parties and addresses (N1 / N3 / N4) ----------
+
+const COUNTRY: Record<string, string> = {
+  "united states": "US", "united states of america": "US", usa: "US", "u.s.a.": "US", canada: "CA", mexico: "MX", "united kingdom": "GB", uk: "GB", "great britain": "GB", germany: "DE", france: "FR",
+  spain: "ES", italy: "IT", netherlands: "NL", ireland: "IE", china: "CN", japan: "JP", australia: "AU", "new zealand": "NZ", india: "IN", brazil: "BR",
+};
+
+/** A country as the two-letter code EDI wants, or null if we can't be sure which it is. */
+export const x12Country = (c: string): string | null => {
+  const t = c.trim();
+  if (!t) return "";
+  if (/^[A-Za-z]{2}$/.test(t)) return t.toUpperCase();
+  return COUNTRY[t.toLowerCase()] ?? null;
+};
+
+/**
+ * One party and its address: N1 (who), N3 (street, up to two lines), N4 (city, state or province code, postal code, country code).
+ * Nothing is cut or guessed: a state written out in full, a country we don't know, or a city missing from an address with a postal
+ * code is an error that says what to fix. Without an address only the N1 is written.
+ */
+function partySegments(code: string, name: string, a: Address | null | undefined, e: X12Errors, label: string): Segment[] {
+  const out: Segment[] = [];
+  const who = e.text((a?.name || name).trim(), `${label} name`, 60);
+  if (!who) return out;
+  out.push(seg("N1", code, who));
+  if (!a || isBlankAddress(a)) return out;
+  const l1 = e.text(a.line1, `${label} street`, 55);
+  const l2 = e.text(a.line2, `${label} street (second line)`, 55);
+  if (l2 && !l1) e.add(`${label}: a second street line needs a first`);
+  if (l1) out.push(seg("N3", l1, l2));
+  const city = e.text(a.city, `${label} city`, 30);
+  const region = a.region.trim();
+  const postal = a.postal.trim();
+  const country = x12Country(a.country);
+  if (region && !/^[A-Za-z]{2,3}$/.test(region)) e.add(`${label}: X12 needs the state or province as a code (like IL), not "${region.slice(0, 20)}"`);
+  if (postal && !/^[A-Za-z0-9 -]{3,15}$/.test(postal)) e.add(`${label}: the postal code "${postal.slice(0, 16)}" isn't valid for X12`);
+  if (country === null) e.add(`${label}: X12 needs a two-letter country code (like US); "${a.country.slice(0, 20)}" isn't one we know`);
+  if (city || region || postal || country) {
+    if (!city) e.add(`${label}: the address needs a city for X12`);
+    out.push(seg("N4", city, region.toUpperCase(), postal, country ?? ""));
+  }
+  return out;
+}
+
+interface Party { code: string; name: string; address: Address | null }
+
+/** The N1 parties in a transaction set, each with the N3 and N4 that follow it. */
+function readParties(segs: Segment[]): Party[] {
+  const out: Party[] = [];
+  let cur: (Party & { a: Address }) | null = null;
+  for (const s of segs) {
+    if (s[0] === "N1") {
+      cur = { code: el(s, 1), name: el(s, 2), address: null, a: { ...BLANK_ADDRESS } };
+      out.push(cur);
+    } else if (cur && s[0] === "N3") { cur.a.line1 = el(s, 1); cur.a.line2 = el(s, 2); cur.address = cur.a; }
+    else if (cur && s[0] === "N4") { cur.a.city = el(s, 1); cur.a.region = el(s, 2); cur.a.postal = el(s, 3); cur.a.country = el(s, 4); cur.address = cur.a; }
+  }
+  return out.map(({ code, name, address }) => ({ code, name, address }));
+}
+
+/** An address read from a party; the party's name goes in as the place's name only when it isn't the business's own name. */
+const placed = (p: Party | undefined, businessName: string): Address | undefined => (p?.address ? { ...p.address, name: p.name && p.name !== businessName ? p.name : "" } : undefined);
 const finish = (e: X12Errors, o: MapOpts, setId: string, body: Segment[]): Written => {
   if (e.any) return { ok: false, errors: e.list };
   return { ok: true, text: buildInterchange({ profile: o.profile, setId, control: o.control, body, now: o.now }) };
@@ -87,8 +150,9 @@ export function orderTo850(order: CanonicalOrder, o: MapOpts): Written {
   body.push(seg("CUR", "BY", order.currency));
   if (order.expectedDate) body.push(seg("DTM", "002", toX12Date(order.expectedDate)));
   body.push(...noteSegments(order.note, e));
-  if (buyer) body.push(seg("N1", "BY", buyer));
-  if (supplier) body.push(seg("N1", "SE", supplier));
+  body.push(...partySegments("BY", buyer, order.buyer.address, e, "Buyer"));
+  body.push(...partySegments("SE", supplier, order.supplier.address, e, "Supplier"));
+  if (order.shipTo) body.push(...partySegments("ST", buyer, order.shipTo, e, "Ship to"));
   let sum = 0;
   const seen = new Set<number>();
   for (const l of order.lines) {
@@ -125,7 +189,11 @@ function readOrder(ic: ParsedInterchange, o?: Pick<MapOpts, "uomMap">): Result<C
   const dtm = find(segs, "DTM", (s) => s[1] === "002");
   const expectedDate = dtm ? fromX12Date(el(dtm, 2)) : null;
   if (dtm && !expectedDate) e.add("DTM*002 (delivery date) isn't CCYYMMDD");
-  const party = (...codes: string[]) => el(find(segs, "N1", (s) => codes.includes(el(s, 1))), 2);
+  const parties = readParties(segs);
+  const party = (...codes: string[]) => parties.find((p) => codes.includes(p.code));
+  const buyerParty = party("BY");
+  const supplierParty = party("SE", "SU", "VN");
+  const shipParty = party("ST");
 
   const lines: CanonicalOrder["lines"] = [];
   let current: CanonicalOrder["lines"][number] | null = null;
@@ -159,7 +227,9 @@ function readOrder(ic: ParsedInterchange, o?: Pick<MapOpts, "uomMap">): Result<C
   return {
     ok: true,
     value: {
-      kind: "order", version: 1, poNumber, revision: purpose === "05" ? 2 : 1, issuedAt, buyer: { name: party("BY") }, supplier: { name: party("SE", "SU", "VN"), contact: "", email: "" },
+      kind: "order", version: 1, poNumber, revision: purpose === "05" ? 2 : 1, issuedAt, buyer: { name: buyerParty?.name ?? "", ...(buyerParty?.address ? { address: placed(buyerParty, buyerParty.name) } : {}) },
+      supplier: { name: supplierParty?.name ?? "", contact: "", email: "", ...(supplierParty?.address ? { address: placed(supplierParty, supplierParty.name) } : {}) },
+      ...(shipParty?.address ? { shipTo: placed(shipParty, buyerParty?.name ?? "") } : {}),
       currency, expectedDate, note: readNote(segs), lines, totalCents: total ?? sum, portalUrl: null,
     },
   };
@@ -244,6 +314,7 @@ export function shipTo856(n: CanonicalShipNotice, o: MapOpts): Written {
   if (carrier) body.push(seg("TD5", "", "", "", "", carrier));
   const tracking = n.trackingNumber ? e.id(n.trackingNumber, "Tracking number", 30) : "";
   if (tracking) body.push(seg("REF", "CN", tracking));
+  if (n.shipTo) body.push(...partySegments("ST", n.customerName ?? "", n.shipTo, e, "Ship to"));
   body.push(seg("HL", 2, 1, "O"), seg("PRF", po));
   let hl = 2;
   for (const l of n.lines) {
@@ -288,7 +359,8 @@ function readShip(ic: ParsedInterchange, o?: Pick<MapOpts, "uomMap">): Result<Ca
   }
   if (!lines.length) e.add("The ship notice has no items (LIN/SN1)");
   if (e.any || !shipDate) return { ok: false, errors: e.list };
-  return { ok: true, value: { kind: "despatch_advice", version: 1, shipmentNo, poNumber: pos[0]!, shipDate, carrier: el(find(segs, "TD5"), 5), trackingNumber: el(ref, 2), lines } };
+  const st = readParties(segs).find((p) => p.code === "ST");
+  return { ok: true, value: { kind: "despatch_advice", version: 1, shipmentNo, poNumber: pos[0]!, shipDate, carrier: el(find(segs, "TD5"), 5), trackingNumber: el(ref, 2), lines, ...(st ? { customerName: st.name } : {}), ...(st?.address ? { shipTo: { ...st.address, name: "" } } : {}) } };
 }
 
 // =====================================================================================================================
@@ -301,6 +373,8 @@ export function invoiceTo810(inv: CanonicalInvoice, o: MapOpts): Written {
   const po = inv.poNumber ? e.id(inv.poNumber, "PO number", 22) : "";
   const body: Segment[] = [seg("BIG", toX12Date(inv.invoiceDate), no, "", po)];
   body.push(seg("CUR", "BY", inv.currency));
+  if (inv.billTo) body.push(...partySegments("BT", inv.billTo, inv.billToAddress, e, "Bill to"));
+  if (inv.shipToAddress) body.push(...partySegments("ST", inv.billTo ?? "", inv.shipToAddress, e, "Ship to"));
   if (inv.dueDate) body.push(seg("ITD", "05", "3", "", "", "", toX12Date(inv.dueDate)));
   let sum = 0;
   for (const l of inv.lines) {
@@ -361,7 +435,10 @@ function readInvoice(ic: ParsedInterchange, o?: Pick<MapOpts, "uomMap">): Result
   const txi = findAll(segs, "TXI").find((s) => el(s, 1) === "TX");
   const tax = txi ? (decimalToCents(el(txi, 2)) ?? 0) : 0;
   if (e.any || !invoiceDate || total === null) return { ok: false, errors: e.list };
-  return { ok: true, value: { kind: "invoice", version: 1, invoiceNumber, invoiceDate, dueDate, poNumber: el(big, 4), currency, lines, taxCents: tax, totalCents: total } };
+  const parties = readParties(segs);
+  const bt = parties.find((p) => p.code === "BT");
+  const st = parties.find((p) => p.code === "ST");
+  return { ok: true, value: { kind: "invoice", version: 1, invoiceNumber, invoiceDate, dueDate, poNumber: el(big, 4), currency, lines, taxCents: tax, totalCents: total, ...(bt ? { billTo: bt.name } : {}), ...(bt?.address ? { billToAddress: { ...bt.address, name: "" } } : {}), ...(st?.address ? { shipToAddress: placed(st, bt?.name ?? "") } : {}) } };
 }
 
 // =====================================================================================================================

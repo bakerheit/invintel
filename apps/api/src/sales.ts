@@ -64,6 +64,8 @@ export function createSalesRoutes(store: Store) {
     if (patch.customerPartnerId !== undefined) { set.customerPartnerId = partner?._id ?? null; if (partner) set.customerName = partner.name; }
     if (patch.customerName !== undefined && !partner) set.customerName = patch.customerName;
     for (const k of ["customerRef", "requestedDate", "note"] as const) if (patch[k] !== undefined) set[k] = patch[k];
+    if (patch.billTo !== undefined) set.billTo = patch.billTo;
+    if (patch.shipTo !== undefined) set.shipTo = patch.shipTo;
     if (patch.lines) set.lines = patch.lines.map((l) => ({ itemId: oid(l.itemId), quantity: l.quantity, unitPriceCents: l.unitPriceCents }));
     const after = await store.salesOrders.findOneAndUpdate({ _id, orgId, state: "draft" }, { $set: set }, { returnDocument: "after" });
     if (!after) return c.json({ error: "That order was just confirmed or changed. Reload it." }, 409);

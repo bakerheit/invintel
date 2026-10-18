@@ -182,7 +182,7 @@ export function createPurchasingRoutes(store: Store) {
   // ---------- suppliers ----------
 
   const supplierView = (s: SupplierDoc, openOrders: number): Supplier => ({
-    id: s._id.toHexString(), name: s.name, contact: s.contact, email: s.email, phone: s.phone, notes: s.notes, openOrders, createdAt: s.createdAt.toISOString(),
+    id: s._id.toHexString(), name: s.name, contact: s.contact, email: s.email, phone: s.phone, notes: s.notes, address: s.address ?? null, openOrders, createdAt: s.createdAt.toISOString(),
   });
 
   r.get("/suppliers", async (c) => {

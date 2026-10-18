@@ -1,5 +1,12 @@
 import {
   ARCHIVE_COLLECTIONS,
+  addressSchema,
+  canonicalInvoiceSchema,
+  companyProfileSchema,
+  docKindSchema,
+  docTemplateOverrideSchema,
+  docTemplateSchema,
+  optionalAddressSchema,
   invoiceSettingsSchema,
   ARCHIVE_FORMAT,
   ARCHIVE_VERSION,
@@ -9,12 +16,14 @@ import {
 } from "@invintel/shared";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { ObjectId, type Collection, type Document } from "mongodb";
+import { Binary, ObjectId, type Collection, type Document } from "mongodb";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { auditActor, recordAudit } from "./audit.js";
 import type { LocationDoc, OrgDoc, Store } from "./db.js";
+import { readImage } from "./image.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
+import { createHash } from "node:crypto";
 
 /** Where each collection lives. Everything here is scoped by orgId. */
 const SOURCES: Record<ArchiveCollection, (s: Store) => Collection<Document>> = {
@@ -29,6 +38,8 @@ const SOURCES: Record<ArchiveCollection, (s: Store) => Collection<Document>> = {
   invoices: (s) => s.invoices as unknown as Collection<Document>,
   payments: (s) => s.payments as unknown as Collection<Document>,
   salesOrders: (s) => s.salesOrders as unknown as Collection<Document>,
+  tradingPartners: (s) => s.tradingPartners as unknown as Collection<Document>,
+  docLogos: (s) => s.docLogos as unknown as Collection<Document>,
   workCenters: (s) => s.workCenters as unknown as Collection<Document>,
   boms: (s) => s.boms as unknown as Collection<Document>,
   workOrders: (s) => s.workOrders as unknown as Collection<Document>,
@@ -39,6 +50,12 @@ const SOURCES: Record<ArchiveCollection, (s: Store) => Collection<Document>> = {
   importBatches: (s) => s.importBatches as unknown as Collection<Document>,
 };
 const NAMES = Object.keys(ARCHIVE_COLLECTIONS) as ArchiveCollection[];
+
+/**
+ * What of a collection is exported. An Invintel-to-Invintel exchange partner is tied to this organization's signing identity, which is
+ * not carried, so those partners are left out (an order from one of them keeps its customer's name and just loses the link).
+ */
+const EXPORT_FILTER: Partial<Record<ArchiveCollection, Document>> = { tradingPartners: { bridge: { $ne: "invintel" } } };
 
 /**
  * Organization settings that travel with the archive. An allowlist, so a crafted archive can't set
@@ -53,6 +70,7 @@ const SETTINGS: Record<string, z.ZodType> = {
   scheduledHoursPerDay: z.number().min(0).max(24),
   alertSettings: z.object({ daysOfSupply: z.number().min(0).max(10000), machineDownMinutes: z.number().min(0).max(100000) }).strict(),
   invoiceSettings: invoiceSettingsSchema,
+  documentProfile: z.object({ company: companyProfileSchema, templates: z.partialRecord(docKindSchema, docTemplateSchema) }).strict(),
   approvalRules: z
     .array(z.object({ kind: z.enum(["adjustment", "purchase_order", "sales_order"]), thresholdCents: z.number().int().min(0).max(1_000_000_000), appliesTo: z.enum(["members", "everyone"]) }).strict())
     .max(10),
@@ -72,6 +90,11 @@ const COUNTERS: { kind: string; collection: ArchiveCollection; field: string }[]
   { kind: "unit", collection: "units", field: "code" },
 ];
 
+/** Numbering kept inside other documents: invoice numbers issued for shipments (INV-0001) live on the sales order's shipments. */
+const NESTED_COUNTERS: { kind: string; collection: ArchiveCollection; values: (d: Document) => string[] }[] = [
+  { kind: "inv", collection: "salesOrders", values: (d) => (Array.isArray(d.shipments) ? d.shipments.map((s: Document) => String(s?.invoiceNumber ?? "")) : []) },
+];
+
 /** Fields every document must have, so garbage can't get into a collection and break the screens that read it. */
 const REQUIRED: Partial<Record<ArchiveCollection, Record<string, "string" | "number" | "boolean" | "id" | "array" | "object" | "date">>> = {
   locations: { name: "string", createdAt: "date", updatedAt: "date" },
@@ -85,6 +108,8 @@ const REQUIRED: Partial<Record<ArchiveCollection, Record<string, "string" | "num
   invoices: { number: "string", supplierId: "id", lines: "array", createdAt: "date", updatedAt: "date" },
   payments: { number: "string", supplierId: "id", allocations: "array", createdAt: "date" },
   salesOrders: { number: "string", state: "string", lines: "array", createdAt: "date", updatedAt: "date" },
+  tradingPartners: { name: "string", kind: "string", bridge: "string", createdAt: "date" },
+  docLogos: { contentType: "string", bytes: "object", createdAt: "date" },
   workCenters: { name: "string", locationId: "id", createdAt: "date" },
   boms: { outputItemId: "id", inputs: "array", createdAt: "date" },
   workOrders: { number: "string", bomId: "id", outputItemId: "id", workCenterId: "id", requirements: "array", createdAt: "date", updatedAt: "date" },
@@ -103,6 +128,7 @@ const OID = /^[0-9a-f]{24}$/i;
 export function toPlain(value: unknown): unknown {
   if (value instanceof ObjectId) return { $oid: value.toHexString() };
   if (value instanceof Date) return { $date: value.toISOString() };
+  if (value instanceof Binary) return { $binary: Buffer.from(value.buffer).toString("base64") };
   if (Array.isArray(value)) return value.map(toPlain);
   if (value && typeof value === "object") {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).map(([k, v]) => [k, toPlain(v)]));
@@ -116,19 +142,25 @@ const MAX_DEPTH = 14;
 const MAX_DOCS = 600_000;
 
 /** Reads the tagged JSON back into Mongo values, refusing anything that could do more than store data. */
-function fromPlain(value: unknown, mapId: (hex: string) => ObjectId, depth = 0): unknown {
+function fromPlain(value: unknown, mapId: (hex: string) => ObjectId, depth = 0, allowBinary = false): unknown {
   if (depth > MAX_DEPTH) throw new ArchiveError("The archive is nested too deeply.");
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) throw new ArchiveError("The archive contains a number that isn't valid.");
     return value;
   }
-  if (Array.isArray(value)) return value.map((v) => fromPlain(v, mapId, depth + 1));
+  if (Array.isArray(value)) return value.map((v) => fromPlain(v, mapId, depth + 1, allowBinary));
   if (typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length === 1 && entries[0]![0] === "$oid") {
       if (typeof entries[0]![1] !== "string" || !OID.test(entries[0]![1])) throw new ArchiveError("The archive contains an id that isn't valid.");
       return mapId(entries[0]![1].toLowerCase());
+    }
+    if (entries.length === 1 && entries[0]![0] === "$binary") {
+      // Raw bytes exist in one place only (the logo). Anywhere else they are a sign of a crafted file.
+      const b64 = entries[0]![1];
+      if (!allowBinary || typeof b64 !== "string" || b64.length > 600_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) throw new ArchiveError("The archive contains data that isn't valid.");
+      return new Binary(Buffer.from(b64, "base64"));
     }
     if (entries.length === 1 && entries[0]![0] === "$date") {
       const d = new Date(String(entries[0]![1]));
@@ -139,7 +171,7 @@ function fromPlain(value: unknown, mapId: (hex: string) => ObjectId, depth = 0):
     for (const [k, v] of entries) {
       // Field names with $ or . are how operators and paths sneak into a query or update; no real document has them.
       if (k.startsWith("$") || k.includes(".") || k === "__proto__" || k === "constructor" || k === "prototype") throw new ArchiveError(`The archive contains a field name that isn't allowed ("${k}").`);
-      out[k] = fromPlain(v, mapId, depth + 1);
+      out[k] = fromPlain(v, mapId, depth + 1, allowBinary);
     }
     return out;
   }
@@ -154,7 +186,7 @@ export async function buildArchive(store: Store, org: OrgDoc): Promise<{ archive
   const data: Record<string, unknown[]> = {};
   const counts: Record<string, number> = {};
   for (const name of NAMES) {
-    const docs = await SOURCES[name](store).find({ orgId: org._id }).sort({ _id: 1 }).toArray();
+    const docs = await SOURCES[name](store).find({ orgId: org._id, ...(EXPORT_FILTER[name] ?? {}) }).sort({ _id: 1 }).toArray();
     counts[name] = docs.length;
     data[name] = docs.map(({ orgId: _orgId, ...rest }) => toPlain(rest));
   }
@@ -171,7 +203,14 @@ export async function buildArchive(store: Store, org: OrgDoc): Promise<{ archive
     counts,
     settings: Object.keys(settings),
   };
-  return { archive: { ...summary, settings, data }, summary };
+  // X12 control numbers are counted per partner and must never be reused with the same partner, so the counts travel with the partners.
+  const counters: Record<string, number> = {};
+  const partnerIds = new Set((data.tradingPartners ?? []).map((p) => (p as { _id: { $oid: string } })._id.$oid));
+  for (const row of await store.counters.find({ _id: { $regex: `^${org._id.toHexString()}:x12(tp)?:[0-9a-f]{24}$` } }).toArray()) {
+    const [, kind, partner] = row._id.split(":");
+    if (partnerIds.has(partner!)) counters[`${kind}:${partner}`] = row.seq;
+  }
+  return { archive: { ...summary, settings, counters, data }, summary };
 }
 
 // ---------------- restore ----------------
@@ -182,6 +221,7 @@ const archiveShape = z.object({
   exportedAt: z.string().max(40),
   organizationName: z.string().max(200),
   settings: z.record(z.string(), z.unknown()).default({}),
+  counters: z.record(z.string().regex(/^x12(tp)?:[0-9a-f]{24}$/), z.number().int().min(0).max(999_999_999)).default({}),
   data: z.record(z.string(), z.array(z.unknown())),
 });
 
@@ -192,7 +232,37 @@ interface Prepared {
   summary: ArchiveSummary;
   docs: Record<ArchiveCollection, Document[]>;
   settings: Record<string, unknown>;
+  /** X12 control numbers per (new) partner id, as the counter keys they belong under. */
+  counters: Record<string, number>;
 }
+
+/**
+ * What the newer collections must look like beyond having the right fields: they feed documents, PDFs and EDI, so what is restored has
+ * to be what the screens would have accepted. Returns the problem, or null. A logo is read again from its bytes (never trusted).
+ */
+function checkDoc(name: ArchiveCollection, doc: Document): string | null {
+  const bad = (v: z.ZodType, x: unknown) => x !== undefined && x !== null && !v.safeParse(x).success;
+  if (name === "suppliers" && bad(addressSchema, doc.address)) return "has an address that isn't valid";
+  if (name === "tradingPartners") {
+    if (bad(addressSchema, doc.billTo) || bad(addressSchema, doc.shipTo)) return "has an address that isn't valid";
+    if (bad(z.partialRecord(docKindSchema, docTemplateOverrideSchema), doc.docTemplates)) return "has a document look that isn't valid";
+  }
+  if (name === "salesOrders") {
+    if (bad(addressSchema, doc.billTo) || bad(addressSchema, doc.shipTo)) return "has an address that isn't valid";
+    for (const s of Array.isArray(doc.shipments) ? doc.shipments : []) {
+      if (s?.invoice !== undefined && !canonicalInvoiceSchema.safeParse(s.invoice).success) return "has an invoice that isn't valid";
+      if (s?.invoiceNumber !== undefined && (typeof s.invoiceNumber !== "string" || s.invoiceNumber.length > 40)) return "has an invoice number that isn't valid";
+    }
+  }
+  if (name === "docLogos") {
+    const img = readImage(Buffer.from((doc.bytes as Binary).buffer));
+    if (!img.ok) return `has a logo that isn't valid: ${img.error}`;
+    const bytes = Buffer.from((doc.bytes as Binary).buffer);
+    Object.assign(doc, { contentType: img.contentType, width: img.width, height: img.height, hash: createHash("sha256").update(bytes).digest("hex") });
+  }
+  return null;
+}
+void optionalAddressSchema;
 
 /** Checks the whole archive and turns it into documents for the target organization. Writes nothing. */
 function prepare(raw: unknown, orgId: ObjectId): Prepared {
@@ -224,7 +294,7 @@ function prepare(raw: unknown, orgId: ObjectId): Prepared {
       if (typeof oid !== "string" || !OID.test(oid)) throw new ArchiveError(`${ARCHIVE_COLLECTIONS[name]}: record ${i + 1} has no valid id.`);
       if (seen.has(oid.toLowerCase())) throw new ArchiveError(`${ARCHIVE_COLLECTIONS[name]}: the same record appears twice.`);
       seen.add(oid.toLowerCase());
-      const doc = fromPlain(raw, mapId) as Document;
+      const doc = fromPlain(raw, mapId, 0, name === "docLogos") as Document;
       delete doc.orgId; // never taken from the file
       if (name === "invoices") {
         // A match snapshot names items by plain text ids and a request for approval isn't archived, so neither can be carried over.
@@ -234,9 +304,20 @@ function prepare(raw: unknown, orgId: ObjectId): Prepared {
       for (const [field, t] of Object.entries(REQUIRED[name] ?? {})) {
         if (!typeOk(doc[field], t)) throw new ArchiveError(`${ARCHIVE_COLLECTIONS[name]}: record ${i + 1} is missing "${field}" or has the wrong kind of value there.`);
       }
+      const problem = checkDoc(name, doc);
+      if (problem) throw new ArchiveError(`${ARCHIVE_COLLECTIONS[name]}: record ${i + 1} ${problem}.`);
       return { ...doc, orgId };
     });
     counts[name] = docs[name].length;
+  }
+
+  if (docs.docLogos.length > 1) throw new ArchiveError("The archive has more than one logo.");
+  // Control numbers belong to partners that came with the archive; each moves to its partner's new id.
+  const counters: Record<string, number> = {};
+  const partnerOids = new Set((a.data.tradingPartners ?? []).map((p) => String((p as { _id?: { $oid?: string } })._id?.$oid ?? "").toLowerCase()));
+  for (const [key, seq] of Object.entries(a.counters)) {
+    const [kind, hex] = key.split(":") as [string, string];
+    if (partnerOids.has(hex.toLowerCase())) counters[`${kind}:${mapId(hex.toLowerCase()).toHexString()}`] = seq;
   }
 
   const settings: Record<string, unknown> = {};
@@ -252,6 +333,7 @@ function prepare(raw: unknown, orgId: ObjectId): Prepared {
     summary: { format: ARCHIVE_FORMAT, version: a.version, exportedAt: a.exportedAt, organizationName: a.organizationName, counts, settings: Object.keys(settings) },
     docs,
     settings,
+    counters,
   };
 }
 
@@ -268,6 +350,8 @@ async function blockedReason(store: Store, orgId: ObjectId): Promise<string | nu
     ["work orders", store.workOrders as unknown as Collection<Document>],
     ["counts", store.counts as unknown as Collection<Document>],
     ["approval requests", store.approvals as unknown as Collection<Document>],
+    ["trading partners", store.tradingPartners as unknown as Collection<Document>],
+    ["a document logo", store.docLogos as unknown as Collection<Document>],
   ];
   for (const [label, col] of guards) {
     if (await col.findOne({ orgId }, { projection: { _id: 1 } })) {
@@ -300,6 +384,11 @@ async function apply(store: Store, orgId: ObjectId, p: Prepared): Promise<void> 
       }, 0);
       if (max > 0) await store.counters.updateOne({ _id: `${orgId.toHexString()}:${c.kind}` }, { $max: { seq: max } }, { upsert: true });
     }
+    for (const c of NESTED_COUNTERS) {
+      const max = p.docs[c.collection].flatMap(c.values).reduce((m, v) => Math.max(m, Number(/(\d+)$/.exec(v)?.[1] ?? 0)), 0);
+      if (max > 0) await store.counters.updateOne({ _id: `${orgId.toHexString()}:${c.kind}` }, { $max: { seq: max } }, { upsert: true });
+    }
+    for (const [key, seq] of Object.entries(p.counters)) await store.counters.updateOne({ _id: `${orgId.toHexString()}:${key}` }, { $max: { seq } }, { upsert: true });
   } catch (e) {
     // Nothing is left half-restored: the organization was empty, so emptying it again is exactly the way back.
     for (const col of touched) await col.deleteMany({ orgId }).catch(() => {});

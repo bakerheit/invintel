@@ -1,8 +1,9 @@
-import { ACCENTS, DEFAULT_TITLES, DOC_LABELS, B2B_DOC_LABELS, type B2BMessage, type CapturedInvoice, type TradingPartner } from "@invintel/shared";
+import { ACCENTS, DEFAULT_TITLES, DOC_LABELS, sameAddress, B2B_DOC_LABELS, type B2BMessage, type CapturedInvoice, type TradingPartner } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Handshake, Inbox, Mail, Plus, Upload } from "lucide-react";
 import { Fragment, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { AddressFields, addressOrNull, orBlank } from "@/components/address-fields";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +67,9 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
   const [transport, setTransport] = useState(c.transport ?? "loopback");
   const [uomMap, setUomMap] = useState(c.uomMap ?? "");
   const [ack997, setAck997] = useState(c.ack997 !== "off");
+  const [billTo, setBillTo] = useState(orBlank(partner?.billTo));
+  const [shipTo, setShipTo] = useState(orBlank(partner?.shipTo));
+  const [sameShip, setSameShip] = useState(!partner?.shipTo || sameAddress(partner.shipTo, partner.billTo));
   const [docTemplates, setDocTemplates] = useState<NonNullable<TradingPartner["docTemplates"]>>(partner?.docTemplates ?? {});
   const save = useMutation({
     mutationFn: () => {
@@ -74,7 +78,7 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
         : bridge === "invoice-inbox" ? { secretEnv }
         : bridge === "x12" ? { ourQual, ourId, theirQual, theirId, version, ...(transport ? { transport } : {}), ...(secretEnv ? { secretEnv } : {}), ...(uomMap.trim() ? { uomMap: uomMap.trim() } : {}), ...(ack997 ? {} : { ack997: "off" }) }
         : {};
-      const input = { name, kind, bridge, bridgeConfig, mode, supplierId: supplierId || null, docTemplates };
+      const input = { name, kind, bridge, bridgeConfig, mode, supplierId: supplierId || null, docTemplates, billTo: addressOrNull(billTo), shipTo: sameShip ? null : addressOrNull(shipTo) };
       return partner ? api.updateB2bPartner(orgId, partner.id, input) : api.createB2bPartner(orgId, input);
     },
     onSuccess: () => { toast.success(partner ? "Partner saved" : "Partner added"); void invalidateOrg(qc, orgId); onDone(); },
@@ -128,6 +132,19 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" checked={ack997} onChange={(e) => setAck997(e.target.checked)} /> Send a receipt (997) for every document they send us</label>
         </>
       )}
+      <details className="rounded-md border p-3 sm:col-span-3" open={!!(partner?.billTo || partner?.shipTo)}>
+        <summary className="cursor-pointer text-sm font-medium">{kind === "customer" ? "Addresses" : "Address"} <span className="font-normal text-muted-foreground">(optional: printed on documents and written into EDI orders and invoices)</span></summary>
+        <div className="mt-3 space-y-4">
+          <div className="space-y-2"><p className="text-sm font-medium">{kind === "customer" ? "Bill to" : "Their address"}</p><AddressFields idPrefix="bill" value={billTo} onChange={setBillTo} /></div>
+          {kind === "customer" && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={sameShip} onChange={(e) => setSameShip(e.target.checked)} /> Ship to the same address</label>
+              {!sameShip && <><p className="text-sm font-medium">Ship to</p><AddressFields idPrefix="ship" value={shipTo} onChange={setShipTo} /></>}
+              <p className="text-xs text-muted-foreground">New orders for this customer copy these addresses, so changing them later doesn't change an order already confirmed.</p>
+            </div>
+          )}
+        </div>
+      </details>
       <details className="rounded-md border p-3 sm:col-span-3">
         <summary className="cursor-pointer text-sm font-medium">Document look for {name.trim() || "this partner"} <span className="font-normal text-muted-foreground">(optional: their own title, colour and terms)</span></summary>
         <div className="mt-3 space-y-4">

@@ -1,5 +1,5 @@
 import {
-  lineValueCents, uomOf, type SalesOrder, type SalesOrderInput, type SalesOrderLine, type SoShipInput, type SoShipment, type SoShortage, type SoStatus, type PickLine,
+  type Address, lineValueCents, uomOf, type SalesOrder, type SalesOrderInput, type SalesOrderLine, type SoShipInput, type SoShipment, type SoShortage, type SoStatus, type PickLine,
 } from "@invintel/shared";
 import { ObjectId } from "mongodb";
 import { recordAudit } from "./audit.js";
@@ -140,7 +140,7 @@ export async function toSalesOrders(store: Store, docs: SalesOrderDoc[]): Promis
     }));
     return {
       id: d._id.toHexString(), number: d.number, status, customer: { partnerId: d.customerPartnerId?.toHexString() ?? null, name: d.customerPartnerId ? (partnerName.get(d.customerPartnerId.toHexString()) ?? d.customerName) : d.customerName },
-      customerRef: d.customerRef, sendDocs: sendDocs(partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), noticeVia: noticeVia(d, partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), source: d.source, messageId: d.messageId?.toHexString() ?? null, requestedDate: d.requestedDate, note: d.note, lines,
+      billTo: d.billTo ?? null, shipTo: d.shipTo ?? null, customerRef: d.customerRef, sendDocs: sendDocs(partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), noticeVia: noticeVia(d, partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), source: d.source, messageId: d.messageId?.toHexString() ?? null, requestedDate: d.requestedDate, note: d.note, lines,
       totalCents: d.lines.reduce((s, l) => s + lineValueCents(l.quantity, l.unitPriceCents, uomOf(item.get(l.itemId.toHexString())).decimals), 0),
       short: holding && lines.some((l) => l.reserved > 0 && l.available < 0), shipments,
       confirmedAt: d.confirmedAt?.toISOString() ?? null, createdAt: d.createdAt.toISOString(), updatedAt: d.updatedAt.toISOString(),
@@ -150,7 +150,7 @@ export async function toSalesOrders(store: Store, docs: SalesOrderDoc[]): Promis
 
 // ---------- writing an order ----------
 
-export type OrderInput = Omit<SalesOrderInput, "lines"> & { lines: { itemId: string; quantity: number; unitPriceCents: number }[] };
+export type OrderInput = Omit<SalesOrderInput, "lines" | "billTo" | "shipTo"> & { billTo?: Address | null; shipTo?: Address | null } & { lines: { itemId: string; quantity: number; unitPriceCents: number }[] };
 
 /** Checks the customer and the lines; returns what a draft needs, or the reason it can't be made. */
 export async function checkOrderInput(store: Store, orgId: ObjectId, input: { customerPartnerId?: string | null; lines?: { itemId: string }[] }): Promise<string | null> {
@@ -167,11 +167,14 @@ export async function createDraft(
   store: Store, orgId: ObjectId, actor: { id: ObjectId | null; name: string },
   input: OrderInput, extra: { source?: "manual" | "exchange"; messageId?: ObjectId } = {},
 ): Promise<Result<{ order: SalesOrderDoc }>> {
-  const partner = input.customerPartnerId ? await store.tradingPartners.findOne({ _id: oidOf(input.customerPartnerId), orgId }, { projection: { name: 1 } }) : null;
+  const partner = input.customerPartnerId ? await store.tradingPartners.findOne({ _id: oidOf(input.customerPartnerId), orgId }, { projection: { name: 1, billTo: 1, shipTo: 1 } }) : null;
   const now = new Date();
+  // Addresses are copied onto the order: its own if given, else the customer's, so a later change to the customer can't rewrite a confirmed order.
+  const billTo = input.billTo === undefined ? (partner?.billTo ?? null) : input.billTo;
+  const shipTo = input.shipTo === undefined ? (partner?.shipTo ?? partner?.billTo ?? null) : input.shipTo;
   const doc: SalesOrderDoc = {
     _id: new ObjectId(), orgId, number: await nextNumber(store, orgId, "so", "SO-"), state: "draft", customerPartnerId: partner?._id ?? null, customerName: partner?.name ?? input.customerName ?? "",
-    customerRef: input.customerRef ?? "", source: extra.source ?? "manual", ...(extra.messageId ? { messageId: extra.messageId } : {}), requestedDate: input.requestedDate ?? null, note: input.note ?? "",
+    customerRef: input.customerRef ?? "", source: extra.source ?? "manual", ...(extra.messageId ? { messageId: extra.messageId } : {}), requestedDate: input.requestedDate ?? null, note: input.note ?? "", billTo, shipTo,
     lines: input.lines.map((l) => ({ itemId: oidOf(l.itemId), quantity: l.quantity, unitPriceCents: l.unitPriceCents })), shipments: [], createdBy: actor, createdAt: now, updatedAt: now,
   };
   try {
@@ -262,7 +265,7 @@ export async function rewriteOrder(store: Store, orgId: ObjectId, actor: { id: O
   if (old.state !== "confirmed") return { ok: false, status: 409, error: `A ${old.state} order can't be rewritten. Write a new one.` };
   if ((await shippedByOrder(store, [old._id])).size > 0) return { ok: false, status: 409, error: "Some of it has shipped. Close it and write a new order for the rest." };
   const made = await createDraft(store, orgId, actor, {
-    customerPartnerId: old.customerPartnerId?.toHexString() ?? null, customerName: old.customerName, customerRef: old.customerRef, requestedDate: old.requestedDate, note: old.note,
+    customerPartnerId: old.customerPartnerId?.toHexString() ?? null, customerName: old.customerName, customerRef: old.customerRef, requestedDate: old.requestedDate, note: old.note, billTo: old.billTo ?? null, shipTo: old.shipTo ?? null,
     lines: old.lines.map((l) => ({ itemId: l.itemId.toHexString(), quantity: l.quantity, unitPriceCents: l.unitPriceCents })),
   });
   if (!made.ok) return made;

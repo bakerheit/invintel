@@ -1,5 +1,5 @@
 import { MongoClient, type Binary, type Collection, type Db, type ObjectId } from "mongodb";
-import type { AuditAction, AuditChange, AuditEntityType, CompanyProfile, DocKind, DocTemplate, DocTemplateOverride, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
+import type { Address, AuditAction, AuditChange, AuditEntityType, CompanyProfile, DocKind, DocTemplate, DocTemplateOverride, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -179,6 +179,9 @@ export interface SalesOrderDoc {
   messageId?: ObjectId;
   requestedDate: string | null;
   note: string;
+  /** Copied from the customer when the order is made, so changing the customer later can't change an order already confirmed (INV-18). */
+  billTo?: Address | null;
+  shipTo?: Address | null;
   /** Each item at most once; quantities are stored whole numbers in the item's own unit. */
   lines: { itemId: ObjectId; quantity: number; unitPriceCents: number }[];
   /** Taken while a shipment is being posted, so two people can't ship the same thing twice. */
@@ -267,6 +270,8 @@ export interface SupplierDoc {
   email: string;
   phone: string;
   notes: string;
+  /** Their address (INV-18). Absent or null: none. */
+  address?: Address | null;
   /** Where this supplier is paid: the last four digits and a description, never a full account number. */
   paymentDetails?: { method: "bank_transfer" | "check" | "card" | "cash" | "other"; accountName: string; bankName: string; accountLast4: string; instructions: string };
   createdAt: Date;
@@ -556,6 +561,9 @@ export interface TradingPartnerDoc {
   note: string;
   /** Document look for this partner, on top of the organization's templates (INV-17). */
   docTemplates?: Partial<Record<DocKind, DocTemplateOverride>>;
+  /** Where we send the invoice and where the goods go (INV-18). Absent or null: none. */
+  billTo?: Address | null;
+  shipTo?: Address | null;
   createdAt: Date;
 }
 

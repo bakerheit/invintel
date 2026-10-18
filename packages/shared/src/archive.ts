@@ -16,6 +16,8 @@ export const ARCHIVE_COLLECTIONS = {
   invoices: "Supplier invoices",
   payments: "Payments",
   salesOrders: "Sales orders",
+  tradingPartners: "Trading partners",
+  docLogos: "Document logo",
   workCenters: "Work centers",
   boms: "Recipes (BOMs)",
   workOrders: "Work orders",

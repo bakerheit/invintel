@@ -33,7 +33,7 @@ export async function confirmationOf(store: Store, doc: SalesOrderDoc): Promise<
     return { lineNo: i + 1, sku: it?.sku ?? "", name: it?.name ?? "", quantity: text(l.quantity, u), unit: u.unit, unitPriceCents: l.unitPriceCents, lineTotalCents: lineValueCents(l.quantity, l.unitPriceCents, u.decimals) };
   });
   return {
-    kind: "sales_confirmation", version: 1, number: doc.number, issuedAt: day(doc.confirmedAt ?? doc.createdAt), customerName: partner?.name ?? doc.customerName, customerRef: doc.customerRef,
+    kind: "sales_confirmation", version: 1, number: doc.number, issuedAt: day(doc.confirmedAt ?? doc.createdAt), customerName: partner?.name ?? doc.customerName, customerRef: doc.customerRef, ...(doc.billTo ? { billTo: doc.billTo } : {}), ...(doc.shipTo ? { shipTo: doc.shipTo } : {}),
     requestedDate: doc.requestedDate, note: doc.note, currency: "USD", lines, totalCents: lines.reduce((s, l) => s + l.lineTotalCents, 0), shipper: issuerName(org),
   };
 }
@@ -74,7 +74,7 @@ export async function invoiceFor(store: Store, doc: SalesOrderDoc, number: strin
   const invoiceNumber = await nextNumber(store, doc.orgId, "inv", "INV-");
   const invoice: CanonicalInvoice = {
     kind: "invoice", version: 1, invoiceNumber, invoiceDate: day(issued), dueDate: company.paymentTermsDays > 0 ? day(due) : null, poNumber: doc.customerRef || doc.number, currency: "USD", lines,
-    taxCents: tax, totalCents: subtotal + tax, billTo: doc.customerName, taxLabel: company.taxLabel, shipmentNo: number, shipper: issuerName(org),
+    taxCents: tax, totalCents: subtotal + tax, billTo: doc.customerName, ...(doc.billTo ? { billToAddress: doc.billTo } : {}), ...(doc.shipTo ? { shipToAddress: doc.shipTo } : {}), taxLabel: company.taxLabel, shipmentNo: number, shipper: issuerName(org),
   };
   // Only the first caller's invoice is kept; a caller who lost the race returns the winner's.
   const won = await store.salesOrders.findOneAndUpdate({ _id: doc._id, shipments: { $elemMatch: { number, invoice: { $exists: false } } } }, { $set: { "shipments.$[s].invoice": invoice, "shipments.$[s].invoiceNumber": invoiceNumber, "shipments.$[s].invoicedAt": issued } }, { arrayFilters: [{ "s.number": number }], returnDocument: "after" });
