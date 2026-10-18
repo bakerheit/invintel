@@ -29,8 +29,8 @@ interface World {
   owner: Awaited<ReturnType<typeof signUp>>;
   member: Awaited<ReturnType<typeof signUp>>;
   base: string;
-  post: (path: string, body: unknown, who?: "owner" | "member") => Promise<Response>;
-  get: (path: string, who?: "owner" | "member") => Promise<Response>;
+  post: (path: string, body: unknown, who?: "owner" | "member") => Response | Promise<Response>;
+  get: (path: string, who?: "owner" | "member") => Response | Promise<Response>;
   ids: Record<string, string> & { storage: string; machine: string; finished: string; paper: string; glue: string; box: string };
 }
 
