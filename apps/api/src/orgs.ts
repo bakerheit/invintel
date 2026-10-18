@@ -150,6 +150,15 @@ export function createOrgRoutes(store: Store) {
 
   scoped.route("/data", createDataRoutes(store));
   scoped.route("/members", createMemberRoutes(store));
+  // A switched-off module refuses its API too, so "off" means off for scripts as well as the menu.
+  for (const module of ["purchasing", "production"] as const) {
+    scoped.use(`/${module}/*`, async (c, next) => {
+      if ({ ...DEFAULT_MODULES, ...c.get("org").modules }[module] === false) {
+        return c.json({ error: `${module[0]!.toUpperCase()}${module.slice(1)} is switched off for this organization` }, 403);
+      }
+      await next();
+    });
+  }
   scoped.route("/purchasing", createPurchasingRoutes(store));
   scoped.route("/overview", createOverviewRoutes(store));
   scoped.route("/locations", createLocationRoutes(store));

@@ -36,8 +36,15 @@ describe("organization modules", () => {
     // The member sees the change, and the other organization isn't touched.
     const list = await (await app.request("/api/orgs", { headers: { cookie: member.cookie } })).json();
     expect(list[0].modules.production).toBe(false);
+    // Off means off for the API too, and the other module keeps working.
+    const get = (path: string) => app.request(`/api/orgs/${owner.org.id}${path}`, { headers: { cookie: owner.cookie } });
+    expect((await get("/production/work-orders")).status).toBe(403);
+    expect((await get("/purchasing/orders")).status).toBe(200);
+    await patch(owner.cookie, url, { production: true });
+    expect((await get("/production/work-orders")).status).toBe(200);
+    await patch(owner.cookie, url, { production: false });
     await patch(owner.cookie, url, { production: false }); // no-op: no second audit event
     const log = await (await app.request(`/api/orgs/${owner.org.id}/audit`, { headers: { cookie: owner.cookie } })).json();
-    expect(log.events.filter((e: { action: string }) => e.action === "organization.modules_changed")).toHaveLength(1);
+    expect(log.events.filter((e: { action: string }) => e.action === "organization.modules_changed")).toHaveLength(3);
   });
 });
