@@ -56,6 +56,8 @@ export interface ItemDoc {
   unitCostCents: number;
   /** Absent on items created before barcodes existed. */
   barcodes?: string[];
+  /** Absent means "quantity". Unit-tracked items hold stock only as StockUnitDocs. */
+  tracking?: "quantity" | "unit";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,9 +72,27 @@ export interface StockDoc {
   updatedAt: Date;
 }
 
+/** One physical roll or pallet with its own label and remaining quantity. */
+export interface StockUnitDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  itemId: ObjectId;
+  code: string;
+  lot: string;
+  quantity: number;
+  initialQuantity: number;
+  locationId: ObjectId;
+  status: "available" | "quarantined" | "consumed";
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface MovementDoc {
   _id: ObjectId;
   orgId: ObjectId;
+  /** Set when the movement is about one specific roll or pallet. */
+  unitId?: ObjectId;
+  unitCode?: string;
   /** Absent on movements recorded before types existed. Use movementType() to read. */
   type?: MovementType;
   itemId: ObjectId;
@@ -124,6 +144,8 @@ export interface Store {
   stock: Collection<StockDoc>;
   movements: Collection<MovementDoc>;
   audit: Collection<AuditEventDoc>;
+  units: Collection<StockUnitDoc>;
+  counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
 
@@ -149,6 +171,8 @@ export async function connect(
     stock: db.collection("stock"),
     movements: db.collection("stock_movements"),
     audit: db.collection("audit_events"),
+    units: db.collection("stock_units"),
+    counters: db.collection("counters"),
     close: () => client.close(),
   };
 
@@ -180,6 +204,9 @@ export async function connect(
     store.movements.createIndex({ itemId: 1, createdAt: -1 }),
     store.movements.createIndex({ orgId: 1, _id: -1 }),
     store.movements.createIndex({ transferId: 1 }, { sparse: true }),
+    store.units.createIndex({ orgId: 1, code: 1 }, { unique: true, collation: caseInsensitive }),
+    store.units.createIndex({ orgId: 1, itemId: 1, status: 1 }),
+    store.units.createIndex({ orgId: 1, locationId: 1, status: 1 }),
     // seq is unique per org: that's what stops two simultaneous writers both claiming the same link.
     store.audit.createIndex({ orgId: 1, seq: 1 }, { unique: true }),
     store.audit.createIndex({ orgId: 1, "entity.type": 1, "entity.id": 1, seq: -1 }),

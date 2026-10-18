@@ -3,12 +3,14 @@ import type { MovementType } from "@invintel/shared";
 import { itemEntity, recordAudit } from "./audit.js";
 import { isDuplicateKey, type MovementDoc, type Store } from "./db.js";
 
+export const UNIT_TRACKED = "This item is tracked by unit (rolls, pallets). Receive, move or adjust the individual units instead.";
+
 export interface Actor {
   userId: ObjectId;
   userName: string;
 }
 
-export type Failure = { ok: false; status: 404 | 422; error: string };
+export type Failure = { ok: false; status: 404 | 409 | 422; error: string };
 export type Posted = { ok: true; movementIds: ObjectId[] };
 
 /**
@@ -72,8 +74,9 @@ export async function postAdjustment(
   input: { itemId: ObjectId; locationId: ObjectId; delta: number; reason: string; type: Extract<MovementType, "adjust" | "receive"> },
 ): Promise<Posted | Failure> {
   const { itemId, locationId, delta, reason, type } = input;
-  const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1 } });
+  const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1, tracking: 1 } });
   if (!item) return { ok: false, status: 404, error: "Item not found" };
+  if (item.tracking === "unit") return { ok: false, status: 409, error: UNIT_TRACKED };
   const location = await store.locations.findOne({ _id: locationId, orgId });
   if (!location) return { ok: false, status: 404, error: "Location not found" };
 
@@ -109,8 +112,9 @@ export async function postMove(
   input: { itemId: ObjectId; fromLocationId: ObjectId; toLocationId: ObjectId; quantity: number; reason: string },
 ): Promise<Posted | Failure> {
   const { itemId, fromLocationId: from, toLocationId: to, quantity, reason } = input;
-  const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1 } });
+  const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1, tracking: 1 } });
   if (!item) return { ok: false, status: 404, error: "Item not found" };
+  if (item.tracking === "unit") return { ok: false, status: 409, error: UNIT_TRACKED };
   const [fromLoc, toLoc] = await Promise.all([
     store.locations.findOne({ _id: from, orgId }),
     store.locations.findOne({ _id: to, orgId }),

@@ -9,6 +9,7 @@ import { ObjectId } from "mongodb";
 import type { Store } from "./db.js";
 import { createActivityRoutes } from "./activity.js";
 import { createAuditRoutes } from "./audit-routes.js";
+import { createUnitRoutes } from "./unit-routes.js";
 import { auditActor, recordAudit } from "./audit.js";
 import { createFloorRoutes } from "./floor.js";
 import { createItemRoutes } from "./items.js";
@@ -126,6 +127,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));
   scoped.route("/audit", createAuditRoutes(store));
+  scoped.route("/units", createUnitRoutes(store));
   scoped.route("/", createFloorRoutes(store));
   scoped.route("/items", createItemRoutes(store));
 

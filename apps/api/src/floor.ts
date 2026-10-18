@@ -15,6 +15,7 @@ import { actorOf } from "./items.js";
 import { indexLocations, loadLocations, toLocation } from "./locations.js";
 import type { OrgEnv } from "./org-access.js";
 import { postAdjustment, postMove } from "./stock-service.js";
+import { presentUnits } from "./units.js";
 
 const ci = { locale: "en", strength: 2 } as const;
 const isObjectId = (s: string) => /^[0-9a-f]{24}$/i.test(s);
@@ -73,6 +74,10 @@ export function createFloorRoutes(store: Store) {
       if (!doc) return null;
       return { kind: "location", location: toLocation(doc, indexLocations(docs).pathOf(id.toHexString())) };
     };
+
+    // A roll or pallet label.
+    const unit = await store.units.findOne({ orgId, code }, { collation: ci });
+    if (unit) return c.json<LookupResult>({ kind: "unit", unit: (await presentUnits(store, orgId, [unit]))[0]! });
 
     // An exact SKU or barcode wins; then other zero-padded forms of the same barcode number.
     const variants = gtinVariants(code);

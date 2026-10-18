@@ -108,6 +108,7 @@ export function createActivityRoutes(store: Store) {
       return {
         id: m._id.toHexString(),
         type: movementType(m),
+        ...(m.unitCode ? { unitCode: m.unitCode } : {}),
         itemId: m.itemId.toHexString(),
         itemSku: item?.sku ?? "",
         itemName: item?.name ?? "Deleted item",
@@ -143,6 +144,9 @@ export function createActivityRoutes(store: Store) {
       return c.json({ error: "A reversal can't be reversed. Record a new receipt or adjustment instead." }, 409);
     }
     if (original.reversedBy) return c.json({ error: "That entry has already been reversed" }, 409);
+    if (original.unitId) {
+      return c.json({ error: "Entries for a roll or pallet can't be reversed yet. Move it back or adjust what's left instead." }, 409);
+    }
     const item = await store.items.findOne({ _id: original.itemId, orgId }, { projection: { name: 1, sku: 1 } });
     if (!item) {
       return c.json({ error: "That item has been deleted. Its history is kept, but entries can't be reversed any more." }, 409);
