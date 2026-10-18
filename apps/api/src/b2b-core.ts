@@ -172,22 +172,39 @@ export async function receiveMessage(store: Store, orgId: ObjectId, partnerId: O
   }
   if (!verified.ok) return { ok: false, status: 422, error: verified.error };
   if (!bridge.carries.includes(verified.docType)) return { ok: false, status: 422, error: `The ${bridge.id} bridge doesn't carry ${verified.docType} documents` };
-  const dup = await store.b2bMessages.findOne({ orgId, partnerId, direction: "in", idempotencyKey: verified.idempotencyKey });
+  return storeInbound(store, orgId, partner, { docType: verified.docType, body: verified.body, contentType: verified.contentType, idempotencyKey: verified.idempotencyKey, providerMessageId: verified.providerMessageId, correlation: verified.correlation });
+}
+
+export interface InboundDoc {
+  docType: B2BDocType;
+  body: string;
+  contentType?: string;
+  idempotencyKey: string;
+  providerMessageId?: string;
+  correlation?: B2BMessageDoc["correlation"];
+  /** Who it came from, when that is a person at the partner rather than the partner's system. */
+  fromName?: string;
+}
+
+/** Stores a document that has already been verified (by a bridge, or by a secret link). Once per idempotency key. */
+export async function storeInbound(store: Store, orgId: ObjectId, partner: TradingPartnerDoc, doc: InboundDoc): Promise<Received> {
+  const partnerId = partner._id;
+  const dup = await store.b2bMessages.findOne({ orgId, partnerId, direction: "in", idempotencyKey: doc.idempotencyKey });
   if (dup) return { ok: true, message: dup, duplicate: true };
   const now = new Date();
   const msg: B2BMessageDoc = {
-    _id: new ObjectId(), orgId, partnerId, direction: "in", docType: verified.docType, state: "received", idempotencyKey: verified.idempotencyKey,
-    correlation: verified.correlation ?? {}, raw: { body: verified.body, contentType: verified.contentType ?? "application/json", hash: sha(verified.body), bytes: Buffer.byteLength(verified.body) },
-    ...(verified.providerMessageId ? { providerMessageId: verified.providerMessageId } : {}),
-    attempts: [], acks: [], createdBy: { id: new ObjectId(partner._id), name: partner.name }, createdAt: now, updatedAt: now,
+    _id: new ObjectId(), orgId, partnerId, direction: "in", docType: doc.docType, state: "received", idempotencyKey: doc.idempotencyKey,
+    correlation: doc.correlation ?? {}, raw: { body: doc.body, contentType: doc.contentType ?? "application/json", hash: sha(doc.body), bytes: Buffer.byteLength(doc.body) },
+    ...(doc.providerMessageId ? { providerMessageId: doc.providerMessageId } : {}),
+    attempts: [], acks: [], createdBy: { id: new ObjectId(partner._id), name: doc.fromName ?? partner.name }, createdAt: now, updatedAt: now,
   };
   try {
     await store.b2bMessages.insertOne(msg);
   } catch (e) {
     if (!isDuplicateKey(e)) throw e;
-    return { ok: true, message: (await store.b2bMessages.findOne({ orgId, partnerId, direction: "in", idempotencyKey: verified.idempotencyKey }))!, duplicate: true };
+    return { ok: true, message: (await store.b2bMessages.findOne({ orgId, partnerId, direction: "in", idempotencyKey: doc.idempotencyKey }))!, duplicate: true };
   }
-  await audit(store, orgId, { id: null, name: partner.name }, "b2b.message_received", msg, partner, `${partner.name}: ${msg.docType} received${partner.mode === "test" ? " (test partner)" : ""}`);
+  await audit(store, orgId, { id: null, name: doc.fromName ?? partner.name }, "b2b.message_received", msg, partner, `${partner.name}: ${msg.docType} received${partner.mode === "test" ? " (test partner)" : ""}`);
   return { ok: true, message: msg, duplicate: false };
 }
 

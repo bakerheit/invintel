@@ -374,6 +374,7 @@ export const AUDIT_ACTIONS = [
   "b2b.message_received",
   "b2b.message_failed",
   "b2b.message_acknowledged",
+  "b2b.order_answered",
   "ncr.opened",
   "ncr.dispositioned",
   "alert.acknowledged",
@@ -699,6 +700,7 @@ export interface UnitsPosted {
 export * from "./production.js";
 export * from "./quality.js";
 export * from "./b2b.js";
+export * from "./b2bdocs.js";
 export * from "./reasons.js";
 export * from "./traceability.js";
 export * from "./scrap.js";

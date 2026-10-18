@@ -9,6 +9,7 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.js";
 import { bridgeIds, getBridge, presentMessages, receiveMessage, recordAck, retryMessage, sendMessage } from "./b2b-core.js";
+import { orderExchange, previewPurchaseOrder, sendPurchaseOrder } from "./b2b-orders.js";
 import { duplicateField, isDuplicateKey, type Store, type TradingPartnerDoc } from "./db.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
@@ -98,7 +99,35 @@ export function createB2BRoutes(store: Store) {
     const orgId = c.get("org")._id;
     const doc = await store.b2bMessages.findOne({ _id: oid(c.req.valid("param").id), orgId });
     if (!doc) return c.json({ error: "Message not found" }, 404);
-    return c.json<B2BMessageDetail>({ ...(await presentMessages(store, orgId, [doc]))[0]!, body: doc.raw.body });
+    // The raw document of a sent order holds the supplier's private link, so only admins read bodies.
+    return c.json<B2BMessageDetail>({ ...(await presentMessages(store, orgId, [doc]))[0]!, body: c.get("role") === "member" ? "" : doc.raw.body });
+  });
+
+  // ----- purchase orders -----
+
+  /** What is going on between us and the supplier for this order. */
+  r.get("/orders/:id", zValidator("param", idParam), async (c) => {
+    const res = await orderExchange(store, c.get("org")._id, oid(c.req.valid("param").id));
+    return "ok" in res ? c.json({ error: res.error }, res.status) : c.json(res);
+  });
+
+  /** Email the order (PDF and a confirmation link) to its supplier's trading partner. */
+  r.post("/orders/:id/send", requireRole("admin"), zValidator("param", idParam), async (c) => {
+    const org = c.get("org");
+    const res = await sendPurchaseOrder(store, org._id, actorOf(c.get("user")), oid(c.req.valid("param").id), org.name);
+    if (!res.ok) return c.json({ error: res.error }, res.status);
+    return c.json((await presentMessages(store, org._id, [res.message]))[0], res.created ? 201 : 200);
+  });
+
+  /** The PDF the supplier would get. Nothing is sent. */
+  r.get("/orders/:id/preview.pdf", zValidator("param", idParam), async (c) => {
+    const org = c.get("org");
+    const res = await previewPurchaseOrder(store, org._id, oid(c.req.valid("param").id), org.name);
+    if (!res.ok) return c.json({ error: res.error }, res.status);
+    c.header("content-type", "application/pdf");
+    c.header("content-disposition", `inline; filename="${res.canonical.poNumber}.pdf"`);
+    c.header("cache-control", "no-store");
+    return c.body(new Uint8Array(res.pdf));
   });
 
   /** Send a document to a partner through its bridge. */

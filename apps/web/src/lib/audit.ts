@@ -30,6 +30,7 @@ export const ACTION_META: Record<AuditAction, { label: string; className: string
   "b2b.message_sent": { label: "Document sent", className: "bg-accent text-accent-foreground" },
   "b2b.message_received": { label: "Document received", className: "bg-accent text-accent-foreground" },
   "b2b.message_failed": { label: "Document failed", className: "bg-warning-soft text-warning" },
+  "b2b.order_answered": { label: "Supplier answered", className: "bg-success-soft text-success" },
   "b2b.message_acknowledged": { label: "Document answered", className: "bg-success-soft text-success" },
   "ncr.opened": { label: "Quality hold", className: "bg-warning-soft text-warning" },
   "ncr.dispositioned": { label: "Hold decision", className: "bg-accent text-accent-foreground" },

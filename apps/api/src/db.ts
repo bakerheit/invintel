@@ -387,6 +387,20 @@ export interface B2BMessageDoc {
   updatedAt: Date;
 }
 
+export interface PortalLinkDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  partnerId: ObjectId;
+  poId: ObjectId;
+  /** The message that carried the link; set once it exists. */
+  messageId?: ObjectId;
+  /** Only a hash is kept: the link itself exists in the sent document and the supplier's inbox. */
+  tokenHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  revokedAt?: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -414,6 +428,7 @@ export interface Store {
   ncrs: Collection<NcrDoc>;
   tradingPartners: Collection<TradingPartnerDoc>;
   b2bMessages: Collection<B2BMessageDoc>;
+  portalLinks: Collection<PortalLinkDoc>;
   drills: Collection<DrillDoc>;
   close: () => Promise<void>;
 }
@@ -455,6 +470,7 @@ export async function connect(
     ncrs: db.collection("ncrs"),
     tradingPartners: db.collection("trading_partners"),
     b2bMessages: db.collection("b2b_messages"),
+    portalLinks: db.collection("b2b_portal_links"),
     drills: db.collection("recall_drills"),
     close: () => client.close(),
   };
@@ -510,6 +526,9 @@ export async function connect(
     // The same key from the same partner in the same direction is the same document.
     store.b2bMessages.createIndex({ orgId: 1, partnerId: 1, direction: 1, idempotencyKey: 1 }, { unique: true }),
     store.b2bMessages.createIndex({ orgId: 1, createdAt: -1 }),
+    store.b2bMessages.createIndex({ orgId: 1, "correlation.poId": 1 }, { sparse: true }),
+    store.portalLinks.createIndex({ tokenHash: 1 }, { unique: true }),
+    store.portalLinks.createIndex({ orgId: 1, poId: 1 }),
     store.drills.createIndex({ orgId: 1, at: -1 }),
     // Trace lookups: lines of one work order, of one unit, and receipts by lot.
     store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),
