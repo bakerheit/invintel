@@ -51,6 +51,10 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 - **Floor mode** (`/o/:orgId/floor`, also in the sidebar) is a full-screen, big-target UI for the plant floor: **Receive**, **Move**, and **Look up**. A scanner types the code and presses Enter; the scan field stays focused and suppresses the on-screen keyboard unless you tap the keyboard button. Items resolve by SKU, locations by code or name. Each flow ends with a result screen and a one-tap **Undo**.
 - To use real scanners, print SKUs and location codes as Code 128 (or QR) labels. Most handheld scanners work as a keyboard ("wedge") with Enter as the suffix.
 
+### Features on and off
+
+**Settings > Features** (admins) hides Purchasing and Production for organizations that don't use them: the sidebar entries, the Cmd-K results and the Floor tile all disappear, so a small shop sees inventory and nothing else. It only hides: no data is touched, and the API stays available. Turning one back on brings everything back. Changes are in the audit log.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:
