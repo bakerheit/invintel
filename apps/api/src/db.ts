@@ -79,6 +79,25 @@ export interface ItemDoc {
   updatedAt: Date;
 }
 
+/** One applied CSV import, kept so it can be undone while nothing has built on it. */
+export interface ImportBatchDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** IMP-0001, in order per organization. */
+  number: string;
+  at: Date;
+  userId: ObjectId;
+  userName: string;
+  filename: string;
+  mode: "create" | "update" | "upsert";
+  /** Items this import made, with the ledger lines that put their opening stock in. */
+  created: { itemId: ObjectId; sku: string; name: string; movementIds: ObjectId[] }[];
+  /** Items this import changed: the fields as they were and as the import left them. */
+  updated: { itemId: ObjectId; sku: string; name: string; before: Record<string, unknown>; after: Record<string, unknown> }[];
+  undoneAt?: Date;
+  undoneBy?: string;
+}
+
 /** How many units of one item sit in one location. Total quantity is the sum of these. */
 export interface StockDoc {
   _id: ObjectId;
@@ -355,6 +374,7 @@ export interface Store {
   approvals: Collection<ApprovalDoc>;
   downtime: Collection<DowntimeDoc>;
   alertStates: Collection<AlertStateDoc>;
+  importBatches: Collection<ImportBatchDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
   drills: Collection<DrillDoc>;
@@ -393,6 +413,7 @@ export async function connect(
     approvals: db.collection("approvals"),
     downtime: db.collection("downtime"),
     alertStates: db.collection("alert_states"),
+    importBatches: db.collection("import_batches"),
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
     drills: db.collection("recall_drills"),
@@ -455,6 +476,8 @@ export async function connect(
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.importBatches.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.importBatches.createIndex({ orgId: 1, at: -1 }),
     store.approvals.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.alertStates.createIndex({ orgId: 1, key: 1 }, { unique: true }),
     store.downtime.createIndex({ orgId: 1, workCenterId: 1, startedAt: -1 }),

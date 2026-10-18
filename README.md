@@ -116,14 +116,27 @@ API under `/api/orgs/:orgId/purchasing`: `GET/POST /suppliers`, `PATCH /supplier
 
 **Inventory > Export** downloads every item as CSV, one row per item and location (`sku, name, category, description, reorder_level, unit_cost, barcodes, location, quantity, unit, decimals`; quantities are written as people read them, `12.500`). Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet can't run them as formulas.
 
-**Inventory > Import** (admins) takes a CSV and shows a preview before anything is written: new items, stock lines, rows skipped and problems per line. Rules:
+**Inventory > Import** (admins) is a short wizard. Nothing is written until the last button:
 
-- Needs a SKU and a name column. Common header names work (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...). Optional: category, notes, reorder level, unit cost (`$12.50` is fine), barcodes (separate with `|`), location (its code, full path or unique name), quantity, and `unit` and `decimals` for a new item that is not counted in whole each (quantity and reorder level are then read with that many decimals; `1.2345` for a 3-decimal item is an error, never rounded).
-- It only **creates**: an existing SKU is never changed, so importing the same file twice can't double anything. Repeat a SKU on another line to put stock in a second location.
-- Opening stock goes through the ledger as receipts ("Imported from CSV"), and each new item is in the audit log.
-- One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 1000 rows per file, about 2 MB. Unit costs are rounded to the cent.
+1. **Which column is which?** Common header names are matched for you (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...); anything else you assign from a dropdown next to an example value. Needs a SKU, and a name when creating.
+2. **What should it do?** *Add new items* (the default: a SKU that already exists is left alone, so running the same file twice can't double anything), *Update existing items*, or *Add and update*. Updates change only what the file fills in, blank cells change nothing, and **stock of items that already exist is never changed by import**. Unit and decimal places can't be changed this way. You can also choose to **import the good rows and skip the problem ones**.
+3. **What would happen:** a line per row with what it will do, and for updates each change as `reorder level: 100 → 150`. Problem rows can be downloaded as a CSV (your original cells plus a `problem` column) to fix and upload again.
 
-API: `GET /data/items.csv`, `POST /data/items/import` with `{ csv, dryRun }`.
+Each applied import is a numbered **batch** (`IMP-0001`) in Recent imports, and can be **undone** while nothing has built on it: new items are removed (their opening stock is written off through the ledger) and updated items go back to how they were. Undo refuses, naming the items, if stock has moved, an item is on an order, recipe, count or roll, or an updated field was changed again. It is all or nothing. Opening stock goes through the ledger as receipts ("Imported from CSV"), and every new or changed item and each import and undo is in the audit log. Limits: 1000 rows per file, about 2 MB. Unit costs are rounded to the cent.
+
+API: `GET /data/items.csv`; `POST /data/items/import` with `{ csv, dryRun, mode, mapping, onErrors, filename }`; `GET /data/imports`; `POST /data/imports/:id/undo`.
+
+### Your data: full archive
+
+**Settings > Your data** (admins) downloads **everything the organization has as one JSON file** (`GET /data/archive.json`): locations, items (with units of measure and barcodes), stock levels, rolls and pallets, the whole ledger, suppliers, purchase orders, work centers, recipes, work orders, counts, quality holds, recall drills, downtime, import history and settings (features, pick-lists, approval rules). It does **not** include the audit log (it has its own export and hash chain), people, or open approval requests.
+
+The **owner** can restore an archive into an organization that has no data (a new one): choose the file, see what is in it, confirm. `POST /data/archive/restore` with `{ archive, dryRun }`.
+
+- Every record gets a **new id**; links between records (transfers, reversals, order lines, recipes, work orders) are rewritten to match. Anything in the file that points outside it gets a throwaway id, so a crafted file can't reach another organization's records. The join code, owner and members are never taken from the file.
+- The file is **checked completely before anything is written**: version, unknown collections, field names starting with `$` or containing `.`, missing or wrong-typed fields, repeated ids, settings against an allowlist. A refused file says why.
+- If the database refuses part way (for example a repeated SKU), everything written is **rolled back** and the organization is as it was. Restoring over data that is already there is refused.
+- Numbering carries on: the next purchase order, work order, count, NCR, import or roll label continues after the highest restored.
+- Dates, whole-number quantities and units survive exactly. The restore is written to the audit log.
 
 ### Units of measure
 

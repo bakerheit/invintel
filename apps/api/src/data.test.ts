@@ -93,7 +93,11 @@ describe("items import and export", () => {
     expect((await call(member.cookie, `${base}/data/items.csv`)).status).toBe(200);
     const stranger = await signUp({ mode: "create", name: "Other" });
     expect((await call(stranger.cookie, `${base}/data/items.csv`)).status).toBe(404);
-    expect((await call(cookie, `${base}/data/items/import`, { csv: "name,qty\nX,1", dryRun: true })).status).toBe(400);
+    // A file with no SKU column previews as "needs a SKU column" (so the person can pick one) and can't be applied.
+    const noSku = await call(cookie, `${base}/data/items/import`, { csv: "name,qty\nX,1", dryRun: true });
+    expect(noSku.status).toBe(200);
+    expect((await noSku.json()).needs).toEqual(["sku"]);
+    expect((await call(cookie, `${base}/data/items/import`, { csv: "name,qty\nX,1", dryRun: false })).status).toBe(400);
     // A huge body is refused before it is parsed.
     const huge = await call(cookie, `${base}/data/items/import`, { csv: `sku,name\n${"x".repeat(3 * 1024 * 1024)}`, dryRun: true });
     expect(huge.status).toBe(413);

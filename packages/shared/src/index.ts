@@ -398,6 +398,10 @@ export const AUDIT_ACTIONS = [
   "production.loaded",
   "production.consumed",
   "production.output",
+  "import.applied",
+  "import.undone",
+  "archive.exported",
+  "archive.restored",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -523,7 +527,35 @@ export type MemberRoleInput = z.infer<typeof memberRoleInputSchema>;
 
 // ---------- CSV import ----------
 
-export type ImportRowStatus = "create" | "stock" | "skip" | "error";
+/** The columns an import understands. A file's columns are matched to these by header name, or by the person's own mapping. */
+export const IMPORT_FIELDS = ["sku", "name", "category", "description", "reorder", "cost", "barcodes", "location", "quantity", "unit", "decimals"] as const;
+export type ImportField = (typeof IMPORT_FIELDS)[number];
+
+export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
+  sku: "SKU",
+  name: "Name",
+  category: "Category",
+  description: "Notes",
+  reorder: "Reorder level",
+  cost: "Unit cost",
+  barcodes: "Barcodes",
+  location: "Location",
+  quantity: "Quantity",
+  unit: "Unit of measure",
+  decimals: "Decimal places",
+};
+
+/** create: only new SKUs. update: only change SKUs that exist. upsert: both. Stock is only ever set up for new items. */
+export const importModeSchema = z.enum(["create", "update", "upsert"]);
+export type ImportMode = z.infer<typeof importModeSchema>;
+
+export type ImportRowStatus = "create" | "update" | "stock" | "skip" | "error";
+
+export interface ImportChange {
+  field: string;
+  from: string;
+  to: string;
+}
 
 export interface ImportRow {
   /** 1-based line in the file, counting the header as line 1. */
@@ -531,6 +563,10 @@ export interface ImportRow {
   sku: string;
   status: ImportRowStatus;
   message: string;
+  /** For updates: what would change, field by field. */
+  changes?: ImportChange[];
+  /** The row as it was in the file, kept on error rows so they can be fixed and re-uploaded. */
+  cells?: string[];
 }
 
 export interface ImportResult {
@@ -538,17 +574,58 @@ export interface ImportResult {
   dryRun: boolean;
   rows: ImportRow[];
   itemsToCreate: number;
+  itemsToUpdate: number;
   stockLines: number;
   units: number;
   skipped: number;
   errors: number;
+  /** The file's header row. */
+  headers: string[];
+  /** Which column (0-based) each field was read from. Only fields that were found. */
+  mapping: Partial<Record<ImportField, number>>;
+  /** The first few rows of the file, so a mapping can be checked by eye. */
+  sample: string[][];
+  /** Fields the import can't go on without that no column is mapped to yet (SKU, and name when creating). */
+  needs?: ImportField[];
+  /** Set once applied: the batch that can be undone. */
+  batchId?: string;
 }
 
 export const importInputSchema = z.object({
   csv: z.string().max(2_000_000),
   dryRun: z.boolean().default(true),
+  mode: importModeSchema.default("create"),
+  /** Column for each field. Leave out to match by header name. Anything not listed is not read. */
+  mapping: z.partialRecord(z.enum(IMPORT_FIELDS), z.number().int().min(0).max(500)).optional(),
+  /** stop: any problem row blocks everything. skip: import the good rows and report the rest. */
+  onErrors: z.enum(["stop", "skip"]).default("stop"),
+  /** Shown in the import history. */
+  filename: z.string().trim().max(200).default(""),
 });
 export type ImportInput = z.input<typeof importInputSchema>;
+
+export interface ImportBatch {
+  id: string;
+  number: string;
+  at: string;
+  userName: string;
+  filename: string;
+  mode: ImportMode;
+  created: number;
+  updated: number;
+  /** Set once undone. */
+  undoneAt: string | null;
+  undoneBy: string | null;
+}
+
+export interface ImportUndoResult {
+  batch: ImportBatch;
+  /** Items removed (they were created by the import). */
+  removed: number;
+  /** Items put back the way they were. */
+  restored: number;
+}
+
 // ---------- stock units (rolls, pallets) ----------
 
 export const unitStatusSchema = z.enum(["available", "quarantined", "consumed"]);
@@ -625,3 +702,4 @@ export * from "./approvals.js";
 export * from "./downtime.js";
 export * from "./alerts.js";
 export * from "./units.js";
+export * from "./archive.js";

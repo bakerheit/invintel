@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ArchiveCard } from "@/components/archive-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
@@ -288,6 +289,12 @@ export default function SettingsPage() {
         {admin && (
           <Section title="Approvals" description="Ask for a second person's OK on the actions that matter. Off until you switch a rule on.">
             <ApprovalRulesForm orgId={org.id} />
+          </Section>
+        )}
+
+        {admin && (
+          <Section title="Your data" description="Download everything this organization has as one file, or bring a file back. Nothing is held hostage.">
+            <ArchiveCard orgId={org.id} isOwner={org.role === "owner"} />
           </Section>
         )}
 
