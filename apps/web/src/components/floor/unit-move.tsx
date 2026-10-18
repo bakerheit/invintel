@@ -1,4 +1,4 @@
-import type { Item, Location, StockUnit } from "@invintel/shared";
+import { formatQty, type Item, type Location, type StockUnit } from "@invintel/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Package } from "lucide-react";
 import { useState } from "react";
@@ -21,7 +21,7 @@ export function UnitCard({ unit }: { unit: StockUnit }) {
         <p className="font-mono text-2xl font-semibold">{unit.code}</p>
         <p className="truncate text-base font-medium">{unit.itemName}</p>
         <p className="text-sm text-muted-foreground">
-          {unit.quantity.toLocaleString()} left{unit.quantity !== unit.initialQuantity ? ` of ${unit.initialQuantity.toLocaleString()}` : ""}
+          {formatQty(unit.quantity, unit.uom)} left{unit.quantity !== unit.initialQuantity ? ` of ${formatQty(unit.initialQuantity, unit.uom, { unit: false })}` : ""}
           {unit.lot ? ` · Lot ${unit.lot}` : ""} · {unit.locationPath}
           {unit.status !== "available" ? ` · ${unit.status}` : ""}
         </p>
@@ -51,7 +51,7 @@ export function UnitPick({ item, onPick, onBack }: { item: Item; onPick: (u: Sto
                 <span className="block font-mono text-lg font-semibold">{u.code}</span>
                 <span className="block text-sm text-muted-foreground">{u.locationPath}{u.lot ? ` · Lot ${u.lot}` : ""}</span>
               </span>
-              <span className="text-xl font-semibold tabular-nums">{u.quantity.toLocaleString()}</span>
+              <span className="text-xl font-semibold tabular-nums">{formatQty(u.quantity, u.uom)}</span>
             </button>
           </li>
         ))}

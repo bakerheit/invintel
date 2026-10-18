@@ -1,4 +1,4 @@
-import type { Item, Location } from "@invintel/shared";
+import { formatQty, lineValueCents, type Item, type Location } from "@invintel/shared";
 import {
   type ColumnDef,
   type SortingState,
@@ -100,7 +100,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         header: filtering ? "Qty here" : "Qty",
         accessorFn: (i) => (filtering ? stockIn(i, idSet) : i.quantity),
         meta: { align: "right" } satisfies Meta,
-        cell: ({ getValue }) => <span className="font-medium tabular-nums">{getValue<number>().toLocaleString()}</span>,
+        cell: ({ row, getValue }) => <span className="font-medium tabular-nums">{formatQty(getValue<number>(), row.original)}</span>,
       },
       {
         id: "status",
@@ -126,7 +126,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
                     {shown.map((s) => (
                       <span key={s.locationId} className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs">
                         <span className="text-muted-foreground">{locationNames.get(s.locationId) ?? "Unknown"}</span>
-                        <span className="font-medium tabular-nums">{s.quantity.toLocaleString()}</span>
+                        <span className="font-medium tabular-nums">{formatQty(s.quantity, row.original, { unit: false })}</span>
                       </span>
                     ))}
                     {stock.length > shown.length && (
@@ -141,12 +141,17 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         accessorKey: "unitCostCents",
         header: "Unit cost",
         meta: { align: "right", className: "hidden md:table-cell" } satisfies Meta,
-        cell: ({ row }) => <span className="tabular-nums">{formatCents(row.original.unitCostCents)}</span>,
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {formatCents(row.original.unitCostCents)}
+            {row.original.unit !== "ea" && <span className="text-xs text-muted-foreground"> / {row.original.unit}</span>}
+          </span>
+        ),
       },
       {
         id: "value",
         header: "Value",
-        accessorFn: (i) => (filtering ? stockIn(i, idSet) : i.quantity) * i.unitCostCents,
+        accessorFn: (i) => lineValueCents(filtering ? stockIn(i, idSet) : i.quantity, i.unitCostCents, i.decimals),
         meta: { align: "right", className: "hidden md:table-cell" } satisfies Meta,
         cell: ({ getValue }) => <span className="tabular-nums">{formatCents(getValue<number>())}</span>,
       },

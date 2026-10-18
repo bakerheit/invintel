@@ -1,10 +1,12 @@
-import type { Count, CountStatus } from "@invintel/shared";
+import { formatQty, type Count, type CountLine, type CountStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, Plus, ScanLine } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
+import { QtyInput } from "@/components/qty-input";
+import { useQtyEntry } from "@/lib/qty";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +26,7 @@ const STATUS: Record<CountStatus, { label: string; className: string }> = {
   cancelled: { label: "Cancelled", className: "bg-secondary text-secondary-foreground" },
 };
 
-const signed = (n: number) => (n > 0 ? `+${n.toLocaleString()}` : n.toLocaleString());
+const signed = (n: number) => (n > 0 ? `+${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : n.toLocaleString(undefined, { maximumFractionDigits: 2 }));
 
 function CountDetail({ countId, onClose }: { countId: string; onClose: () => void }) {
   const { id: orgId, role } = useCurrentOrg();
@@ -54,7 +56,7 @@ function CountDetail({ countId, onClose }: { countId: string; onClose: () => voi
   });
   if (!c) return null;
   const admin = isAdmin(role);
-  const writeOff = zero ? c.uncounted.reduce((s, u) => s + u.expected, 0) : 0;
+  const writeOff = zero ? Math.round(c.uncounted.reduce((s, u) => s + u.expected / 10 ** u.uom.decimals, 0)) : 0;
   const askPost = async () => {
     const diffs = c.summary.over + c.summary.under + (zero ? c.uncounted.length : 0);
     if (await confirm({
@@ -82,14 +84,13 @@ function CountDetail({ countId, onClose }: { countId: string; onClose: () => voi
               {c.lines.map((l) => (
                 <tr key={l.itemId}>
                   <td className="p-2"><div className="font-medium">{l.itemName}</div><div className="font-mono text-xs text-muted-foreground">{l.itemSku}</div></td>
-                  <td className="p-2 text-right tabular-nums">{l.expected.toLocaleString()}</td>
+                  <td className="p-2 text-right tabular-nums">{formatQty(l.expected, l.uom, { unit: false })}</td>
                   <td className="p-2 text-right">
                     {c.status === "open" ? (
-                      <Input aria-label={`Counted ${l.itemName}`} className="ml-auto h-8 w-20 text-right" type="number" min={0} defaultValue={l.counted}
-                        onBlur={(e) => { const v = Number(e.target.value); if (e.target.value !== "" && v !== l.counted && v >= 0) fix.mutate({ itemId: l.itemId, counted: v }); }} />
-                    ) : <span className="tabular-nums">{l.counted.toLocaleString()}</span>}
+                      <CountedBox line={l} onSave={(counted) => fix.mutate({ itemId: l.itemId, counted })} />
+                    ) : <span className="tabular-nums">{formatQty(l.counted, l.uom, { unit: false })}</span>}
                   </td>
-                  <td className={cn("p-2 text-right font-semibold tabular-nums", l.variance < 0 && "text-destructive", l.variance > 0 && "text-warning", l.variance === 0 && "font-normal text-muted-foreground")}>{l.variance === 0 ? "matched" : signed(l.variance)}</td>
+                  <td className={cn("p-2 text-right font-semibold tabular-nums", l.variance < 0 && "text-destructive", l.variance > 0 && "text-warning", l.variance === 0 && "font-normal text-muted-foreground")}>{l.variance === 0 ? "matched" : formatQty(l.variance, l.uom, { sign: true, unit: false })}</td>
                   <td className="p-2 text-right tabular-nums text-muted-foreground">{l.variance === 0 ? "" : formatCents(l.varianceCents)}</td>
                 </tr>
               ))}
@@ -100,7 +101,7 @@ function CountDetail({ countId, onClose }: { countId: string; onClose: () => voi
         {c.status === "open" && c.uncounted.length > 0 && (
           <div className="rounded-lg border bg-muted/30 p-3 text-sm">
             <p className="font-medium">{c.uncounted.length} {c.uncounted.length === 1 ? "item has" : "items have"} stock here that nobody counted</p>
-            <p className="mt-1 text-muted-foreground">{c.uncounted.slice(0, 6).map((u) => `${u.itemName} (${u.expected})`).join(", ")}{c.uncounted.length > 6 ? `, and ${c.uncounted.length - 6} more` : ""}</p>
+            <p className="mt-1 text-muted-foreground">{c.uncounted.slice(0, 6).map((u) => `${u.itemName} (${formatQty(u.expected, u.uom)})`).join(", ")}{c.uncounted.length > 6 ? `, and ${c.uncounted.length - 6} more` : ""}</p>
             {admin && (
               <label className="mt-2 flex items-center gap-2">
                 <input type="checkbox" className="size-4" checked={zero} onChange={(e) => setZero(e.target.checked)} />
@@ -185,5 +186,20 @@ export default function CountsPage() {
       </Card>
       {open && <CountDetail key={open} countId={open} onClose={() => setOpen(null)} />}
     </>
+  );
+}
+
+/** Fix a counted figure on the desk. Typed in the item's own unit; saved when you leave the box, only if it's a valid, different quantity. */
+function CountedBox({ line, onSave }: { line: CountLine; onSave: (counted: number) => void }) {
+  const entry = useQtyEntry(line.uom, { initial: line.counted });
+  return (
+    <div className="ml-auto w-24">
+      <QtyInput
+        entry={entry}
+        aria-label={`Counted ${line.itemName}`}
+        inputClassName="h-8 text-right"
+        onBlur={() => { if (entry.stored !== null && entry.stored !== line.counted) onSave(entry.stored); }}
+      />
+    </div>
   );
 }

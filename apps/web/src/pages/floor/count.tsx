@@ -1,15 +1,16 @@
-import type { Count } from "@invintel/shared";
+import { formatQty, uomOf, type Count, type Item, type Uom } from "@invintel/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { ScanInput } from "@/components/floor/scan-input";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { QtyInput } from "@/components/qty-input";
 import { api } from "@/lib/api";
 import { feedback } from "@/lib/feedback";
 import { resolveItem, resolveLocation } from "@/lib/floor";
 import { invalidateOrg, isAdmin, useCurrentOrg } from "@/lib/org";
+import { useQtyEntry } from "@/lib/qty";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,8 +21,7 @@ export default function CountPage() {
   const { id: orgId, role } = useCurrentOrg();
   const qc = useQueryClient();
   const [count, setCount] = useState<Count | null>(null);
-  const [item, setItem] = useState<{ id: string; name: string; sku: string } | null>(null);
-  const [qty, setQty] = useState("");
+  const [item, setItem] = useState<{ id: string; name: string; sku: string; uom: Uom; altUnits: Item["altUnits"] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
@@ -44,21 +44,17 @@ export default function CountPage() {
       feedback("ok");
       setError(null);
       setSaved(null);
-      setItem({ id: i.id, name: i.name, sku: i.sku });
-      // Counting it again replaces the number, so start from what was entered before.
-      const before = count?.lines.find((l) => l.itemId === i.id);
-      setQty(before ? String(before.counted) : "");
+      setItem({ id: i.id, name: i.name, sku: i.sku, uom: uomOf(i), altUnits: i.altUnits });
     },
     onError: (e: Error) => { feedback("error"); setError(e.message); },
   });
   const save = useMutation({
-    mutationFn: () => api.countItem(orgId, count!.id, item!.id, Number(qty)),
-    onSuccess: async (c) => {
+    mutationFn: (counted: number) => api.countItem(orgId, count!.id, item!.id, counted),
+    onSuccess: async (c, counted) => {
       feedback("ok");
-      setSaved(`${item!.name}: ${qty}`);
+      setSaved(`${item!.name}: ${formatQty(counted, item!.uom)}`);
       setCount(c);
       setItem(null);
-      setQty("");
       await invalidateOrg(qc, orgId);
     },
     onError: (e: Error) => { feedback("error"); setError(e.message); },
@@ -87,29 +83,16 @@ export default function CountPage() {
       {!item ? (
         <ScanInput label="Scan an item, then say how many are here" onScan={(c) => pick.mutate(c)} disabled={pick.isPending} error={error} />
       ) : (
-        <form
-          className="space-y-4"
-          onSubmit={(e) => { e.preventDefault(); if (qty !== "" && Number(qty) >= 0) save.mutate(); }}
-        >
-          <div>
-            <p className="text-2xl font-semibold">{item.name}</p>
-            <p className="font-mono text-sm text-muted-foreground">{item.sku}</p>
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="count-qty" className="text-base font-medium">How many are here?</label>
-            <Input
-              id="count-qty" autoFocus type="number" inputMode="numeric" min={0} value={qty}
-              onChange={(e) => setQty(e.target.value.replace(/[^\d]/g, ""))}
-              className="h-20 text-center text-4xl font-semibold tabular-nums"
-            />
-            <p className="text-sm text-muted-foreground">Zero is a real answer: it means you looked and there are none.</p>
-          </div>
-          {error && <p role="alert" className="text-base text-destructive">{error}</p>}
-          <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="outline" className="h-16 text-lg" onClick={() => { setItem(null); setError(null); }}>Cancel</Button>
-            <Button type="submit" className="h-16 text-lg" disabled={qty === "" || save.isPending}>Save</Button>
-          </div>
-        </form>
+        <CountForm
+          key={item.id}
+          item={item}
+          // Counting it again replaces the number, so start from what was entered before.
+          before={count.lines.find((l) => l.itemId === item.id)?.counted}
+          error={error}
+          saving={save.isPending}
+          onSave={(counted) => save.mutate(counted)}
+          onCancel={() => { setItem(null); setError(null); }}
+        />
       )}
 
       {!item && (
@@ -120,7 +103,7 @@ export default function CountPage() {
               {[...count.lines].sort((a, b) => a.itemName.localeCompare(b.itemName)).map((l) => (
                 <li key={l.itemId} className="flex items-center justify-between gap-3 px-3 py-2 text-base">
                   <span className="min-w-0 truncate">{l.itemName}</span>
-                  <span className="shrink-0 font-semibold tabular-nums">{l.counted.toLocaleString()}</span>
+                  <span className="shrink-0 font-semibold tabular-nums">{formatQty(l.counted, l.uom)}</span>
                 </li>
               ))}
             </ul>
@@ -134,5 +117,35 @@ export default function CountPage() {
         </div>
       )}
     </>
+  );
+}
+
+function CountForm({ item, before, error, saving, onSave, onCancel }: {
+  item: { name: string; sku: string; uom: Uom; altUnits: Item["altUnits"] };
+  before?: number;
+  error: string | null;
+  saving: boolean;
+  onSave: (counted: number) => void;
+  onCancel: () => void;
+}) {
+  const entry = useQtyEntry({ ...item.uom, altUnits: item.altUnits }, { initial: before ?? null });
+  const ready = entry.stored !== null;
+  return (
+    <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (entry.stored !== null) onSave(entry.stored); }}>
+      <div>
+        <p className="text-2xl font-semibold">{item.name}</p>
+        <p className="font-mono text-sm text-muted-foreground">{item.sku}</p>
+      </div>
+      <div className="space-y-2">
+        <label htmlFor="count-qty" className="text-base font-medium">How many are here?{item.uom.unit !== "ea" && ` (${item.uom.unit})`}</label>
+        <QtyInput entry={entry} id="count-qty" autoFocus inputClassName="h-20 text-center text-4xl font-semibold tabular-nums" />
+        <p className="text-sm text-muted-foreground">Zero is a real answer: it means you looked and there are none.</p>
+      </div>
+      {error && <p role="alert" className="text-base text-destructive">{error}</p>}
+      <div className="grid grid-cols-2 gap-2">
+        <Button type="button" variant="outline" className="h-16 text-lg" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" className="h-16 text-lg" disabled={!ready || saving}>Save</Button>
+      </div>
+    </form>
   );
 }

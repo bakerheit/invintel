@@ -1,4 +1,4 @@
-import type { AgingBucket } from "@invintel/shared";
+import { formatQty, type AgingBucket } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Download } from "lucide-react";
 import { useState } from "react";
@@ -74,7 +74,7 @@ export default function AgingReportPage() {
                         <tr key={`${x.itemId}:${x.locationId}`}>
                           <td className="p-2"><div className="font-medium">{x.name}</div><div className="font-mono text-xs text-muted-foreground">{x.sku}</div></td>
                           <td className="p-2 text-muted-foreground">{x.locationPath}</td>
-                          <td className="p-2 text-right tabular-nums">{x.quantity.toLocaleString()}</td>
+                          <td className="p-2 text-right tabular-nums">{formatQty(x.quantity, x.uom)}</td>
                           <td className="p-2 text-right tabular-nums">{formatCents(x.valueCents)}</td>
                           <td className="p-2 text-right tabular-nums"><span className={cn(x.daysSince > 180 && "font-semibold text-destructive", x.daysSince > 90 && x.daysSince <= 180 && "text-warning")}>{x.daysSince}</span>{x.onActiveBom && <Badge variant="secondary" className="ml-2" title="Used by an active BOM">in a BOM</Badge>}</td>
                         </tr>

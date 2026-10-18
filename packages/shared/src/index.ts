@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { altUnitsSchema, decimalsSchema, DEFAULT_UOM, unitLabelSchema, type Uom } from "./units.js";
 
 // ---------- ids ----------
 
@@ -143,6 +144,14 @@ const itemFields = {
   unitCostCents: z.number().int().min(0),
   /** "unit" items (rolls, pallets) are held as individually labelled units with their own remaining quantity. */
   tracking: z.enum(["quantity", "unit"]),
+  /**
+   * How the stored whole-number quantities read: 12500 with unit "kg" and 3 decimals is 12.500 kg.
+   * Decimals are fixed once an item has any stock or history (see units.ts).
+   */
+  unit: unitLabelSchema,
+  decimals: decimalsSchema,
+  /** Other units this item is bought or counted in (case = 12 each). Used to convert at receiving. */
+  altUnits: altUnitsSchema,
   /** Product barcodes that identify this item when scanned. An item can have several (each, case, pallet). */
   barcodes: z.array(barcodeSchema).max(20).transform((codes) => [...new Set(codes)]),
 };
@@ -155,6 +164,9 @@ export const itemInputSchema = z.object({
   unitCostCents: itemFields.unitCostCents.default(0),
   barcodes: itemFields.barcodes.default([]),
   tracking: itemFields.tracking.default("quantity"),
+  unit: itemFields.unit.default(DEFAULT_UOM.unit),
+  decimals: itemFields.decimals.default(DEFAULT_UOM.decimals),
+  altUnits: itemFields.altUnits.default([]),
 });
 export type ItemInput = z.infer<typeof itemInputSchema>;
 
@@ -275,6 +287,8 @@ export interface ActivityEntry {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   locationId: string;
   locationName: string;
   locationPath: string;
@@ -440,6 +454,9 @@ export const AUDIT_FIELD_LABELS: Record<string, string> = {
   reorderLevel: "reorder level",
   unitCostCents: "unit cost",
   barcodes: "barcodes",
+  unit: "unit of measure",
+  decimals: "decimal places",
+  altUnits: "other units",
   type: "type",
   code: "code",
   parent: "location it's inside",
@@ -449,6 +466,9 @@ export const AUDIT_FIELD_LABELS: Record<string, string> = {
 export function formatAuditValue(field: string, value: unknown): string {
   if (value === null || value === undefined || value === "") return "none";
   if (field === "unitCostCents" && typeof value === "number") return `$${(value / 100).toFixed(2)}`;
+  if (field === "altUnits" && Array.isArray(value)) {
+    return value.length ? value.map((u: { name?: string; factor?: string }) => `${u.name} = ${u.factor}`).join(", ") : "none";
+  }
   if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
   const text = String(value);
   return text.length > 80 ? `${text.slice(0, 77)}…` : text;
@@ -463,6 +483,8 @@ export interface AttentionItem {
   id: string;
   sku: string;
   name: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   reorderLevel: number;
   status: AttentionStatus;
@@ -539,6 +561,8 @@ export interface StockUnit {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read (kg with 3 decimals, each with 0). */
+  uom: Uom;
   lot: string;
   /** What's left. Shrinks as the unit is used. */
   quantity: number;
@@ -600,3 +624,4 @@ export * from "./reports.js";
 export * from "./approvals.js";
 export * from "./downtime.js";
 export * from "./alerts.js";
+export * from "./units.js";

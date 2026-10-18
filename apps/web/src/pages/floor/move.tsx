@@ -1,4 +1,4 @@
-import type { Item, Location, PostedDocument, StockUnit } from "@invintel/shared";
+import { formatQty, uomOf, type Item, type Location, type PostedDocument, type StockUnit } from "@invintel/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -76,7 +76,7 @@ export default function MovePage() {
       setItem(r.value);
       const only = r.value.stock.length === 1 ? r.value.stock[0]! : undefined;
       setFrom(only?.locationId ?? "");
-      setQty(1);
+      setQty(Math.min(10 ** uomOf(r.value).decimals, only?.quantity ?? Infinity));
       setStep("details");
     } catch (e) {
       feedback("error");
@@ -207,13 +207,13 @@ export default function MovePage() {
                         )}
                       >
                         <span className="text-lg font-medium">{nameOf(s.locationId)}</span>
-                        <span className="text-xl font-semibold tabular-nums">{s.quantity.toLocaleString()}</span>
+                        <span className="text-xl font-semibold tabular-nums">{formatQty(s.quantity, item)}</span>
                       </button>
                     ))}
                   </div>
                 </div>
               )}
-              {from && <QtyStepper value={qty} onChange={setQty} max={available} label={`How many? (${available.toLocaleString()} at ${nameOf(from)})`} />}
+              {from && <QtyStepper value={qty} onChange={setQty} max={available} uom={item} label={`How many? (${formatQty(available, item)} at ${nameOf(from)})`} />}
               <div className="grid gap-2">
                 <Button className="h-16 text-xl" disabled={!from || qty < 1} onClick={() => { setError(null); setStep("destination"); }}>
                   Next: where to?
@@ -230,7 +230,7 @@ export default function MovePage() {
       {step === "destination" && item && (
         <div className="space-y-6">
           <div className="rounded-xl border bg-card p-4 text-lg">
-            <span className="font-semibold">{qty.toLocaleString()} × {item.name}</span>
+            <span className="font-semibold">{formatQty(qty, item)} × {item.name}</span>
             <span className="block text-sm text-muted-foreground">from {nameOf(from)}</span>
           </div>
           <ScanInput label="Scan the destination" placeholder="Scan location" onScan={onDestination} disabled={busy} error={error} />
@@ -254,7 +254,7 @@ export default function MovePage() {
       )}
 
       {step === "done" && done && item && (
-        <ResultPanel title={`Moved ${done.qty.toLocaleString()} × ${item.name}`} detail={`${done.from.path} → ${done.to.path}`}>
+        <ResultPanel title={`Moved ${formatQty(done.qty, item)} × ${item.name}`} detail={`${done.from.path} → ${done.to.path}`}>
           {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-medium text-destructive">{error}</p>}
           <Button className="h-16 w-full text-xl" onClick={reset}>Move another</Button>
           <Button variant="outline" className="h-14 w-full text-base" onClick={() => void undo()} disabled={busy}>

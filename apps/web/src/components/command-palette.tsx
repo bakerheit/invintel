@@ -1,3 +1,4 @@
+import { formatQty } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, Package, ScanLine, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -57,7 +58,7 @@ export function CommandPalette() {
       .filter((i) => [i.name, i.sku, ...i.barcodes].some((t) => t.toLowerCase().includes(q)))
       .slice(0, MAX_PER_GROUP)
       .map((i) => ({
-        key: `i${i.id}`, group: "Items" as const, label: i.name, hint: `${i.sku} · ${i.quantity.toLocaleString()} on hand`,
+        key: `i${i.id}`, group: "Items" as const, label: i.name, hint: `${i.sku} · ${formatQty(i.quantity, i)} on hand`,
         icon: <Package className="size-4" />,
         run: () => void navigate(`/o/${org.id}/inventory/${i.id}`),
       }));

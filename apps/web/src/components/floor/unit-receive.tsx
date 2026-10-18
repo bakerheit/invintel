@@ -1,4 +1,4 @@
-import type { Item, Location, UnitsPosted } from "@invintel/shared";
+import { formatQty, uomOf, type Item, type Location, type UnitsPosted } from "@invintel/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { ListChecks, Printer } from "lucide-react";
 import { useState } from "react";
@@ -23,7 +23,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
   const qc = useQueryClient();
   const { data: locations = [] } = useLocations(orgId);
   const [step, setStep] = useState<"details" | "destination" | "done">("details");
-  const [each, setEach] = useState(1);
+  const [each, setEach] = useState(10 ** uomOf(item).decimals);
   const [count, setCount] = useState(1);
   const [lot, setLot] = useState("");
   const [reference, setReference] = useState("");
@@ -73,12 +73,12 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
   if (step === "done" && done) {
     const { units } = done.posted;
     return (
-      <ResultPanel title={`Received ${units.length} × ${item.name}`} detail={`${each.toLocaleString()} each, into ${done.to.path}`}>
+      <ResultPanel title={`Received ${units.length} × ${item.name}`} detail={`${formatQty(each, item)} each, into ${done.to.path}`}>
         <ul className="divide-y rounded-xl border bg-card">
           {units.map((u) => (
             <li key={u.id} className="flex items-center justify-between px-4 py-3">
               <span className="font-mono text-lg font-semibold">{u.code}</span>
-              <span className="text-muted-foreground tabular-nums">{u.quantity.toLocaleString()}</span>
+              <span className="text-muted-foreground tabular-nums">{formatQty(u.quantity, item)}</span>
             </li>
           ))}
         </ul>
@@ -97,7 +97,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
     return (
       <div className="space-y-6">
         <div className="rounded-xl border bg-card p-4 text-lg">
-          <span className="font-semibold">{count.toLocaleString()} × {each.toLocaleString()} {item.name}</span>
+          <span className="font-semibold">{count.toLocaleString()} × {formatQty(each, item)} {item.name}</span>
           {(lot || reference) && <span className="block text-sm text-muted-foreground">{[lot && `Lot ${lot}`, reference].filter(Boolean).join(" · ")}</span>}
         </div>
         <ScanInput label="Scan where they're going" placeholder="Scan location" onScan={onDestination} disabled={busy} error={error} />
@@ -118,7 +118,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
       <p className="rounded-xl bg-accent/50 p-3 text-sm">
         This item is tracked by roll or pallet. Each one gets its own label, so it can be found, moved and used up on its own.
       </p>
-      <QtyStepper value={each} onChange={setEach} label="Quantity in each (e.g. kg on a roll)" />
+      <QtyStepper value={each} onChange={setEach} uom={item} label="Quantity in each (e.g. kg on a roll)" />
       <QtyStepper value={count} onChange={(n) => setCount(Math.min(200, n))} label="How many rolls or pallets?" />
       <div className="space-y-2">
         <label htmlFor="unit-lot" className="text-base font-medium">Lot or batch (optional)</label>
@@ -129,7 +129,7 @@ export function UnitReceive({ item, onReset }: { item: Item; onReset: () => void
         <Input id="unit-ref" className="h-14 text-lg" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} />
       </div>
       <InspectToggle value={inspect} onChange={setInspect} />
-      <Button className="h-16 w-full text-xl" onClick={() => setStep("destination")}>Next: where to?</Button>
+      <Button className="h-16 w-full text-xl" disabled={each < 1 || count < 1} onClick={() => setStep("destination")}>Next: where to?</Button>
       <Button variant="ghost" className="h-12 w-full text-base" onClick={onReset}>Scan a different item</Button>
     </div>
   );

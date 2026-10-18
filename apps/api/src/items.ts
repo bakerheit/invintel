@@ -3,6 +3,7 @@ import {
   adjustmentInputSchema,
   itemCreateSchema,
   itemUpdateSchema,
+  lineValueCents,
   objectIdSchema,
   transferInputSchema,
   type StockMovement,
@@ -17,6 +18,7 @@ import { loadItem, loadItems, toItem } from "./item-queries.js";
 import type { OrgEnv } from "./org-access.js";
 import { logMovement, postAdjustment, postMove, type Actor } from "./stock-service.js";
 import { createApproval, isSoleApprover, ruleFor, toApproval } from "./approvals-core.js";
+import { itemHasQuantities } from "./item-quantities.js";
 import { unitCodeTaken } from "./units.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -43,6 +45,9 @@ const itemSnapshot = (i: ItemDoc) => ({
   unitCostCents: i.unitCostCents,
   barcodes: i.barcodes ?? [],
   tracking: i.tracking ?? "quantity",
+  unit: i.unit ?? "ea",
+  decimals: i.decimals ?? 0,
+  altUnits: i.altUnits ?? [],
 });
 
 export const actorOf = (user: { id: string; name: string }): Actor => ({
@@ -125,6 +130,14 @@ export function createItemRoutes(store: Store) {
         const hasStock = await store.stock.findOne({ itemId: _id, quantity: { $gt: 0 } }, { projection: { _id: 1 } });
         const hasUnits = await store.units.findOne({ itemId: _id, status: { $ne: "consumed" } }, { projection: { _id: 1 } });
         if (hasStock || hasUnits) return c.json({ error: "Can't change how this item is tracked while it still has stock" }, 409);
+      }
+    }
+    if (patch.decimals !== undefined) {
+      // Stored numbers are counts of the smallest unit. Moving the decimal point would silently
+      // rescale every quantity this item has ever had, so it is only open before it has any.
+      const current = await store.items.findOne({ _id, orgId }, { projection: { decimals: 1 } });
+      if (current && (current.decimals ?? 0) !== patch.decimals && (await itemHasQuantities(store, orgId, _id))) {
+        return c.json({ error: "Decimal places can't change once an item has stock, history or open orders. Create a new item instead." }, 409);
       }
     }
     if (patch.barcodes) {
@@ -215,9 +228,9 @@ export function createItemRoutes(store: Store) {
     const itemId = new ObjectId(c.req.valid("param").id);
     const { locationId, delta, reason } = c.req.valid("json");
     // A rule may say this adjustment needs a second person. Then it waits as a request instead of posting.
-    const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { sku: 1, name: 1, unitCostCents: 1 } });
+    const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { sku: 1, name: 1, unitCostCents: 1, decimals: 1 } });
     if (item) {
-      const valueCents = Math.abs(delta) * item.unitCostCents;
+      const valueCents = lineValueCents(Math.abs(delta), item.unitCostCents, item.decimals ?? 0);
       if (ruleFor(c.get("org"), "adjustment", valueCents, c.get("role"))) {
         const loc = await store.locations.findOne({ _id: new ObjectId(locationId), orgId }, { projection: { name: 1 } });
         if (!loc) return c.json({ error: "Location not found" }, 404);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_QTY, type Uom } from "./units.js";
 
 const id = z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id");
 
@@ -14,7 +15,7 @@ export type CountStartInput = z.input<typeof countStartSchema>;
 /** Counting one item sets what was found, not a change. Counting it again replaces the number. */
 export const countLineSchema = z.object({
   itemId: id,
-  counted: z.number().int().min(0).max(1_000_000),
+  counted: z.number().int().min(0).max(MAX_QTY),
 });
 export type CountLineInput = z.infer<typeof countLineSchema>;
 
@@ -28,6 +29,8 @@ export interface CountLine {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   /** What the system says is at this location right now (or, once posted, what it said when posted). */
   expected: number;
   counted: number;
@@ -49,7 +52,7 @@ export interface Count {
   postedAt: string | null;
   lines: CountLine[];
   /** Items with stock here that haven't been counted. Posting with zeroUncounted writes these off. */
-  uncounted: { itemId: string; itemSku: string; itemName: string; expected: number }[];
+  uncounted: { itemId: string; itemSku: string; itemName: string; uom: Uom; expected: number }[];
   /** Totals across counted lines. */
   summary: { counted: number; matched: number; over: number; under: number; netUnits: number; netCents: number };
 }

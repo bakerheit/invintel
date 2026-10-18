@@ -1,4 +1,4 @@
-import { LOCATION_TYPES, type AttentionItem, type LocationType, type Overview } from "@invintel/shared";
+import { LOCATION_TYPES, lineValueCents, uomOf, type AttentionItem, type LocationType, type Overview } from "@invintel/shared";
 import { Hono } from "hono";
 import type { Store } from "./db.js";
 import { loadItems } from "./item-queries.js";
@@ -29,12 +29,14 @@ export function createOverviewRoutes(store: Store) {
     const attention: (AttentionItem & { ratio: number })[] = [];
     for (const item of items) {
       const quantity = item.stock.reduce((sum, s) => sum + s.quantity, 0);
-      units += quantity;
-      valueCents += quantity * item.unitCostCents;
+      // "Units" adds up across items, so it is in display units: 12.5 kg counts as 12.5, not 12,500.
+      const shown = (n: number) => n / 10 ** (item.decimals ?? 0);
+      units += shown(quantity);
+      valueCents += lineValueCents(quantity, item.unitCostCents, item.decimals ?? 0);
       for (const s of item.stock) {
         const t = totals.get(typeOf.get(s.locationId.toHexString()) ?? "storage")!;
-        t.units += s.quantity;
-        t.valueCents += s.quantity * item.unitCostCents;
+        t.units += shown(s.quantity);
+        t.valueCents += lineValueCents(s.quantity, item.unitCostCents, item.decimals ?? 0);
       }
       const status = quantity <= 0 ? "out" : item.reorderLevel > 0 && quantity <= item.reorderLevel ? "low" : null;
       if (status) {
@@ -42,6 +44,7 @@ export function createOverviewRoutes(store: Store) {
           id: item._id.toHexString(),
           sku: item.sku,
           name: item.name,
+          uom: uomOf(item),
           quantity,
           reorderLevel: item.reorderLevel,
           status,
@@ -55,14 +58,14 @@ export function createOverviewRoutes(store: Store) {
     const overview: Overview = {
       items: items.length,
       locations: locations.length,
-      units,
+      units: Math.round(units),
       valueCents,
       outCount: attention.filter((a) => a.status === "out").length,
       lowCount: attention.filter((a) => a.status === "low").length,
       attention: attention.slice(0, ATTENTION_LIMIT).map(({ ratio: _ratio, ...rest }) => rest),
-      byType: LOCATION_TYPES.map((type) => ({ type, ...totals.get(type)! })),
+      byType: LOCATION_TYPES.map((type) => ({ type, ...totals.get(type)!, units: Math.round(totals.get(type)!.units) })),
       movements24h,
-      awaitingPutaway: totals.get("receiving")!.units,
+      awaitingPutaway: Math.round(totals.get("receiving")!.units),
     };
     return c.json(overview);
   });

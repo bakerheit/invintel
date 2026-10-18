@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_QTY, type Uom } from "./units.js";
 
 const id = z.string().regex(/^[0-9a-f]{24}$/i, "Invalid id");
 
@@ -41,7 +42,7 @@ export type PoStatus = (typeof PO_STATUSES)[number];
 
 export const poLineInputSchema = z.object({
   itemId: id,
-  quantity: z.number().int().positive().max(1_000_000),
+  quantity: z.number().int().positive().max(MAX_QTY),
   unitCostCents: z.number().int().min(0).max(100_000_000),
 });
 
@@ -63,6 +64,8 @@ export interface PurchaseOrderLine {
   itemId: string;
   itemSku: string;
   itemName: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   unitCostCents: number;
   /** From the ledger: receipts against this order that haven't been reversed. */
@@ -91,7 +94,7 @@ export const poReceiveInputSchema = z.object({
   locationId: id,
   /** Inspect before release: everything received goes straight on quality hold. */
   inspect: z.boolean().default(false),
-  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(1_000_000), supplierLot: z.string().trim().max(64).default('') })).min(1).max(100),
+  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(MAX_QTY), supplierLot: z.string().trim().max(64).default("") })).min(1).max(100),
 });
 export type PoReceiveInput = z.input<typeof poReceiveInputSchema>;
 
@@ -108,6 +111,8 @@ export interface ReorderSuggestion {
   itemId: string;
   sku: string;
   name: string;
+  /** How this item's whole-number quantities read. */
+  uom: Uom;
   quantity: number;
   reorderLevel: number;
   /** Already on open purchase orders and not yet received. */

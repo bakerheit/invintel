@@ -1,4 +1,4 @@
-import type { Item } from "@invintel/shared";
+import { lineValueCents, type Item } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, CircleDollarSign, Download, Layers, Package, Plus, Search, TriangleAlert, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -77,8 +77,9 @@ export default function InventoryPage() {
   );
 
   const all = items.data ?? [];
-  const units = all.reduce((sum, i) => sum + i.quantity, 0);
-  const totalValue = all.reduce((sum, i) => sum + i.quantity * i.unitCostCents, 0);
+  // Totals across items are in display units (12.5 kg counts as 12.5), not stored counts.
+  const units = Math.round(all.reduce((sum, i) => sum + i.quantity / 10 ** i.decimals, 0));
+  const totalValue = all.reduce((sum, i) => sum + lineValueCents(i.quantity, i.unitCostCents, i.decimals), 0);
   const lowCount = all.filter(needsAttention).length;
   const filtering = !!search || lowStockOnly || !!locationId;
 

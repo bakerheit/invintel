@@ -1,4 +1,4 @@
-import type { MovementType, StockUnit } from "@invintel/shared";
+import { uomOf, type MovementType, type StockUnit } from "@invintel/shared";
 import { ObjectId } from "mongodb";
 import { itemEntity, recordAudit } from "./audit.js";
 import { isDuplicateKey, type StockUnitDoc, type Store } from "./db.js";
@@ -41,7 +41,7 @@ export const unitCodeTaken = async (store: Store, orgId: ObjectId, codes: string
 
 /** Turn unit documents into API shape, with item names and location paths attached. */
 export async function presentUnits(store: Store, orgId: ObjectId, docs: StockUnitDoc[]): Promise<StockUnit[]> {
-  const items = await store.items.find({ _id: { $in: [...new Set(docs.map((d) => d.itemId.toHexString()))].map((id) => new ObjectId(id)) } }, { projection: { sku: 1, name: 1 } }).toArray();
+  const items = await store.items.find({ _id: { $in: [...new Set(docs.map((d) => d.itemId.toHexString()))].map((id) => new ObjectId(id)) } }, { projection: { sku: 1, name: 1, unit: 1, decimals: 1 } }).toArray();
   const itemById = new Map(items.map((i) => [i._id.toHexString(), i]));
   const locations = indexLocations(await loadLocations(store, orgId));
   return docs.map((u) => ({
@@ -50,6 +50,7 @@ export async function presentUnits(store: Store, orgId: ObjectId, docs: StockUni
     itemId: u.itemId.toHexString(),
     itemSku: itemById.get(u.itemId.toHexString())?.sku ?? "",
     itemName: itemById.get(u.itemId.toHexString())?.name ?? "Deleted item",
+    uom: uomOf(itemById.get(u.itemId.toHexString())),
     lot: u.lot,
     quantity: u.quantity,
     initialQuantity: u.initialQuantity,

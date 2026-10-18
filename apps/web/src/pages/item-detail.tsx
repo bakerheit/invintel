@@ -1,3 +1,4 @@
+import { formatQty, lineValueCents } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowLeftRight, History, Package, Pencil, Printer, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Link, useParams } from "react-router";
@@ -83,10 +84,10 @@ export default function ItemDetailPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          ["On hand", item.quantity.toLocaleString()],
-          ["Value", formatCents(item.quantity * item.unitCostCents)],
-          ["Unit cost", formatCents(item.unitCostCents)],
-          ["Reorder at", item.reorderLevel > 0 ? item.reorderLevel.toLocaleString() : "Not tracked"],
+          ["On hand", formatQty(item.quantity, item)],
+          ["Value", formatCents(lineValueCents(item.quantity, item.unitCostCents, item.decimals))],
+          [item.unit === "ea" ? "Unit cost" : `Cost per ${item.unit}`, formatCents(item.unitCostCents)],
+          ["Reorder at", item.reorderLevel > 0 ? formatQty(item.reorderLevel, item) : "Not tracked"],
         ].map(([label, value]) => (
           <Card key={label} className="gap-0 p-4">
             <div className="text-sm text-muted-foreground">{label}</div>
@@ -112,8 +113,8 @@ export default function ItemDetailPage() {
                       <p className="truncate text-xs text-muted-foreground">{u.locationPath}{u.lot ? ` · Lot ${u.lot}` : ""}</p>
                     </div>
                     <p className="tabular-nums">
-                      <span className="font-medium">{u.quantity.toLocaleString()}</span>
-                      {u.quantity !== u.initialQuantity && <span className="text-muted-foreground"> of {u.initialQuantity.toLocaleString()}</span>}
+                      <span className="font-medium">{formatQty(u.quantity, item)}</span>
+                      {u.quantity !== u.initialQuantity && <span className="text-muted-foreground"> of {formatQty(u.initialQuantity, item, { unit: false })}</span>}
                     </p>
                   </li>
                 ))}
@@ -140,7 +141,7 @@ export default function ItemDetailPage() {
                         {loc?.code && <span className="ml-2 font-mono text-xs text-muted-foreground">{loc.code}</span>}
                       </Link>
                       <div className="flex shrink-0 items-center gap-3">
-                        <span className="font-medium tabular-nums">{s.quantity.toLocaleString()}</span>
+                        <span className="font-medium tabular-nums">{formatQty(s.quantity, item)}</span>
                         <Button variant="ghost" size="sm" onClick={() => openDialog({ kind: "adjust", item, locationId: s.locationId })}>Adjust</Button>
                       </div>
                     </li>
@@ -186,7 +187,7 @@ export default function ItemDetailPage() {
                       </p>
                       <p className="truncate text-xs text-muted-foreground">{e.userName} · {formatRelative(e.createdAt)}{e.reason ? ` · ${e.reason}` : ""}</p>
                     </div>
-                    <span className={cn("shrink-0 font-medium tabular-nums", e.delta < 0 && "text-muted-foreground")}>{e.delta > 0 ? "+" : ""}{e.delta.toLocaleString()}</span>
+                    <span className={cn("shrink-0 font-medium tabular-nums", e.delta < 0 && "text-muted-foreground")}>{formatQty(e.delta, item, { sign: true })}</span>
                   </li>
                 ))}
               </ul>

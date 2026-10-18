@@ -1,5 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import {
+  lineValueCents,
+  uomOf,
   objectIdSchema,
   poFromSuggestionsSchema,
   poReceiveInputSchema,
@@ -47,7 +49,7 @@ export async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<
   if (!docs.length) return [];
   const [suppliers, items, received] = await Promise.all([
     store.suppliers.find({ _id: { $in: docs.map((d) => d.supplierId) } }).toArray(),
-    store.items.find({ _id: { $in: docs.flatMap((d) => d.lines.map((l) => l.itemId)) } }, { projection: { sku: 1, name: 1 } }).toArray(),
+    store.items.find({ _id: { $in: docs.flatMap((d) => d.lines.map((l) => l.itemId)) } }, { projection: { sku: 1, name: 1, unit: 1, decimals: 1 } }).toArray(),
     receivedByOrder(store, docs.map((d) => d._id)),
   ]);
   const supplierName = new Map(suppliers.map((s) => [s._id.toHexString(), s.name]));
@@ -57,6 +59,7 @@ export async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<
       itemId: l.itemId.toHexString(),
       itemSku: item.get(l.itemId.toHexString())?.sku ?? "",
       itemName: item.get(l.itemId.toHexString())?.name ?? "Deleted item",
+      uom: uomOf(item.get(l.itemId.toHexString())),
       quantity: l.quantity,
       unitCostCents: l.unitCostCents,
       received: received.get(`${d._id.toHexString()}:${l.itemId.toHexString()}`) ?? 0,
@@ -78,7 +81,7 @@ export async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<
       expectedDate: d.expectedDate,
       note: d.note,
       lines,
-      totalCents: lines.reduce((s, l) => s + l.quantity * l.unitCostCents, 0),
+      totalCents: lines.reduce((s, l) => s + lineValueCents(l.quantity, l.unitCostCents, item.get(l.itemId)?.decimals ?? 0), 0),
       orderedUnits,
       receivedUnits,
       createdAt: d.createdAt.toISOString(),
@@ -184,7 +187,7 @@ export function createPurchasingRoutes(store: Store) {
       // Order enough to get back to twice the reorder level, counting what is already on its way.
       const suggestedQuantity = Math.max(0, i.reorderLevel * 2 - quantity - coming);
       if (suggestedQuantity === 0) continue;
-      out.push({ itemId: i._id.toHexString(), sku: i.sku, name: i.name, quantity, reorderLevel: i.reorderLevel, onOrder: coming, suggestedQuantity, unitCostCents: i.unitCostCents });
+      out.push({ itemId: i._id.toHexString(), sku: i.sku, name: i.name, uom: uomOf(i), quantity, reorderLevel: i.reorderLevel, onOrder: coming, suggestedQuantity, unitCostCents: i.unitCostCents });
     }
     out.sort((a, b) => a.quantity / a.reorderLevel - b.quantity / b.reorderLevel || a.name.localeCompare(b.name, "en"));
     return c.json(out);
