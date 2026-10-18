@@ -8,6 +8,22 @@ import { changeStock, logMovement, type Actor, type Failure } from "./stock-serv
 
 const ci = { locale: "en", strength: 2 } as const;
 
+/**
+ * Stock rows for unit-tracked items are a mirror of the units, which are updated atomically first. So these
+ * adjustments are not refused for lack of stock: when a move and a use of the same unit interleave, the row can be
+ * briefly behind (a refused removal would be lost and leave the row one use too high for good).
+ */
+async function bumpStock(store: Store, orgId: ObjectId, itemId: ObjectId, locationId: ObjectId, delta: number) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await store.stock.updateOne({ orgId, itemId, locationId }, { $inc: { quantity: delta }, $set: { updatedAt: new Date() } }, { upsert: true });
+      return;
+    } catch (e) {
+      if (!isDuplicateKey(e) || attempt >= 2) throw e;
+    }
+  }
+}
+
 /** Next label number for this org: U-000001, U-000002, ... Never reused, even after units are consumed. */
 async function nextCodes(store: Store, orgId: ObjectId, n: number): Promise<string[]> {
   const counter = await store.counters.findOneAndUpdate(
@@ -161,8 +177,8 @@ export async function moveUnit(
   );
   if (!claimed) return { ok: false, status: 409, error: "Someone else just moved or used that unit" };
 
-  await changeStock(store, orgId, unit.itemId, unit.locationId, -claimed.quantity);
-  await changeStock(store, orgId, unit.itemId, toLocationId, claimed.quantity);
+  await bumpStock(store, orgId, unit.itemId, unit.locationId, -claimed.quantity);
+  await bumpStock(store, orgId, unit.itemId, toLocationId, claimed.quantity);
 
   const transferId = opts.transferId ?? new ObjectId();
   const extra = { type: opts.type ?? ("transfer" as MovementType), ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}) };
@@ -214,21 +230,22 @@ export async function adjustUnit(
   if (after.quantity === 0) {
     result = (await store.units.findOneAndUpdate({ _id: unitId }, { $set: { status: "consumed" } }, { returnDocument: "after" })) ?? after;
   }
-  await changeStock(store, orgId, unit.itemId, unit.locationId, delta);
+  // Use the location the unit was at when the quantity changed (`after`), not the one read earlier: a move can land in between.
+  await bumpStock(store, orgId, unit.itemId, after.locationId, delta);
   const id = await logMovement(store, {
     orgId,
     type: opts.type ?? "adjust",
     ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}),
     ...(opts.transferId ? { transferId: opts.transferId } : {}),
     itemId: unit.itemId,
-    locationId: unit.locationId,
+    locationId: after.locationId,
     unitId,
     unitCode: unit.code,
     delta,
     reason,
     actor,
   });
-  const location = await store.locations.findOne({ _id: unit.locationId });
+  const location = await store.locations.findOne({ _id: after.locationId });
   await recordAudit(store, {
     orgId,
     actor: asAuditActor(actor),
