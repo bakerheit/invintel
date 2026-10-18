@@ -63,12 +63,12 @@ interface Line {
 }
 
 /**
- * Posts the lines of one production document. Removals go first (they can fail), and if anything
+ * Posts the lines of one production document, in the order given. If anything
  * fails the stock changes already made are put back. All lines share a group id so the Activity
  * screen reverses them together.
  */
 async function postLines(store: Store, orgId: ObjectId, actor: Actor, wo: WorkOrderDoc, lines: Line[]) {
-  const ordered = [...lines].filter((l) => l.delta !== 0).sort((a, b) => a.delta - b.delta);
+  const ordered = lines.filter((l) => l.delta !== 0); // callers order lines so removals that can fail come before the additions that depend on them
   const applied: Line[] = [];
   const unwind = () => Promise.all(applied.map((l) => changeStock(store, orgId, l.itemId, l.locationId, -l.delta)));
   try {
