@@ -67,6 +67,13 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 
 API under `/api/orgs/:orgId/counts`: `GET /`, `POST /` (`{locationId}`), `GET /:id`, `PUT /:id/lines`, `DELETE /:id/lines/:itemId`, `POST /:id/post`, `POST /:id/cancel`.
 
+### Reports
+
+**Reports** (sidebar) are read-only views of what the ledger and counts already record. New reports register in `apps/web/src/lib/reports.ts`.
+
+- **Stock aging** (`GET /reports/aging`, `/reports/aging.csv`, optional `?locationId=`): days since stock last moved at each place, value tied up, which items sit on an active BOM, buckets from 0-30 days to over a year, and the value idle over 180 days.
+- **Counting** (`GET /reports/count-accuracy`, `/reports/count-schedule`): accuracy of posted counts by place, month and item, and an ABC count schedule (A items every 30 days, B every 90, C every 180; a place follows its most important class) with overdue and due-soon flags and a Start count button.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:

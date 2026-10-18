@@ -1,4 +1,7 @@
 import type {
+  AgingReport,
+  CountAccuracyReport,
+  CountScheduleReport,
   Count,
   CountListRow,
   Bom,
@@ -149,6 +152,11 @@ export const api = {
   postCount: (orgId: string, id: string, zeroUncounted: boolean) =>
     request<{ count: Count; adjustments: number; failures: string[] }>(`/orgs/${orgId}/counts/${id}/post`, post({ zeroUncounted })),
   cancelCount: (orgId: string, id: string) => request<Count>(`/orgs/${orgId}/counts/${id}/cancel`, post({})),
+  agingReport: (orgId: string, locationId?: string) =>
+    request<AgingReport>(`/orgs/${orgId}/reports/aging${locationId ? `?locationId=${locationId}` : ""}`),
+  agingCsvUrl: (orgId: string, locationId?: string) => `/api/orgs/${orgId}/reports/aging.csv${locationId ? `?locationId=${locationId}` : ""}`,
+  countAccuracy: (orgId: string) => request<CountAccuracyReport>(`/orgs/${orgId}/reports/count-accuracy`),
+  countSchedule: (orgId: string) => request<CountScheduleReport>(`/orgs/${orgId}/reports/count-schedule`),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 

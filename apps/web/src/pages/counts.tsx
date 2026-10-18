@@ -1,8 +1,8 @@
 import type { Count, CountStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, Plus, ScanLine } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { EmptyState } from "@/components/empty-state";
@@ -133,6 +133,15 @@ export default function CountsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
   const rows = counts.data ?? [];
+
+  // "Start count" on the Reports page sends people here with ?start=<location id>.
+  const [params, setParams] = useSearchParams();
+  const startId = params.get("start");
+  useEffect(() => {
+    if (!startId) return;
+    setParams({}, { replace: true });
+    api.startCount(orgId, startId).then(async (c) => { await invalidateOrg(qc, orgId); setOpen(c.id); }, (e: Error) => toast.error(e.message));
+  }, [startId, orgId, qc, setParams]);
 
   return (
     <>
