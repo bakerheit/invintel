@@ -183,9 +183,11 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
         outputItemId: d.outputItemId.toHexString(),
         outputItemSku: names.get(d.outputItemId.toHexString())?.sku ?? "",
         outputItemName: names.get(d.outputItemId.toHexString())?.name ?? "Deleted item",
+        outputTracking: unitItems.has(d.outputItemId.toHexString()) ? ("unit" as const) : ("quantity" as const),
         quantity: d.quantity,
         workCenterId: d.workCenterId.toHexString(),
         workCenterName: center?.name ?? "Deleted work center",
+        workCenterLocationId: center?.locationId.toHexString() ?? "",
         dueDate: d.dueDate,
         note: d.note,
         requirements: d.requirements.map((r) => ({
