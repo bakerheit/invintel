@@ -7,6 +7,7 @@ import { auditActor, recordAudit } from "./audit.js";
 import type { Store, WebhookDoc } from "./db.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { deliverNow, newSecret, queueTest, toDelivery } from "./webhooks.js";
+import { sealWebhookSecret } from "./webhook-secrets.js";
 import { validateWebhookUrl } from "./webhook-safety.js";
 
 const MAX_WEBHOOKS = 20;
@@ -40,9 +41,10 @@ export function createWebhookRoutes(store: Store) {
     if ((await store.webhooks.countDocuments({ orgId: org._id })) >= MAX_WEBHOOKS) return c.json({ error: `An organization can have ${MAX_WEBHOOKS} webhooks.` }, 409);
     const me = c.get("user");
     const now = new Date();
+    const secret = newSecret();
     const doc: WebhookDoc = {
       _id: new ObjectId(), orgId: org._id, url: checked.url.toString(), events: input.events, description: input.description,
-      secret: newSecret(), enabled: true, failures: 0, createdBy: { id: new ObjectId(me.id), name: me.name }, createdAt: now, updatedAt: now,
+      secret: sealWebhookSecret(secret), enabled: true, failures: 0, createdBy: { id: new ObjectId(me.id), name: me.name }, createdAt: now, updatedAt: now,
     };
     await store.webhooks.insertOne(doc);
     await recordAudit(store, {
@@ -51,7 +53,7 @@ export function createWebhookRoutes(store: Store) {
       summary: `Added a webhook to ${host(doc.url)} for ${doc.events.includes("*") ? "all events" : doc.events.join(", ")}`,
       refs: { webhookId: doc._id.toHexString() },
     });
-    return c.json<WebhookWithSecret>({ ...(await present(doc)), secret: doc.secret }, 201);
+    return c.json<WebhookWithSecret>({ ...(await present(doc)), secret }, 201);
   });
 
   r.patch("/:id", zValidator("param", idParam), zValidator("json", webhookUpdateSchema), async (c) => {
@@ -107,7 +109,7 @@ export function createWebhookRoutes(store: Store) {
   r.post("/:id/rotate-secret", zValidator("param", idParam), async (c) => {
     const org = c.get("org");
     const secret = newSecret();
-    const doc = await store.webhooks.findOneAndUpdate({ _id: new ObjectId(c.req.valid("param").id), orgId: org._id }, { $set: { secret, updatedAt: new Date() } }, { returnDocument: "after" });
+    const doc = await store.webhooks.findOneAndUpdate({ _id: new ObjectId(c.req.valid("param").id), orgId: org._id }, { $set: { secret: sealWebhookSecret(secret), updatedAt: new Date() } }, { returnDocument: "after" });
     if (!doc) return c.json({ error: "Webhook not found" }, 404);
     await recordAudit(store, {
       orgId: org._id, actor: auditActor(c.get("user")), action: "webhook.secret_rotated",

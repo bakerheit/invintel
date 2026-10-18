@@ -304,6 +304,9 @@ describe("webhooks: delivering", () => {
     expect(await deliverDue(store)).toBe(2);
     expect(rx.hits).toHaveLength(2);
 
+    // Four workers send at once, so which arrives first isn't promised: line them up by event type.
+    rx.hits.sort((a, b) => String(a.headers["x-invintel-event"]).localeCompare(String(b.headers["x-invintel-event"])));
+    expect(rx.hits.map((h) => h.headers["x-invintel-event"])).toEqual(["item.created", "stock.adjusted"]);
     const first = rx.hits[0]!;
     expect(verify(hook.secret, first)).toBe(true);
     expect(verify("whsec_wrong", first)).toBe(false);
@@ -461,8 +464,7 @@ describe("webhooks: delivering", () => {
     expect(d.error).toMatch(/https|private|reserved/);
 
     // A public-looking name that resolves to a private address at connect time.
-    const port = new URL(rx.url).port;
-    await store.webhooks.updateOne({ _id: new ObjectId(hook.id) }, { $set: { url: `https://rebind.example.test:${port}/hook`, enabled: true, failures: 0 } });
+    await store.webhooks.updateOne({ _id: new ObjectId(hook.id) }, { $set: { url: "https://rebind.example.test:8443/hook", enabled: true, failures: 0 } });
     vi.spyOn(dns, "lookup").mockImplementation(((host: string, opts: unknown, cb: (...a: unknown[]) => void) => cb(null, [{ address: "127.0.0.1", family: 4 }])) as never);
     await w.admin.json("/items", { sku: "P2", name: "P2" });
     await deliverDue(store);

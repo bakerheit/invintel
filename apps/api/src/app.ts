@@ -35,7 +35,9 @@ export function createApp(store: Store, authOptions: AuthOptions) {
   const api = new Hono<AuthEnv>();
   const keyAuth = createKeyAuth(store, { perMinute: authOptions.apiKeyRatePerMinute });
   api.use("*", async (c, next) => {
-    if (!c.req.header("authorization")) return auth.requireAuth(c, next);
+    // The key path is only for "Authorization: Bearer ivk_...". Anything else (a reverse proxy's Basic auth, say) is not
+    // an attempt to use a key, so the signed-in cookie session decides.
+    if (!/^Bearer\s+ivk_/i.test(c.req.header("authorization") ?? "")) return auth.requireAuth(c, next);
     // A key is for one organization's inventory, and for nothing else (not listing or creating organizations).
     if (!/^\/api\/orgs\/[0-9a-f]{24}(\/|$)/i.test(c.req.path)) return c.json({ error: "This API key isn't allowed to do that" }, 403);
     return keyAuth(c as never, next);

@@ -11,9 +11,8 @@ import { ObjectId } from "mongodb";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
-import { getConnInfo } from "@hono/node-server/conninfo";
-import type { Context } from "hono";
 import type { KeyAuth } from "./api-keys.js";
+import { clientIp } from "./client-ip.js";
 import { isDuplicateKey, type OrgDoc, type Store, type UserDoc } from "./db.js";
 import {
   createOrganization,
@@ -48,19 +47,13 @@ export const toUser = (u: UserDoc): User => ({
 // Verified against when the email is unknown so response time doesn't reveal which emails exist.
 const dummyHash = hash("invintel-dummy-password");
 
-/** Best-effort client address for rate limiting. Behind a proxy this is the proxy's address. */
-function clientKey(c: Context) {
-  try {
-    return getConnInfo(c).remote.address ?? "unknown";
-  } catch {
-    return "unknown";
-  }
-}
-
 export function createAuth(store: Store, opts: AuthOptions) {
   const loginLimiter = new FailureLimiter(MAX_FAILURES, FAILURE_WINDOW_MS);
   // Wrong join codes at sign-up are limited per client address. The user doesn't exist yet.
   const joinLimiter = new FailureLimiter(MAX_FAILURES, FAILURE_WINDOW_MS);
+  // Wrong passwords from one address, across any number of emails (guessing passwords for many accounts). More forgiving
+  // than the per-email limit, since several people can share an office address.
+  const loginAddressLimiter = new FailureLimiter(30, FAILURE_WINDOW_MS);
 
   async function startSession(c: Parameters<typeof setCookie>[0], userId: ObjectId) {
     const token = randomBytes(32).toString("base64url");
@@ -113,7 +106,7 @@ export function createAuth(store: Store, opts: AuthOptions) {
     // Check the join code before creating anything so a typo doesn't leave a half-made account.
     let orgToJoin: OrgDoc | null = null;
     if (organization.mode === "join") {
-      const key = clientKey(c);
+      const key = clientIp(c);
       if (joinLimiter.isLocked(key)) {
         return c.json({ error: "Too many wrong join codes. Try again in a few minutes." }, 429);
       }
@@ -158,13 +151,15 @@ export function createAuth(store: Store, opts: AuthOptions) {
 
   routes.post("/login", zValidator("json", loginInputSchema), async (c) => {
     const { email, password } = c.req.valid("json");
-    if (loginLimiter.isLocked(email)) {
+    const from = clientIp(c);
+    if (loginLimiter.isLocked(email) || loginAddressLimiter.isLocked(from)) {
       return c.json({ error: "Too many failed attempts. Try again in a few minutes." }, 429);
     }
     const user = await store.users.findOne({ email });
     const ok = await verify(user?.passwordHash ?? (await dummyHash), password).catch(() => false);
     if (!user || !ok) {
       loginLimiter.fail(email);
+      loginAddressLimiter.fail(from);
       return c.json({ error: "Invalid email or password" }, 401);
     }
     loginLimiter.reset(email);
