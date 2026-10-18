@@ -314,6 +314,21 @@ export interface NcrDoc {
   }[];
 }
 
+export interface DrillDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  at: Date;
+  by: { id: ObjectId; name: string };
+  direction: "forward" | "backward";
+  query: string;
+  tookMs: number;
+  units: number;
+  stillInStock: number;
+  workOrders: number;
+  locations: number;
+  hasInferred: boolean;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -338,6 +353,7 @@ export interface Store {
   alertStates: Collection<AlertStateDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
+  drills: Collection<DrillDoc>;
   close: () => Promise<void>;
 }
 
@@ -375,6 +391,7 @@ export async function connect(
     alertStates: db.collection("alert_states"),
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
+    drills: db.collection("recall_drills"),
     close: () => client.close(),
   };
 
@@ -425,6 +442,11 @@ export async function connect(
     store.ncrs.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.ncrs.createIndex({ orgId: 1, status: 1, heldAt: -1 }),
     store.ncrs.createIndex({ unitId: 1 }, { sparse: true }),
+    store.drills.createIndex({ orgId: 1, at: -1 }),
+    // Trace lookups: lines of one work order, of one unit, and receipts by lot.
+    store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),
+    store.movements.createIndex({ orgId: 1, supplierLot: 1 }, { sparse: true }),
+    store.units.createIndex({ orgId: 1, lot: 1 }, { collation: caseInsensitive }),
     store.suppliers.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
     store.purchaseOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),

@@ -24,6 +24,7 @@ export const ACTION_META: Record<AuditAction, { label: string; className: string
   "approval.rules_changed": { label: "Approval rules changed", className: "bg-secondary text-secondary-foreground" },
   "downtime.started": { label: "Machine down", className: "bg-destructive/10 text-destructive" },
   "downtime.ended": { label: "Machine back up", className: "bg-success-soft text-success" },
+  "traceability.drill": { label: "Mock recall", className: "bg-accent text-accent-foreground" },
   "ncr.opened": { label: "Quality hold", className: "bg-warning-soft text-warning" },
   "ncr.dispositioned": { label: "Hold decision", className: "bg-accent text-accent-foreground" },
   "reasons.changed": { label: "Reason lists", className: "bg-secondary text-secondary-foreground" },
