@@ -231,3 +231,33 @@ describe("isolation and listing", () => {
     expect((await s.get("/quality/ncrs?status=bogus")).status).toBe(400);
   });
 });
+
+describe("held stock and production", () => {
+  it("a held roll can't be loaded onto a machine, and plain stock in the hold area can't be loaded either", async () => {
+    const s = await shop();
+    const mach = (await s.post("/locations", { name: "Press", type: "production" })).body.id as string;
+    const box = (await s.post("/items", { sku: "BOX", name: "Box" })).body.id as string;
+    const wc = (await s.post("/production/work-centers", { name: "Press 1", locationId: mach })).body.id as string;
+    await s.post("/production/boms", { outputItemId: box, inputs: [{ itemId: s.roll, quantity: 1 }, { itemId: s.bolt, quantity: 1 }] });
+    const wo = (await s.post("/production/work-orders", { outputItemId: box, quantity: 10, workCenterId: wc })).body;
+    await s.post(`/production/work-orders/${wo.id}/action`, { action: "release" });
+    const load = (b: object) => s.post(`/production/work-orders/${wo.id}/load`, b);
+
+    const u = await s.newUnit(500);
+    expect((await s.post("/quality/holds", { unitId: u.id, reason: "Damaged" })).status).toBe(201);
+    const held = await load({ itemId: s.roll, unitId: u.id });
+    expect(held.status).toBe(409);
+    expect(held.body.error).toMatch(/hold|quarantine/i);
+    expect((await s.get(`/units/${u.id}`)).body).toMatchObject({ status: "quarantined", locationPath: "Main" });
+
+    await s.post("/quality/holds", { itemId: s.bolt, locationId: s.main, quantity: 20, reason: "Damaged" });
+    const fromHold = await load({ itemId: s.bolt, fromLocationId: await s.holdArea(), quantity: 5 });
+    expect(fromHold.status).toBe(422);
+    expect(await s.stock(s.bolt, await s.holdArea())).toBe(20);
+    expect(await s.stock(s.bolt, mach)).toBe(0);
+    // released stock can be loaded again
+    const ncr = (await s.get("/quality/ncrs?status=open")).body.find((n: { unitCode: string | null }) => n.unitCode);
+    expect((await s.post(`/quality/ncrs/${ncr.id}/dispose`, { type: "use" })).status).toBe(200);
+    expect((await load({ itemId: s.roll, unitId: u.id })).status).toBe(201);
+  });
+});

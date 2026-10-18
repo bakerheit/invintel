@@ -1,4 +1,7 @@
 import type {
+  RecallDrill,
+  TraceQuery,
+  TraceResult,
   DisposeInput,
   HoldInput,
   Ncr,
@@ -78,6 +81,8 @@ import type {
   TransferInput,
   User,
 } from "@invintel/shared";
+
+const traceParams = (q: TraceQuery) => new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
 
 let onUnauthorized: () => void = () => {};
 /** The auth store registers itself here so any 401 drops the user back to the login page. */
@@ -292,4 +297,10 @@ export const api = {
   disposeNcr: (orgId: string, id: string, input: DisposeInput) => request<Ncr>(`/orgs/${orgId}/quality/ncrs/${id}/dispose`, post(input)),
   reasons: (orgId: string) => request<Reasons>(`/orgs/${orgId}/reasons`),
   saveReasons: (orgId: string, input: ReasonsUpdate) => request<Reasons>(`/orgs/${orgId}/reasons`, { method: "PUT", body: JSON.stringify(input) }),
+
+  // Lot genealogy and mock recall.
+  trace: (orgId: string, q: TraceQuery) => request<TraceResult>(`/orgs/${orgId}/traceability/trace?${traceParams(q)}`),
+  traceCsvUrl: (orgId: string, q: TraceQuery) => `/api/orgs/${orgId}/traceability/trace.csv?${traceParams(q)}`,
+  runDrill: (orgId: string, q: TraceQuery) => request<{ drill: RecallDrill; result: TraceResult }>(`/orgs/${orgId}/traceability/drills`, post(q)),
+  drills: (orgId: string) => request<RecallDrill[]>(`/orgs/${orgId}/traceability/drills`),
 };
