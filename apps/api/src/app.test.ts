@@ -449,3 +449,358 @@ describe("items and stock", () => {
     expect((await create({ sku: "Z", name: "z", initialStock: { locationId: main.id, quantity: 0 } })).status).toBe(400);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 0: patch safety, location hierarchy, floor documents, activity ledger
+// ---------------------------------------------------------------------------
+
+describe("patch safety", () => {
+  it("leaves fields you didn't send alone", async () => {
+    const owner = await newOwner();
+    const base = `/api/orgs/${owner.org.id}`;
+    const item = await (
+      await call(`${base}/items`, {
+        body: { sku: "P-1", name: "Keep me", description: "desc", category: "Cat", reorderLevel: 7, unitCostCents: 250 },
+        cookie: owner.cookie,
+      })
+    ).json();
+    const patched = await (
+      await call(`${base}/items/${item.id}`, { method: "PATCH", body: { name: "Renamed" }, cookie: owner.cookie })
+    ).json();
+    expect(patched).toMatchObject({ name: "Renamed", description: "desc", category: "Cat", reorderLevel: 7, unitCostCents: 250 });
+
+    const loc = await (
+      await call(`${base}/locations`, {
+        body: { name: "Roll store", description: "Paper", type: "production", code: "RS-1" },
+        cookie: owner.cookie,
+      })
+    ).json();
+    const locPatched = await (
+      await call(`${base}/locations/${loc.id}`, { method: "PATCH", body: { name: "Roll storage" }, cookie: owner.cookie })
+    ).json();
+    expect(locPatched).toMatchObject({ name: "Roll storage", description: "Paper", type: "production", code: "RS-1" });
+  });
+});
+
+describe("location types and hierarchy", () => {
+  let owner: Account;
+  let base: string;
+  const mk = (body: object, who = owner) => call(`${base}/locations`, { body, cookie: who.cookie });
+  const list = async () => (await call(`${base}/locations`, { cookie: owner.cookie })).json();
+
+  beforeEach(async () => {
+    owner = await newOwner();
+    base = `/api/orgs/${owner.org.id}`;
+  });
+
+  it("nests locations, reports full paths, and defaults the type", async () => {
+    const plant = await (await mk({ name: "Plant 1" })).json();
+    expect(plant).toMatchObject({ type: "storage", parentId: null, code: "", path: "Plant 1" });
+    const rolls = await (await mk({ name: "Roll storage", type: "receiving", parentId: plant.id })).json();
+    expect(rolls).toMatchObject({ type: "receiving", parentId: plant.id, path: "Plant 1 / Roll storage" });
+
+    const paths = (await list()).map((l: { path: string }) => l.path);
+    expect(paths).toEqual(["Main", "Plant 1", "Plant 1 / Roll storage"]);
+  });
+
+  it("treats older documents without type, parent or code as plain storage at the top level", async () => {
+    await store.locations.insertOne({
+      _id: new (await import("mongodb")).ObjectId(),
+      orgId: new (await import("mongodb")).ObjectId(owner.org.id),
+      name: "Legacy",
+      description: "",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const legacy = (await list()).find((l: { name: string }) => l.name === "Legacy");
+    expect(legacy).toMatchObject({ type: "storage", parentId: null, code: "", path: "Legacy" });
+  });
+
+  it("allows the same name under different parents but not twice under one", async () => {
+    const a = await (await mk({ name: "Warehouse A" })).json();
+    const b = await (await mk({ name: "Warehouse B" })).json();
+    expect((await mk({ name: "Bin 1", parentId: a.id })).status).toBe(201);
+    expect((await mk({ name: "Bin 1", parentId: b.id })).status).toBe(201);
+    expect((await mk({ name: "bin 1", parentId: a.id })).status).toBe(409);
+  });
+
+  it("keeps codes unique per org, ignoring case, but lets many locations have none", async () => {
+    expect((await mk({ name: "One", code: "A-01" })).status).toBe(201);
+    expect((await mk({ name: "Two", code: "a-01" })).status).toBe(409);
+    expect((await mk({ name: "Three" })).status).toBe(201);
+    expect((await mk({ name: "Four" })).status).toBe(201);
+    const other = await newOwner("Other");
+    const res = await call(`/api/orgs/${other.org.id}/locations`, { body: { name: "One", code: "A-01" }, cookie: other.cookie });
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects parents from another org, cycles, and self-parenting", async () => {
+    const other = await newOwner("Other");
+    const foreign = (await (await call(`/api/orgs/${other.org.id}/locations`, { cookie: other.cookie })).json())[0];
+    expect((await mk({ name: "Bad", parentId: foreign.id })).status).toBe(400);
+
+    const top = await (await mk({ name: "Top" })).json();
+    const mid = await (await mk({ name: "Mid", parentId: top.id })).json();
+    const move = (id: string, parentId: string) =>
+      call(`${base}/locations/${id}`, { method: "PATCH", body: { parentId }, cookie: owner.cookie });
+    expect((await move(top.id, mid.id)).status).toBe(400); // into its own child
+    expect((await move(top.id, top.id)).status).toBe(400); // into itself
+    expect((await move(mid.id, top.id)).status).toBe(200); // no-op move is fine
+  });
+
+  it("limits nesting depth", async () => {
+    let parentId: string | null = null;
+    for (let depth = 1; depth <= 6; depth++) {
+      const res = await mk({ name: `Level ${depth}`, parentId });
+      expect(res.status).toBe(201);
+      parentId = (await res.json()).id;
+    }
+    expect((await mk({ name: "Level 7", parentId })).status).toBe(400);
+  });
+
+  it("won't delete a location that has locations inside it", async () => {
+    const parent = await (await mk({ name: "Parent" })).json();
+    const child = await (await mk({ name: "Child", parentId: parent.id })).json();
+    expect((await call(`${base}/locations/${parent.id}`, { method: "DELETE", cookie: owner.cookie })).status).toBe(409);
+    expect((await call(`${base}/locations/${child.id}`, { method: "DELETE", cookie: owner.cookie })).status).toBe(204);
+    expect((await call(`${base}/locations/${parent.id}`, { method: "DELETE", cookie: owner.cookie })).status).toBe(204);
+  });
+});
+
+describe("floor documents and lookup", () => {
+  let owner: Account;
+  let base: string;
+  let main: { id: string };
+  let shed: { id: string };
+  let item: { id: string; sku: string };
+
+  const post = (path: string, body: object, who = owner) => call(`${base}${path}`, { body, cookie: who.cookie });
+  const lookup = async (code: string, who = owner, b = base) =>
+    (await call(`${b}/lookup?code=${encodeURIComponent(code)}`, { cookie: who.cookie })).json();
+
+  beforeEach(async () => {
+    owner = await newOwner();
+    base = `/api/orgs/${owner.org.id}`;
+    main = (await (await call(`${base}/locations`, { cookie: owner.cookie })).json())[0];
+    shed = await (await post("/locations", { name: "Shed", code: "SH-1" })).json();
+    item = await (await post("/items", { sku: "Roll-100", name: "Kraft roll" })).json();
+  });
+
+  it("receives stock and returns movement ids for undo", async () => {
+    const res = await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 12, reference: "PO 77" });
+    expect(res.status).toBe(201);
+    const doc = await res.json();
+    expect(doc.item.quantity).toBe(12);
+    expect(doc.movementIds).toHaveLength(1);
+
+    const page = await (await call(`${base}/movements`, { cookie: owner.cookie })).json();
+    expect(page.entries[0]).toMatchObject({ type: "receive", delta: 12, reason: "Received: PO 77", userName: "Ada" });
+  });
+
+  it("rejects receipts for unknown items or other orgs' locations", async () => {
+    const other = await newOwner("Other");
+    const foreign = (await (await call(`/api/orgs/${other.org.id}/locations`, { cookie: other.cookie })).json())[0];
+    expect((await post("/receipts", { itemId: item.id, locationId: foreign.id, quantity: 1 })).status).toBe(404);
+    expect((await post("/receipts", { itemId: "a".repeat(24), locationId: main.id, quantity: 1 })).status).toBe(404);
+    expect((await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 0 })).status).toBe(400);
+  });
+
+  it("moves stock as two linked movements and refuses oversized or pointless moves", async () => {
+    await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 10 });
+    const res = await post("/moves", { itemId: item.id, fromLocationId: main.id, toLocationId: shed.id, quantity: 4 });
+    expect(res.status).toBe(201);
+    const doc = await res.json();
+    expect(doc.movementIds).toHaveLength(2);
+    expect(doc.item.stock).toEqual(
+      expect.arrayContaining([
+        { locationId: main.id, quantity: 6 },
+        { locationId: shed.id, quantity: 4 },
+      ]),
+    );
+    expect((await post("/moves", { itemId: item.id, fromLocationId: main.id, toLocationId: shed.id, quantity: 99 })).status).toBe(422);
+    expect((await post("/moves", { itemId: item.id, fromLocationId: main.id, toLocationId: main.id, quantity: 1 })).status).toBe(400);
+  });
+
+  it("resolves scanned codes to items and locations", async () => {
+    expect(await lookup("roll-100")).toMatchObject({ kind: "item", item: { id: item.id, sku: "Roll-100" } });
+    expect(await lookup("sh-1")).toMatchObject({ kind: "location", location: { id: shed.id, path: "Shed" } });
+    expect(await lookup("Main")).toMatchObject({ kind: "location", location: { id: main.id } });
+    expect(await lookup(item.id)).toMatchObject({ kind: "item" });
+    expect(await lookup(shed.id)).toMatchObject({ kind: "location" });
+    expect(await lookup("nope")).toEqual({ kind: "none" });
+    expect(await lookup("")).toEqual({ kind: "none" });
+  });
+
+  it("matches barcodes that differ only by leading zeros (UPC-A vs EAN-13 vs GTIN-14)", async () => {
+    const upc = await (await post("/items", { sku: "036000291452", name: "Retail thing" })).json();
+    // 12 digits as stored; 13 and 14 digits as different scanners report the same label.
+    for (const scanned of ["036000291452", "0036000291452", "00036000291452"]) {
+      expect(await lookup(scanned)).toMatchObject({ kind: "item", item: { id: upc.id } });
+    }
+    // Not the same number, so no match.
+    expect(await lookup("036000291453")).toEqual({ kind: "none" });
+    // And the other direction: SKU stored as 13 digits, scanned as 12.
+    const ean = await (await post("/items", { sku: "0012345678905", name: "Stored as EAN" })).json();
+    expect(await lookup("012345678905")).toMatchObject({ kind: "item", item: { id: ean.id } });
+    // Short or non-numeric codes never get padded into something else.
+    await post("/items", { sku: "123", name: "Short" });
+    expect(await lookup("0123")).toEqual({ kind: "none" });
+  });
+
+  it("only resolves codes inside your own org", async () => {
+    const other = await newOwner("Other");
+    expect(await lookup("Roll-100", other, `/api/orgs/${other.org.id}`)).toEqual({ kind: "none" });
+    expect(await lookup("SH-1", other, `/api/orgs/${other.org.id}`)).toEqual({ kind: "none" });
+  });
+});
+
+describe("activity ledger", () => {
+  let owner: Account;
+  let member: Account;
+  let base: string;
+  let main: { id: string };
+  let shed: { id: string };
+  let item: { id: string };
+
+  const post = (path: string, body: object, who = owner) => call(`${base}${path}`, { body, cookie: who.cookie });
+  const activity = async (qs = "", who = owner) =>
+    (await call(`${base}/movements${qs}`, { cookie: who.cookie })).json();
+  const reverse = (id: string, who = owner, reason = "") =>
+    call(`${base}/movements/${id}/reverse`, { body: { reason }, cookie: who.cookie });
+  const qty = async (itemId = item.id) => (await (await call(`${base}/items/${itemId}`, { cookie: owner.cookie })).json()).quantity;
+
+  beforeEach(async () => {
+    owner = await newOwner();
+    member = await newMember(owner);
+    base = `/api/orgs/${owner.org.id}`;
+    main = (await (await call(`${base}/locations`, { cookie: owner.cookie })).json())[0];
+    shed = await (await post("/locations", { name: "Shed" })).json();
+    item = await (await post("/items", { sku: "L-1", name: "Ledger thing" })).json();
+  });
+
+  it("lists newest first with item and location details, and derives types for old rows", async () => {
+    await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 5 });
+    await post(`/items/${item.id}/adjust`, { locationId: main.id, delta: -1, reason: "damaged" });
+    // A row written before types existed.
+    await store.movements.insertOne({
+      _id: new (await import("mongodb")).ObjectId(),
+      orgId: new (await import("mongodb")).ObjectId(owner.org.id),
+      itemId: new (await import("mongodb")).ObjectId(item.id),
+      locationId: new (await import("mongodb")).ObjectId(main.id),
+      delta: 1,
+      reason: "Initial stock",
+      userName: "Old Timer",
+      createdAt: new Date(),
+    });
+    const { entries } = await activity();
+    // Newest first: the old row (derived as a receipt), then the adjustment, then the receipt.
+    expect(entries.map((e: { type: string }) => e.type)).toEqual(["receive", "adjust", "receive"]);
+    expect(entries[1]).toMatchObject({ itemSku: "L-1", itemName: "Ledger thing", locationName: "Main", locationPath: "Main", delta: -1, reason: "damaged" });
+  });
+
+  it("filters by type, item, location (including what's inside it), and search text", async () => {
+    const aisle = await (await post("/locations", { name: "Aisle 1", parentId: shed.id })).json();
+    const other = await (await post("/items", { sku: "Z-9", name: "Zebra part" })).json();
+    await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 5 });
+    await post("/receipts", { itemId: other.id, locationId: aisle.id, quantity: 3 });
+    await post(`/items/${item.id}/adjust`, { locationId: main.id, delta: -1 });
+
+    expect((await activity("?type=adjust")).entries).toHaveLength(1);
+    expect((await activity(`?itemId=${other.id}`)).entries).toHaveLength(1);
+    // Filtering by the parent location includes stock in its child.
+    expect((await activity(`?locationId=${shed.id}`)).entries.map((e: { itemSku: string }) => e.itemSku)).toEqual(["Z-9"]);
+    expect((await activity("?q=zebra")).entries).toHaveLength(1);
+    expect((await activity("?q=l-1")).entries).toHaveLength(2);
+    expect((await activity("?q=nothing-matches")).entries).toEqual([]);
+  });
+
+  it("pages through results without overlap", async () => {
+    for (let i = 0; i < 5; i++) await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 1, reference: `r${i}` });
+    const first = await activity("?limit=2");
+    expect(first.entries).toHaveLength(2);
+    expect(first.nextBefore).toBeTruthy();
+    const second = await activity(`?limit=2&before=${first.nextBefore}`);
+    const third = await activity(`?limit=2&before=${second.nextBefore}`);
+    expect(third.nextBefore).toBeUndefined();
+    const ids = [...first.entries, ...second.entries, ...third.entries].map((e: { id: string }) => e.id);
+    expect(new Set(ids).size).toBe(5);
+    expect(third.entries).toHaveLength(1);
+  });
+
+  it("reverses a receipt, records a reversal, and marks the original", async () => {
+    const doc = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 8 })).json();
+    const res = await reverse(doc.movementIds[0], owner, "wrong item");
+    expect(res.status).toBe(200);
+    expect(await qty()).toBe(0);
+
+    const { entries } = await activity();
+    expect(entries[0]).toMatchObject({ type: "reversal", delta: -8, reason: "Reversal: wrong item", canReverse: false });
+    expect(entries[0].reversalOf).toBe(doc.movementIds[0]);
+    expect(entries[1]).toMatchObject({ type: "receive", reversed: true, canReverse: false });
+
+    expect((await reverse(doc.movementIds[0])).status).toBe(409); // already reversed
+    expect((await reverse(entries[0].id)).status).toBe(409); // can't reverse a reversal
+  });
+
+  it("refuses to reverse a receipt whose stock has since been used, and leaves everything as it was", async () => {
+    const doc = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 5 })).json();
+    await post(`/items/${item.id}/adjust`, { locationId: main.id, delta: -3, reason: "used" });
+    const res = await reverse(doc.movementIds[0]);
+    expect(res.status).toBe(422);
+    expect(await qty()).toBe(2);
+    const { entries } = await activity();
+    expect(entries.every((e: { reversed: boolean }) => !e.reversed)).toBe(true);
+    // The claim was released, so it can still be reversed once the stock is back.
+    await post(`/items/${item.id}/adjust`, { locationId: main.id, delta: 3 });
+    expect((await reverse(doc.movementIds[0])).status).toBe(200);
+  });
+
+  it("reverses both halves of a transfer", async () => {
+    await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 10 });
+    const moved = await (await post("/moves", { itemId: item.id, fromLocationId: main.id, toLocationId: shed.id, quantity: 4 })).json();
+    const res = await reverse(moved.movementIds[1]);
+    expect(res.status).toBe(200);
+    expect((await res.json()).movementIds).toHaveLength(2);
+    const after = await (await call(`${base}/items/${item.id}`, { cookie: owner.cookie })).json();
+    expect(after.stock).toEqual([{ locationId: main.id, quantity: 10 }]);
+    expect((await activity("?type=reversal")).entries).toHaveLength(2);
+  });
+
+  it("lets members undo their own recent entries, but not other people's or old ones", async () => {
+    const mine = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 2 }, member)).json();
+    const theirs = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 3 }, owner)).json();
+
+    const asMember = (await activity("", member)).entries as { id: string; canReverse: boolean }[];
+    expect(asMember.find((e) => e.id === mine.movementIds[0])!.canReverse).toBe(true);
+    expect(asMember.find((e) => e.id === theirs.movementIds[0])!.canReverse).toBe(false);
+    expect((await reverse(theirs.movementIds[0], member)).status).toBe(403);
+    expect((await reverse(mine.movementIds[0], member)).status).toBe(200);
+
+    // Past the undo window only an admin can.
+    const old = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 1 }, member)).json();
+    await store.movements.updateOne(
+      { _id: new (await import("mongodb")).ObjectId(old.movementIds[0]) },
+      { $set: { createdAt: new Date(Date.now() - 20 * 60 * 1000) } },
+    );
+    expect((await reverse(old.movementIds[0], member)).status).toBe(403);
+    expect((await reverse(old.movementIds[0], owner)).status).toBe(200);
+  });
+
+  it("only lets one of two simultaneous reversals through", async () => {
+    const doc = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 4 })).json();
+    const results = await Promise.all([reverse(doc.movementIds[0]), reverse(doc.movementIds[0])]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(await qty()).toBe(0);
+    expect(await store.movements.countDocuments({ type: "reversal" })).toBe(1);
+  });
+
+  it("keeps the ledger inside the org", async () => {
+    const doc = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 4 })).json();
+    const other = await newOwner("Other");
+    const otherBase = `/api/orgs/${other.org.id}`;
+    expect((await (await call(`${otherBase}/movements`, { cookie: other.cookie })).json()).entries).toEqual([]);
+    const res = await call(`${otherBase}/movements/${doc.movementIds[0]}/reverse`, { body: {}, cookie: other.cookie });
+    expect(res.status).toBe(404);
+    expect(await qty()).toBe(4);
+  });
+});

@@ -1,4 +1,5 @@
 import type {
+  ActivityPage,
   AdjustmentInput,
   Item,
   ItemCreate,
@@ -7,10 +8,15 @@ import type {
   LocationInput,
   LocationUpdate,
   LoginInput,
+  LookupResult,
+  MoveInput,
+  MovementType,
   OrganizationInput,
   OrgMember,
   OrgSummary,
   RegisterInput,
+  PostedDocument,
+  ReceiveInput,
   RegisterResult,
   StockMovement,
   TransferInput,
@@ -93,4 +99,19 @@ export const api = {
     request<Item>(`/orgs/${orgId}/items/${id}/transfer`, post(input)),
   listMovements: (orgId: string, id: string) =>
     request<StockMovement[]>(`/orgs/${orgId}/items/${id}/movements`),
+
+  activity: (orgId: string, params: { itemId?: string; locationId?: string; type?: MovementType; q?: string; before?: string }) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
+    return request<ActivityPage>(`/orgs/${orgId}/movements?${qs}`);
+  },
+  reverseMovement: (orgId: string, id: string, input: { reason?: string }) =>
+    request<{ reversedIds: string[]; movementIds: string[] }>(`/orgs/${orgId}/movements/${id}/reverse`, post(input)),
+
+  lookup: (orgId: string, code: string) =>
+    request<LookupResult>(`/orgs/${orgId}/lookup?code=${encodeURIComponent(code)}`),
+  receive: (orgId: string, input: Partial<ReceiveInput> & Pick<ReceiveInput, "itemId" | "locationId" | "quantity">) =>
+    request<PostedDocument>(`/orgs/${orgId}/receipts`, post(input)),
+  move: (orgId: string, input: Partial<MoveInput> & Pick<MoveInput, "itemId" | "fromLocationId" | "toLocationId" | "quantity">) =>
+    request<PostedDocument>(`/orgs/${orgId}/moves`, post(input)),
 };

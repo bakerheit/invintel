@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type Db, type ObjectId } from "mongodb";
-import type { OrgRole } from "@invintel/shared";
+import type { LocationType, MovementType, OrgRole } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -37,6 +37,10 @@ export interface LocationDoc {
   orgId: ObjectId;
   name: string;
   description: string;
+  /** Older documents predate these three; readers must default them. */
+  type?: LocationType;
+  parentId?: ObjectId | null;
+  code?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,14 +71,24 @@ export interface StockDoc {
 export interface MovementDoc {
   _id: ObjectId;
   orgId: ObjectId;
+  /** Absent on movements recorded before types existed. Use movementType() to read. */
+  type?: MovementType;
   itemId: ObjectId;
   locationId: ObjectId;
   delta: number;
   reason: string;
+  userId?: ObjectId;
   userName: string;
   transferId?: ObjectId;
+  /** On a reversal: the movement it undoes. */
+  reversalOf?: ObjectId;
+  /** On an original: the reversal that undid it. */
+  reversedBy?: ObjectId;
   createdAt: Date;
 }
+
+export const movementType = (m: MovementDoc): MovementType =>
+  m.type ?? (m.transferId ? "transfer" : m.reason === "Initial stock" ? "receive" : "adjust");
 
 export interface Store {
   client: MongoClient;
@@ -116,6 +130,8 @@ export async function connect(
 
   // Before organizations existed SKUs were unique across the whole database.
   await store.items.dropIndex("sku_1").catch(() => {});
+  // Location names used to be unique per org; with a hierarchy they're unique per parent.
+  await store.locations.dropIndex("orgId_1_name_1").catch(() => {});
 
   await Promise.all([
     store.users.createIndex({ email: 1 }, { unique: true }),
@@ -123,14 +139,28 @@ export async function connect(
     store.orgs.createIndex({ joinCode: 1 }, { unique: true }),
     store.memberships.createIndex({ orgId: 1, userId: 1 }, { unique: true }),
     store.memberships.createIndex({ userId: 1 }),
-    store.locations.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.locations.createIndex({ orgId: 1, parentId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    // Codes are optional ("" means none), so only non-empty ones must be unique.
+    store.locations.createIndex(
+      { orgId: 1, code: 1 },
+      { unique: true, collation: caseInsensitive, partialFilterExpression: { code: { $gt: "" } } },
+    ),
     store.items.createIndex({ orgId: 1, sku: 1 }, { unique: true, collation: caseInsensitive }),
     store.stock.createIndex({ itemId: 1, locationId: 1 }, { unique: true }),
     store.stock.createIndex({ orgId: 1, locationId: 1 }),
     store.movements.createIndex({ itemId: 1, createdAt: -1 }),
+    store.movements.createIndex({ orgId: 1, _id: -1 }),
+    store.movements.createIndex({ transferId: 1 }, { sparse: true }),
   ]);
   return store;
 }
 
 export const isDuplicateKey = (e: unknown) =>
   typeof e === "object" && e !== null && "code" in e && e.code === 11000;
+
+/** Which unique field a duplicate-key error was about, e.g. "code" or "name". */
+export const duplicateField = (e: unknown): string | undefined => {
+  if (typeof e !== "object" || e === null) return undefined;
+  const pattern = (e as { keyPattern?: Record<string, unknown> }).keyPattern;
+  return pattern ? Object.keys(pattern).find((k) => k !== "orgId" && k !== "parentId") : undefined;
+};

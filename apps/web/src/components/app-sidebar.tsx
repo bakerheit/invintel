@@ -1,5 +1,5 @@
 import type { OrgSummary } from "@invintel/shared";
-import { Check, ChevronsUpDown, LogOut, MapPin, Monitor, Moon, Package, Plus, Settings, Sun } from "lucide-react";
+import { Check, ChevronsUpDown, History, LogOut, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -41,6 +41,7 @@ const initials = (name: string) =>
 
 export const navItems = (orgId: string) => [
   { to: `/o/${orgId}`, end: true, label: "Inventory", icon: Package },
+  { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History },
   { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin },
   { to: `/o/${orgId}/settings`, end: false, label: "Settings", icon: Settings },
 ];
@@ -180,6 +181,19 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Tools</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton render={<Link to={`/o/${org.id}/floor`} onClick={() => setOpenMobile(false)} />}>
+                  <ScanLine />
+                  <span>Floor mode</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

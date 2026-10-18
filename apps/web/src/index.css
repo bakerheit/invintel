@@ -141,3 +141,8 @@
     font-feature-settings: "cv11", "ss01";
     }
 }
+/* The line that sweeps across the camera viewfinder. */
+@keyframes scan {
+  0%, 100% { top: 6%; }
+  50% { top: calc(94% - 2px); }
+}

@@ -1,4 +1,4 @@
-import type { Item, Location } from "@invintel/shared";
+import type { ActivityEntry, Item, Location } from "@invintel/shared";
 import { create } from "zustand";
 
 type Dialog =
@@ -7,8 +7,9 @@ type Dialog =
   | { kind: "edit-item"; item: Item }
   | { kind: "adjust"; item: Item; locationId?: string }
   | { kind: "transfer"; item: Item }
-  | { kind: "create-location" }
-  | { kind: "edit-location"; location: Location };
+  | { kind: "create-location"; parentId?: string }
+  | { kind: "edit-location"; location: Location }
+  | { kind: "reverse"; entry: ActivityEntry };
 
 interface UiState {
   search: string;

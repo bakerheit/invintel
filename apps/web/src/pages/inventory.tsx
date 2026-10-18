@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatCents } from "@/lib/format";
+import { withDescendants } from "@/lib/locations";
 import { invalidateOrg, orgKey, useCurrentOrg, useLocations } from "@/lib/org";
 import { needsAttention } from "@/lib/stock";
 import { useUi } from "@/stores/ui";
@@ -34,6 +35,8 @@ export default function InventoryPage() {
   // The filter lives in the URL so a location's "View stock" link is shareable.
   const requested = params.get("location");
   const locationId = locations.find((l) => l.id === requested)?.id;
+  // Picking an area includes everything stored inside it.
+  const locationIds = locationId ? withDescendants(locations, locationId) : undefined;
 
   const remove = useMutation({
     mutationFn: (item: Item) => api.deleteItem(orgId, item.id),
@@ -131,7 +134,7 @@ export default function InventoryPage() {
             <Select
               value={locationId ?? ALL}
               onValueChange={(v) => setParams(!v || v === ALL ? {} : { location: v }, { replace: true })}
-              items={[{ value: ALL, label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: l.name }))]}
+              items={[{ value: ALL, label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: l.path }))]}
             >
               <SelectTrigger className="w-full sm:w-48" aria-label="Location filter">
                 <SelectValue />
@@ -139,7 +142,7 @@ export default function InventoryPage() {
               <SelectContent>
                 <SelectItem value={ALL}>All locations</SelectItem>
                 {locations.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                  <SelectItem key={l.id} value={l.id}>{l.path}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -149,7 +152,7 @@ export default function InventoryPage() {
               </Button>
             )}
           </div>
-          <ItemsTable items={all} locations={locations} locationId={locationId} onDelete={onDelete} />
+          <ItemsTable items={all} locations={locations} locationId={locationId} locationIds={locationIds} onDelete={onDelete} />
         </div>
       )}
       <Dialogs />

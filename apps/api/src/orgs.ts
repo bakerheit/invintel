@@ -7,6 +7,8 @@ import {
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import type { Store } from "./db.js";
+import { createActivityRoutes } from "./activity.js";
+import { createFloorRoutes } from "./floor.js";
 import { createItemRoutes } from "./items.js";
 import { createLocationRoutes } from "./locations.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
@@ -95,6 +97,8 @@ export function createOrgRoutes(store: Store) {
   });
 
   scoped.route("/locations", createLocationRoutes(store));
+  scoped.route("/movements", createActivityRoutes(store));
+  scoped.route("/", createFloorRoutes(store));
   scoped.route("/items", createItemRoutes(store));
 
   orgs.route("/:orgId", scoped);

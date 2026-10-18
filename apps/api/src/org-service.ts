@@ -77,6 +77,9 @@ export async function createOrganization(store: Store, userId: ObjectId, name: s
     orgId: org._id,
     name: DEFAULT_LOCATION_NAME,
     description: "",
+    type: "storage",
+    parentId: null,
+    code: "",
     createdAt: now,
     updatedAt: now,
   });

@@ -8,8 +8,9 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, MoreHorizontal, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, History, MoreHorizontal, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCents } from "@/lib/format";
+import { useCurrentOrg } from "@/lib/org";
 import { needsAttention, stockStatus } from "@/lib/stock";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/stores/ui";
@@ -30,6 +32,8 @@ interface Props {
   locations: Location[];
   /** When set, only items with stock there are shown, with quantities for that location. */
   locationId?: string;
+  /** The location plus everything inside it. Defaults to just `locationId`. */
+  locationIds?: string[];
   onDelete: (item: Item) => void;
   onFilteredCount?: (count: number) => void;
 }
@@ -38,8 +42,8 @@ interface Props {
 type Meta = { className?: string; align?: "right" };
 const metaOf = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta ?? {}) as Meta;
 
-const stockAt = (item: Item, locationId: string) =>
-  item.stock.find((s) => s.locationId === locationId)?.quantity ?? 0;
+const stockIn = (item: Item, ids: Set<string>) =>
+  item.stock.reduce((sum, s) => (ids.has(s.locationId) ? sum + s.quantity : sum), 0);
 
 function SortIcon({ state }: { state: false | "asc" | "desc" }) {
   if (state === "asc") return <ArrowUp className="size-3.5" />;
@@ -47,23 +51,28 @@ function SortIcon({ state }: { state: false | "asc" | "desc" }) {
   return <ArrowUpDown className="size-3.5 opacity-40" />;
 }
 
-export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
+export function ItemsTable({ items, locations, locationId, locationIds, onDelete }: Props) {
   const { search, lowStockOnly, openDialog } = useUi();
+  const org = useCurrentOrg();
+  const navigate = useNavigate();
   const [sorting, setSorting] = useState<SortingState>([]);
+
+  const idSet = useMemo(() => new Set(locationIds ?? (locationId ? [locationId] : [])), [locationIds, locationId]);
+  const filtering = idSet.size > 0;
 
   const locationNames = useMemo(() => new Map(locations.map((l) => [l.id, l.name])), [locations]);
 
   const data = useMemo(
     () =>
       items.filter((i) => {
-        if (locationId && stockAt(i, locationId) === 0) return false;
+        if (filtering && stockIn(i, idSet) === 0) return false;
         if (lowStockOnly && !needsAttention(i)) return false;
         return true;
       }),
     // locationNames is a dependency only to hand the table a fresh array when locations load:
     // it caches each row's accessor values per data array, and "Where" reads the names.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, locationId, lowStockOnly, locationNames],
+    [items, filtering, idSet, lowStockOnly, locationNames],
   );
 
   const columns = useMemo<ColumnDef<Item>[]>(
@@ -88,8 +97,8 @@ export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
       },
       {
         id: "quantity",
-        header: locationId ? "Qty here" : "Qty",
-        accessorFn: (i) => (locationId ? stockAt(i, locationId) : i.quantity),
+        header: filtering ? "Qty here" : "Qty",
+        accessorFn: (i) => (filtering ? stockIn(i, idSet) : i.quantity),
         meta: { align: "right" } satisfies Meta,
         cell: ({ getValue }) => <span className="font-medium tabular-nums">{getValue<number>().toLocaleString()}</span>,
       },
@@ -99,7 +108,7 @@ export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
         accessorFn: (i) => stockStatus(i),
         cell: ({ row }) => <StatusBadge status={stockStatus(row.original)} />,
       },
-      ...(locationId
+      ...(filtering
         ? []
         : [
             {
@@ -137,7 +146,7 @@ export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
       {
         id: "value",
         header: "Value",
-        accessorFn: (i) => (locationId ? stockAt(i, locationId) : i.quantity) * i.unitCostCents,
+        accessorFn: (i) => (filtering ? stockIn(i, idSet) : i.quantity) * i.unitCostCents,
         meta: { align: "right", className: "hidden md:table-cell" } satisfies Meta,
         cell: ({ getValue }) => <span className="tabular-nums">{formatCents(getValue<number>())}</span>,
       },
@@ -163,6 +172,9 @@ export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
               <DropdownMenuItem onClick={() => openDialog({ kind: "edit-item", item: row.original })}>
                 <Pencil /> Edit details
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate(`/o/${org.id}/activity?item=${row.original.id}`)}>
+                <History /> History
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={() => onDelete(row.original)}>
                 <Trash2 /> Delete
@@ -172,7 +184,7 @@ export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
         ),
       },
     ],
-    [openDialog, onDelete, locationId, locationNames],
+    [openDialog, onDelete, locationId, filtering, idSet, locationNames, org.id, navigate],
   );
 
   const table = useReactTable({
@@ -233,7 +245,7 @@ export function ItemsTable({ items, locations, locationId, onDelete }: Props) {
             {!rows.length && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                  {locationId ? "Nothing stored here matches." : "No items match."}
+                  {filtering ? "Nothing stored here matches." : "No items match."}
                 </TableCell>
               </TableRow>
             )}

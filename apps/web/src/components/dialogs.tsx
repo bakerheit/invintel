@@ -1,4 +1,4 @@
-import type { Item, Location } from "@invintel/shared";
+import { LOCATION_TYPES, type ActivityEntry, type Item, type Location, type LocationType } from "@invintel/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { type FormEvent, type ReactNode, useState } from "react";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { centsToDollars, dollarsToCents } from "@/lib/format";
+import { LOCATION_TYPE_META, withDescendants } from "@/lib/locations";
 import { invalidateOrg, useCurrentOrg, useLocations } from "@/lib/org";
 import { useUi } from "@/stores/ui";
 
@@ -28,6 +29,10 @@ function Field({ label, name, defaultValue, type = "text", required, min, step }
     </div>
   );
 }
+
+/** Option list for LocationSelect: shows the full path so nested places are unambiguous. */
+const locationOptions = (locations: Location[], hint?: (id: string) => string) =>
+  locations.map((l) => ({ id: l.id, name: l.path, hint: hint?.(l.id) }));
 
 function LocationSelect({ label, value, onChange, locations }: {
   label: string;
@@ -134,7 +139,7 @@ function ItemForm({ item, locations }: { item?: Item; locations: Location[] }) {
       {!item && (
         <div className="grid grid-cols-2 gap-4">
           <Field label="Starting quantity" name="quantity" type="number" min={0} defaultValue={0} />
-          <LocationSelect label="Stored at" value={locationId} onChange={setLocationId} locations={locations} />
+          <LocationSelect label="Stored at" value={locationId} onChange={setLocationId} locations={locationOptions(locations)} />
         </div>
       )}
     </FormShell>
@@ -165,7 +170,7 @@ function AdjustForm({ item, locations, locationId: preferred }: { item: Item; lo
         label="Location"
         value={locationId}
         onChange={setLocationId}
-        locations={locations.map((l) => ({ id: l.id, name: l.name, hint: `${held(l.id)} here` }))}
+        locations={locationOptions(locations, (id) => `${held(id)} here`)}
       />
       <Field label="Change" name="delta" type="number" defaultValue={1} required />
       <Field label="Reason" name="reason" />
@@ -199,13 +204,13 @@ function TransferForm({ item, locations }: { item: Item; locations: Location[] }
           label="From"
           value={from}
           onChange={setFrom}
-          locations={sources.map((l) => ({ id: l.id, name: l.name, hint: `${held(l.id)} here` }))}
+          locations={locationOptions(sources, (id) => `${held(id)} here`)}
         />
         <LocationSelect
           label="To"
           value={to}
           onChange={setTo}
-          locations={locations.filter((l) => l.id !== from)}
+          locations={locationOptions(locations.filter((l) => l.id !== from))}
         />
       </div>
       <Field label="Quantity" name="quantity" type="number" min={1} defaultValue={1} required />
@@ -214,16 +219,101 @@ function TransferForm({ item, locations }: { item: Item; locations: Location[] }
   );
 }
 
-function LocationForm({ location }: { location?: Location }) {
+const NO_PARENT = "__none__";
+
+function LocationForm({ location, parentId: presetParent, locations }: { location?: Location; parentId?: string; locations: Location[] }) {
   const { id: orgId } = useCurrentOrg();
+  const [type, setType] = useState<LocationType>(location?.type ?? "storage");
+  const [parentId, setParentId] = useState<string>(location?.parentId ?? presetParent ?? NO_PARENT);
+  // A location can't be moved inside itself or anything in it.
+  const blocked = new Set(location ? withDescendants(locations, location.id) : []);
+  const parents = locations.filter((l) => !blocked.has(l.id));
+
   const submit = useSubmit((form) => {
-    const input = { name: text(form, "name"), description: text(form, "description") };
+    const input = {
+      name: text(form, "name"),
+      description: text(form, "description"),
+      code: text(form, "code"),
+      type,
+      parentId: parentId === NO_PARENT ? null : parentId,
+    };
     return location ? api.updateLocation(orgId, location.id, input) : api.createLocation(orgId, input);
   }, location ? "Location updated" : "Location created");
+
   return (
     <FormShell {...submit} submitLabel={location ? "Save" : "Create"}>
-      <Field label="Name" name="name" defaultValue={location?.name} required />
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Name" name="name" defaultValue={location?.name} required />
+        <Field label="Code (for scanning)" name="code" defaultValue={location?.code} />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-1.5">
+          <Label>Type</Label>
+          <Select
+            value={type}
+            onValueChange={(v) => v && setType(v as LocationType)}
+            items={LOCATION_TYPES.map((t) => ({ value: t, label: LOCATION_TYPE_META[t].label }))}
+          >
+            <SelectTrigger aria-label="Type" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LOCATION_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>{LOCATION_TYPE_META[t].label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label>Inside</Label>
+          <Select
+            value={parentId}
+            onValueChange={(v) => v && setParentId(v)}
+            items={[{ value: NO_PARENT, label: "Top level" }, ...parents.map((l) => ({ value: l.id, label: l.path }))]}
+          >
+            <SelectTrigger aria-label="Inside" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_PARENT}>Top level</SelectItem>
+              {parents.map((l) => (
+                <SelectItem key={l.id} value={l.id}>{l.path}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="-mt-2 text-xs text-muted-foreground">{LOCATION_TYPE_META[type].hint}.</p>
       <Field label="Description" name="description" defaultValue={location?.description} />
+    </FormShell>
+  );
+}
+
+function ReverseForm({ entry }: { entry: ActivityEntry }) {
+  const { id: orgId } = useCurrentOrg();
+  const submit = useSubmit(
+    (form) => api.reverseMovement(orgId, entry.id, { reason: text(form, "reason") }),
+    "Entry reversed",
+  );
+  const what =
+    entry.type === "transfer"
+      ? "Both halves of this transfer will be undone."
+      : entry.delta > 0
+        ? `${entry.delta} will be taken back out of ${entry.locationPath}.`
+        : `${-entry.delta} will be put back into ${entry.locationPath}.`;
+  return (
+    <FormShell {...submit} submitLabel="Reverse entry">
+      <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+        <p className="font-medium">{entry.itemName}</p>
+        <p className="text-muted-foreground">
+          {entry.delta > 0 ? "+" : ""}
+          {entry.delta} at {entry.locationPath}. {what}
+        </p>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        The original entry stays in the history. A matching reversal is added next to it.
+      </p>
+      <Field label="Why? (optional)" name="reason" />
     </FormShell>
   );
 }
@@ -235,6 +325,7 @@ const TITLES = {
   transfer: "Move stock",
   "create-location": "New location",
   "edit-location": "Edit location",
+  reverse: "Reverse entry",
 } as const;
 
 export function Dialogs() {
@@ -256,8 +347,11 @@ export function Dialogs() {
               <AdjustForm key={dialog.item.id} item={dialog.item} locations={locations} locationId={dialog.locationId} />
             )}
             {dialog.kind === "transfer" && <TransferForm key={dialog.item.id} item={dialog.item} locations={locations} />}
-            {dialog.kind === "create-location" && <LocationForm />}
-            {dialog.kind === "edit-location" && <LocationForm key={dialog.location.id} location={dialog.location} />}
+            {dialog.kind === "create-location" && <LocationForm parentId={dialog.parentId} locations={locations} />}
+            {dialog.kind === "edit-location" && (
+              <LocationForm key={dialog.location.id} location={dialog.location} locations={locations} />
+            )}
+            {dialog.kind === "reverse" && <ReverseForm key={dialog.entry.id} entry={dialog.entry} />}
           </>
         )}
       </DialogContent>
