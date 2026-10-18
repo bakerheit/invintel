@@ -67,7 +67,7 @@ const inkB = await item("INK-BLK", "Flexo ink, black, 5 gal", "Ink", 6, 95);
 const inkW = await item("INK-WHT", "Flexo ink, white, 5 gal", "Ink", 6, 92);
 const strap = await item("STRAP-PP", "Polypropylene strapping coil", "Supplies", 20, 31.5);
 const pallet = await item("PAL-4840", "Pallet 48x40", "Supplies", 100, 9);
-const rsc = await item("RSC-1296", "RSC box 12x9x6 (bundle of 25)", "Finished goods", 50, 21, ["0850012345674"]);
+const rsc = await item("RSC-1296", "RSC box 12x9x6 (bundle of 25)", "Finished goods", 50, 21, ["0850012345671"]);
 const rsc2 = await item("RSC-181212", "RSC box 18x12x12 (bundle of 25)", "Finished goods", 40, 34);
 
 const receive = (itemId: string, locationId: string, quantity: number, reference: string) =>
