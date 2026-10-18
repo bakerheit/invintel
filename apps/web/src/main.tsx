@@ -12,6 +12,7 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { queryClient } from "./lib/query";
 import { ThemeProvider } from "./lib/theme";
 import ActivityPage from "./pages/activity";
+import AuditPage from "./pages/audit";
 import FloorHome from "./pages/floor/home";
 import LookupPage from "./pages/floor/lookup";
 import MovePage from "./pages/floor/move";
@@ -65,6 +66,7 @@ createRoot(document.getElementById("root")!).render(
             <Route element={<AppShell />}>
               <Route index element={<InventoryPage />} />
               <Route path="activity" element={<ActivityPage />} />
+              <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>

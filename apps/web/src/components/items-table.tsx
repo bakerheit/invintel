@@ -8,7 +8,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, History, MoreHorizontal, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, History, MoreHorizontal, Pencil, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { StatusBadge } from "@/components/status-badge";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCents } from "@/lib/format";
-import { useCurrentOrg } from "@/lib/org";
+import { isAdmin, useCurrentOrg } from "@/lib/org";
 import { needsAttention, stockStatus } from "@/lib/stock";
 import { cn } from "@/lib/utils";
 import { useUi } from "@/stores/ui";
@@ -173,8 +173,13 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
                 <Pencil /> Edit details
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate(`/o/${org.id}/activity?item=${row.original.id}`)}>
-                <History /> History
+                <History /> Stock history
               </DropdownMenuItem>
+              {isAdmin(org.role) && (
+                <DropdownMenuItem onClick={() => navigate(`/o/${org.id}/audit?entityId=${row.original.id}`)}>
+                  <ShieldCheck /> Audit trail
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={() => onDelete(row.original)}>
                 <Trash2 /> Delete
@@ -184,7 +189,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         ),
       },
     ],
-    [openDialog, onDelete, locationId, filtering, idSet, locationNames, org.id, navigate],
+    [openDialog, onDelete, locationId, filtering, idSet, locationNames, org.id, org.role, navigate],
   );
 
   const table = useReactTable({

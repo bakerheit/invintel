@@ -1,5 +1,7 @@
 import type {
   ActivityPage,
+  AuditPage,
+  AuditVerification,
   AdjustmentInput,
   Item,
   ItemCreate,
@@ -107,6 +109,13 @@ export const api = {
   },
   reverseMovement: (orgId: string, id: string, input: { reason?: string }) =>
     request<{ reversedIds: string[]; movementIds: string[] }>(`/orgs/${orgId}/movements/${id}/reverse`, post(input)),
+
+  auditLog: (orgId: string, params: { entityId?: string; action?: string; actorId?: string; q?: string; before?: number }) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") qs.set(k, String(v));
+    return request<AuditPage>(`/orgs/${orgId}/audit?${qs}`);
+  },
+  verifyAudit: (orgId: string) => request<AuditVerification>(`/orgs/${orgId}/audit/verify`),
 
   lookup: (orgId: string, code: string) =>
     request<LookupResult>(`/orgs/${orgId}/lookup?code=${encodeURIComponent(code)}`),

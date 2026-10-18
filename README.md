@@ -47,6 +47,25 @@ Open http://localhost:5173 and create an account. At sign-up you either **create
 - **Floor mode** (`/o/:orgId/floor`, also in the sidebar) is a full-screen, big-target UI for the plant floor: **Receive**, **Move**, and **Look up**. A scanner types the code and presses Enter; the scan field stays focused and suppresses the on-screen keyboard unless you tap the keyboard button. Items resolve by SKU, locations by code or name. Each flow ends with a result screen and a one-tap **Undo**.
 - To use real scanners, print SKUs and location codes as Code 128 (or QR) labels. Most handheld scanners work as a keyboard ("wedge") with Enter as the suffix.
 
+### Audit log
+
+Every change is recorded in a single **audit log** (admins and owners only, under "Audit log" in the sidebar): who did it, when, a one-line summary, and for edits the exact before and after of each field.
+
+What's recorded: items (created, edited, deleted), locations (created, edited, deleted), the organization (created, renamed, join code changed), members joining, and every stock receipt, adjustment, move and reversal (linked to its ledger entries). Join codes and passwords are never written to the log.
+
+How it's protected:
+
+- **Append-only.** There is no endpoint that edits or deletes an audit event.
+- **Hash-chained.** Each event stores a SHA-256 over its own contents plus the hash of the event before it. Edit or remove an event and every hash after it stops matching. **Verify integrity** on the audit page (or `GET /api/orgs/:orgId/audit/verify`) walks the chain and tells you where it first breaks. It also counts ledger entries that no audit event refers to.
+- **History outlives deletes.** Deleting an item writes any remaining stock off through the ledger and keeps every movement; deleted items and locations keep their names in Activity, taken from the audit snapshot. Entries for a deleted item can't be reversed.
+- **Exportable.** *Export CSV* streams the log (honouring the current filters) with the hashes, for auditors.
+
+Limits, so nobody over-trusts it:
+
+- It is **tamper-evident, not tamper-proof**. Someone with write access to the database could rewrite the whole chain consistently, and deleting only the *newest* events can't be seen from inside the chain. The verify panel shows the head hash: record it somewhere outside the system (an email, a document, a ticket) and compare later.
+- Audit events are written right after the change they describe, not in the same database transaction. If an audit write ever fails, the full event is logged to the server console for manual recovery and the user's action still succeeds. Closing that gap means running MongoDB as a replica set and wrapping each change in a transaction.
+- Sign-ins, failed logins and password changes are not in the log yet, and there is no UI yet for changing a member's role.
+
 ### Barcode scanning
 
 Every scan field in Floor mode accepts three kinds of input, and they all behave the same:

@@ -138,10 +138,10 @@ export function createAuth(store: Store, opts: AuthOptions) {
     let result: RegisterResult;
     try {
       if (organization.mode === "create") {
-        const org = await createOrganization(store, user._id, organization.name);
+        const org = await createOrganization(store, user._id, user.name, organization.name);
         result = { user: toUser(user), organization: await summarizeOrg(store, org, "owner") };
       } else {
-        const joined = await joinOrganization(store, user._id, orgToJoin!);
+        const joined = await joinOrganization(store, user._id, user.name, orgToJoin!, "signed up with the join code");
         result = { user: toUser(user), organization: await summarizeOrg(store, orgToJoin!, joined.role) };
       }
     } catch (e) {

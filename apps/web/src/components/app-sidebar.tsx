@@ -1,5 +1,5 @@
 import type { OrgSummary } from "@invintel/shared";
-import { Check, ChevronsUpDown, History, LogOut, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, Sun } from "lucide-react";
+import { Check, ChevronsUpDown, History, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -40,10 +40,11 @@ const initials = (name: string) =>
     .join("") || "?";
 
 export const navItems = (orgId: string) => [
-  { to: `/o/${orgId}`, end: true, label: "Inventory", icon: Package },
-  { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History },
-  { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin },
-  { to: `/o/${orgId}/settings`, end: false, label: "Settings", icon: Settings },
+  { to: `/o/${orgId}`, end: true, label: "Inventory", icon: Package, adminOnly: false },
+  { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History, adminOnly: false },
+  { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin, adminOnly: false },
+  { to: `/o/${orgId}/audit`, end: false, label: "Audit log", icon: ShieldCheck, adminOnly: true },
+  { to: `/o/${orgId}/settings`, end: false, label: "Settings", icon: Settings, adminOnly: false },
 ];
 
 function OrgSwitcher({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] }) {
@@ -170,7 +171,7 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems(org.id).map(({ to, end, label, icon: Icon }) => (
+              {navItems(org.id).filter((n) => !n.adminOnly || org.role !== "member").map(({ to, end, label, icon: Icon }) => (
                 <SidebarMenuItem key={to}>
                   <SidebarMenuButton
                     isActive={end ? pathname === to : pathname.startsWith(to)}

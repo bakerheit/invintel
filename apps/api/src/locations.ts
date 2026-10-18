@@ -8,6 +8,7 @@ import {
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
+import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.js";
 import { duplicateField, isDuplicateKey, type LocationDoc, type Store } from "./db.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 
@@ -142,7 +143,16 @@ export function createLocationRoutes(store: Store) {
       throw e;
     }
     const withNew = indexLocations([...docs, doc]);
-    return c.json(toLocation(doc, withNew.pathOf(doc._id.toHexString())), 201);
+    const path = withNew.pathOf(doc._id.toHexString());
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "location.created",
+      entity: { type: "location", id: doc._id.toHexString(), label: path },
+      summary: `Created location ${path}`,
+      snapshot: { name: doc.name, type: doc.type, code: doc.code, description: doc.description, parent: input.parentId ? index.pathOf(input.parentId) : "" },
+    });
+    return c.json(toLocation(doc, path), 201);
   });
 
   r.patch(
@@ -185,6 +195,36 @@ export function createLocationRoutes(store: Store) {
         );
         if (!doc) return c.json({ error: "Location not found" }, 404);
         const fresh = indexLocations(docs.map((d) => (d._id.equals(doc._id) ? doc : d)));
+
+        // Compare as people see it: the parent is shown by its path, not its id.
+        const was = index.byId.get(id)!;
+        const parentLabel = (parentId: string | null | undefined, ix: typeof index) => (parentId ? ix.pathOf(parentId) : "");
+        const changes = diffFields(
+          {
+            name: was.name,
+            description: was.description,
+            type: was.type ?? "storage",
+            code: was.code ?? "",
+            parent: parentLabel(was.parentId?.toHexString(), index),
+          },
+          {
+            name: set.name,
+            description: set.description,
+            type: set.type,
+            code: set.code,
+            parent: patch.parentId !== undefined ? parentLabel(patch.parentId, fresh) : undefined,
+          },
+        );
+        if (changes.length) {
+          await recordAudit(store, {
+            orgId,
+            actor: auditActor(c.get("user")),
+            action: "location.updated",
+            entity: { type: "location", id, label: fresh.pathOf(id) },
+            summary: `${summarizeChanges(changes)} (${fresh.pathOf(id)})`,
+            changes,
+          });
+        }
         const totals = await ownTotals(store, orgId, doc._id);
         const t = totals.get(id);
         return c.json(toLocation(doc, fresh.pathOf(id), t?.skuCount, t?.unitCount));
@@ -207,8 +247,19 @@ export function createLocationRoutes(store: Store) {
     if (await store.stock.findOne({ orgId, locationId: _id, quantity: { $gt: 0 } }, { projection: { _id: 1 } })) {
       return c.json({ error: "Move or remove the stock in this location before deleting it" }, 409);
     }
+    const docs = await loadLocations(store, orgId);
+    const index = indexLocations(docs);
+    const was = docs.find((d) => d._id.equals(_id))!;
     await store.locations.deleteOne({ _id, orgId });
     await store.stock.deleteMany({ orgId, locationId: _id });
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "location.deleted",
+      entity: { type: "location", id: _id.toHexString(), label: index.pathOf(_id.toHexString()) },
+      summary: `Deleted location ${index.pathOf(_id.toHexString())}`,
+      snapshot: { name: was.name, path: index.pathOf(_id.toHexString()), type: was.type ?? "storage", code: was.code ?? "", description: was.description },
+    });
     return c.body(null, 204);
   });
 

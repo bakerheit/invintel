@@ -11,10 +11,11 @@ import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { duplicateField, isDuplicateKey, movementType, type ItemDoc, type MovementDoc, type Store } from "./db.js";
+import { auditActor, diffFields, itemEntity, recordAudit, summarizeChanges } from "./audit.js";
 import { conflictMessage, findCodeConflict } from "./item-codes.js";
 import { loadItem, loadItems, toItem } from "./item-queries.js";
 import type { OrgEnv } from "./org-access.js";
-import { postAdjustment, postMove, type Actor } from "./stock-service.js";
+import { logMovement, postAdjustment, postMove, type Actor } from "./stock-service.js";
 
 const idParam = z.object({ id: objectIdSchema });
 
@@ -28,6 +29,17 @@ const toMovement = (m: MovementDoc): StockMovement => ({
   userName: m.userName,
   ...(m.transferId ? { transferId: m.transferId.toHexString() } : {}),
   createdAt: m.createdAt.toISOString(),
+});
+
+/** The fields of an item that are worth recording. */
+const itemSnapshot = (i: ItemDoc) => ({
+  sku: i.sku,
+  name: i.name,
+  description: i.description,
+  category: i.category,
+  reorderLevel: i.reorderLevel,
+  unitCostCents: i.unitCostCents,
+  barcodes: i.barcodes ?? [],
 });
 
 export const actorOf = (user: { id: string; name: string }): Actor => ({
@@ -70,6 +82,14 @@ export function createItemRoutes(store: Store) {
       }
       throw e;
     }
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "item.created",
+      entity: itemEntity(doc._id, doc),
+      summary: `Created ${doc.name} (${doc.sku})`,
+      snapshot: itemSnapshot(doc),
+    });
     if (initialStock && locationId) {
       await postAdjustment(store, orgId, actorOf(c.get("user")), {
         itemId: doc._id,
@@ -94,14 +114,27 @@ export function createItemRoutes(store: Store) {
       const clash = await findCodeConflict(store, orgId, [patch.sku], { selfId: _id, against: ["barcodes"] });
       if (clash) return c.json({ error: conflictMessage(clash, "SKU") }, 409);
     }
+    let before: ItemDoc | null;
     try {
-      const updated = await store.items.findOneAndUpdate({ _id, orgId }, { $set: { ...patch, updatedAt: new Date() } });
-      if (!updated) return c.json({ error: "Item not found" }, 404);
+      // Returns the document as it was before the update, which is what the audit diff needs.
+      before = await store.items.findOneAndUpdate({ _id, orgId }, { $set: { ...patch, updatedAt: new Date() } });
+      if (!before) return c.json({ error: "Item not found" }, 404);
     } catch (e) {
       if (isDuplicateKey(e)) {
         return c.json({ error: duplicateField(e) === "barcodes" ? "One of those barcodes is already in use" : "SKU already exists" }, 409);
       }
       throw e;
+    }
+    const changes = diffFields(itemSnapshot(before), patch);
+    if (changes.length) {
+      await recordAudit(store, {
+        orgId,
+        actor: auditActor(c.get("user")),
+        action: "item.updated",
+        entity: itemEntity(_id, { name: patch.name ?? before.name, sku: patch.sku ?? before.sku }),
+        summary: summarizeChanges(changes),
+        changes,
+      });
     }
     return c.json(toItem((await loadItem(store, orgId, _id))!));
   });
@@ -109,9 +142,39 @@ export function createItemRoutes(store: Store) {
   r.delete("/:id", zValidator("param", idParam), async (c) => {
     const orgId = c.get("org")._id;
     const _id = new ObjectId(c.req.valid("param").id);
-    const { deletedCount } = await store.items.deleteOne({ _id, orgId });
-    if (!deletedCount) return c.json({ error: "Item not found" }, 404);
-    await Promise.all([store.stock.deleteMany({ itemId: _id }), store.movements.deleteMany({ itemId: _id })]);
+    const doc = await store.items.findOne({ _id, orgId });
+    if (!doc) return c.json({ error: "Item not found" }, 404);
+
+    const actor = actorOf(c.get("user"));
+    const stock = await store.stock.find({ itemId: _id, quantity: { $gt: 0 } }).toArray();
+    const locations = await store.locations.find({ _id: { $in: stock.map((s) => s.locationId) } }).toArray();
+    const locationName = new Map(locations.map((l) => [l._id.toHexString(), l.name]));
+    const total = stock.reduce((sum, s) => sum + s.quantity, 0);
+
+    const itemGone = await store.items.deleteOne({ _id, orgId });
+    if (!itemGone.deletedCount) return c.json({ error: "Item not found" }, 404);
+
+    // The ledger is never erased. Whatever was on hand is written off through it, so history still adds up.
+    const writeOffs: string[] = [];
+    for (const s of stock) {
+      const id = await logMovement(store, { orgId, type: "adjust", itemId: _id, locationId: s.locationId, delta: -s.quantity, reason: "Item deleted", actor });
+      writeOffs.push(id.toHexString());
+    }
+    await store.stock.deleteMany({ itemId: _id });
+
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "item.deleted",
+      entity: itemEntity(_id, doc),
+      summary: `Deleted ${doc.name} (${doc.sku})${total ? ` and wrote off ${total.toLocaleString("en-US")} units` : ""}`,
+      snapshot: {
+        ...itemSnapshot(doc),
+        quantityWrittenOff: total,
+        stock: stock.map((s) => ({ location: locationName.get(s.locationId.toHexString()) ?? "Unknown", quantity: s.quantity })),
+      },
+      refs: { movementIds: writeOffs, itemId: _id.toHexString() },
+    });
     return c.body(null, 204);
   });
 

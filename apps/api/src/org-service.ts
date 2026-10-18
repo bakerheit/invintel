@@ -1,6 +1,7 @@
 import type { OrgRole, OrgSummary } from "@invintel/shared";
 import { randomInt } from "node:crypto";
 import { ObjectId } from "mongodb";
+import { recordAudit } from "./audit.js";
 import { isDuplicateKey, type OrgDoc, type Store } from "./db.js";
 
 // No 0/O/1/I/L so codes survive being read out loud or copied by hand.
@@ -53,7 +54,7 @@ export async function listOrgSummaries(store: Store, userId: ObjectId): Promise<
 }
 
 /** Creates the org, makes the user its owner, and gives it a first location to hold stock. */
-export async function createOrganization(store: Store, userId: ObjectId, name: string) {
+export async function createOrganization(store: Store, userId: ObjectId, userName: string, name: string) {
   const now = new Date();
   const org: OrgDoc = { _id: new ObjectId(), name, joinCode: "", createdBy: userId, createdAt: now };
   for (let attempt = 0; ; attempt++) {
@@ -83,13 +84,21 @@ export async function createOrganization(store: Store, userId: ObjectId, name: s
     createdAt: now,
     updatedAt: now,
   });
+  await recordAudit(store, {
+    orgId: org._id,
+    actor: { id: userId, name: userName },
+    action: "organization.created",
+    entity: { type: "organization", id: org._id.toHexString(), label: org.name },
+    summary: `Created organization ${org.name}`,
+    snapshot: { name: org.name, owner: userName, defaultLocation: DEFAULT_LOCATION_NAME },
+  });
   return org;
 }
 
 export const findOrgByJoinCode = (store: Store, joinCode: string) => store.orgs.findOne({ joinCode });
 
 /** Adds the user as a member. Joining twice is harmless and keeps their existing role. */
-export async function joinOrganization(store: Store, userId: ObjectId, org: OrgDoc) {
+export async function joinOrganization(store: Store, userId: ObjectId, userName: string, org: OrgDoc, via: string) {
   try {
     await store.memberships.insertOne({
       _id: new ObjectId(),
@@ -97,6 +106,14 @@ export async function joinOrganization(store: Store, userId: ObjectId, org: OrgD
       userId,
       role: "member",
       createdAt: new Date(),
+    });
+    await recordAudit(store, {
+      orgId: org._id,
+      actor: { id: userId, name: userName },
+      action: "member.joined",
+      entity: { type: "member", id: userId.toHexString(), label: userName },
+      summary: `${userName} joined as a member (${via})`,
+      snapshot: { role: "member", via },
     });
     return { role: "member" as OrgRole, created: true };
   } catch (e) {

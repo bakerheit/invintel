@@ -9,6 +9,7 @@ import {
 import { Hono } from "hono";
 import { ObjectId, type Filter } from "mongodb";
 import { z } from "zod";
+import { auditActor, itemEntity, recordAudit } from "./audit.js";
 import { movementType, type MovementDoc, type Store } from "./db.js";
 import { indexLocations, loadLocations } from "./locations.js";
 import { ROLE_RANK, type OrgEnv } from "./org-access.js";
@@ -84,7 +85,22 @@ export function createActivityRoutes(store: Store) {
     const page = rows.slice(0, limit);
     const itemIds = [...new Set(page.map((m) => m.itemId.toHexString()))].map((id) => new ObjectId(id));
     const items = await store.items.find({ _id: { $in: itemIds } }, { projection: { sku: 1, name: 1 } }).toArray();
-    const itemById = new Map(items.map((i) => [i._id.toHexString(), i]));
+    const itemById = new Map<string, { sku: string; name: string }>(items.map((i) => [i._id.toHexString(), i]));
+
+    // Deleted items and locations keep their names in the ledger: the audit log remembers them.
+    const missingItems = itemIds.filter((id) => !itemById.has(id.toHexString())).map((id) => id.toHexString());
+    if (missingItems.length) {
+      for (const e of await store.audit.find({ orgId, action: "item.deleted", "entity.id": { $in: missingItems } }).toArray()) {
+        itemById.set(e.entity.id, { sku: String(e.snapshot?.sku ?? ""), name: `${e.snapshot?.name ?? "Deleted item"} (deleted)` });
+      }
+    }
+    const missingLocations = [...new Set(page.map((m) => m.locationId.toHexString()))].filter((id) => !locations.byId.has(id));
+    const deletedLocation = new Map<string, string>();
+    if (missingLocations.length) {
+      for (const e of await store.audit.find({ orgId, action: "location.deleted", "entity.id": { $in: missingLocations } }).toArray()) {
+        deletedLocation.set(e.entity.id, `${e.snapshot?.path ?? e.entity.label} (deleted)`);
+      }
+    }
 
     const entries: ActivityEntry[] = page.map((m) => {
       const item = itemById.get(m.itemId.toHexString());
@@ -96,8 +112,8 @@ export function createActivityRoutes(store: Store) {
         itemSku: item?.sku ?? "",
         itemName: item?.name ?? "Deleted item",
         locationId: m.locationId.toHexString(),
-        locationName: loc?.name ?? "Deleted location",
-        locationPath: loc ? locations.pathOf(m.locationId.toHexString()) : "Deleted location",
+        locationName: loc?.name ?? deletedLocation.get(m.locationId.toHexString()) ?? "Deleted location",
+        locationPath: loc ? locations.pathOf(m.locationId.toHexString()) : (deletedLocation.get(m.locationId.toHexString()) ?? "Deleted location"),
         delta: m.delta,
         reason: m.reason,
         userName: m.userName,
@@ -127,6 +143,10 @@ export function createActivityRoutes(store: Store) {
       return c.json({ error: "A reversal can't be reversed. Record a new receipt or adjustment instead." }, 409);
     }
     if (original.reversedBy) return c.json({ error: "That entry has already been reversed" }, 409);
+    const item = await store.items.findOne({ _id: original.itemId, orgId }, { projection: { name: 1, sku: 1 } });
+    if (!item) {
+      return c.json({ error: "That item has been deleted. Its history is kept, but entries can't be reversed any more." }, 409);
+    }
     if (!canReverse(original, c.get("role"), user.id)) {
       return c.json({ error: "You can only undo your own entries from the last 15 minutes. Ask an admin." }, 403);
     }
@@ -197,6 +217,33 @@ export function createActivityRoutes(store: Store) {
         createdAt: now,
       })),
     );
+
+    const places = await store.locations.find({ _id: { $in: group.map((m) => m.locationId) } }).toArray();
+    const placeName = (id: ObjectId) => places.find((l) => l._id.equals(id))?.name ?? "a deleted location";
+    const amount = (n: number) => Math.abs(n).toLocaleString("en-US");
+    const what =
+      original.transferId && group.length === 2
+        ? (() => {
+            const out = group.find((m) => m.delta < 0)!;
+            const into = group.find((m) => m.delta > 0)!;
+            return `move of ${amount(into.delta)} × ${item.name} from ${placeName(out.locationId)} to ${placeName(into.locationId)}`;
+          })()
+        : movementType(original) === "receive"
+          ? `receipt of ${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`
+          : `adjustment of ${original.delta > 0 ? "+" : "-"}${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`;
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(user),
+      action: "stock.reversed",
+      entity: itemEntity(original.itemId, item),
+      summary: `Reversed the ${what}${reason ? `: ${reason}` : ""}`,
+      snapshot: { reason },
+      refs: {
+        movementIds: pairs.map((p) => p.reversalId.toHexString()),
+        reversedMovementIds: pairs.map((p) => p.original._id.toHexString()),
+        itemId: original.itemId.toHexString(),
+      },
+    });
     return c.json({ reversedIds: pairs.map((p) => p.original._id.toHexString()), movementIds: pairs.map((p) => p.reversalId.toHexString()) });
   });
 

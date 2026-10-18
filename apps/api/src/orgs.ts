@@ -8,6 +8,8 @@ import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import type { Store } from "./db.js";
 import { createActivityRoutes } from "./activity.js";
+import { createAuditRoutes } from "./audit-routes.js";
+import { auditActor, recordAudit } from "./audit.js";
 import { createFloorRoutes } from "./floor.js";
 import { createItemRoutes } from "./items.js";
 import { createLocationRoutes } from "./locations.js";
@@ -30,7 +32,7 @@ export function createOrgRoutes(store: Store) {
 
   orgs.post("/", zValidator("json", organizationInputSchema), async (c) => {
     const userId = new ObjectId(c.get("user").id);
-    const org = await createOrganization(store, userId, c.req.valid("json").name);
+    const org = await createOrganization(store, userId, c.get("user").name, c.req.valid("json").name);
     return c.json(await summarizeOrg(store, org, "owner"), 201);
   });
 
@@ -44,7 +46,7 @@ export function createOrgRoutes(store: Store) {
       joinLimiter.fail(user.id);
       return c.json({ error: "That join code isn't valid" }, 400);
     }
-    const joined = await joinOrganization(store, new ObjectId(user.id), org);
+    const joined = await joinOrganization(store, new ObjectId(user.id), user.name, org, "used the join code");
     return c.json(await summarizeOrg(store, org, joined.role), joined.created ? 201 : 200);
   });
 
@@ -69,16 +71,35 @@ export function createOrgRoutes(store: Store) {
   scoped.get("/", async (c) => c.json(await summarizeOrg(store, c.get("org"), c.get("role"))));
 
   scoped.patch("/", requireRole("admin"), zValidator("json", organizationInputSchema), async (c) => {
+    const before = c.get("org");
     const org = await store.orgs.findOneAndUpdate(
-      { _id: c.get("org")._id },
+      { _id: before._id },
       { $set: { name: c.req.valid("json").name } },
       { returnDocument: "after" },
     );
+    if (org!.name !== before.name) {
+      await recordAudit(store, {
+        orgId: before._id,
+        actor: auditActor(c.get("user")),
+        action: "organization.renamed",
+        entity: { type: "organization", id: before._id.toHexString(), label: org!.name },
+        summary: `Renamed the organization from ${before.name} to ${org!.name}`,
+        changes: [{ field: "name", from: before.name, to: org!.name }],
+      });
+    }
     return c.json(await summarizeOrg(store, org!, c.get("role")));
   });
 
   scoped.post("/join-code", requireRole("admin"), async (c) => {
     const org = await rotateJoinCode(store, c.get("org")._id);
+    // The codes themselves are credentials, so the log records that it happened, not what they were.
+    await recordAudit(store, {
+      orgId: org!._id,
+      actor: auditActor(c.get("user")),
+      action: "organization.join_code_rotated",
+      entity: { type: "organization", id: org!._id.toHexString(), label: org!.name },
+      summary: "Generated a new join code. The old one no longer works",
+    });
     return c.json(await summarizeOrg(store, org!, c.get("role")));
   });
 
@@ -98,6 +119,7 @@ export function createOrgRoutes(store: Store) {
 
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));
+  scoped.route("/audit", createAuditRoutes(store));
   scoped.route("/", createFloorRoutes(store));
   scoped.route("/items", createItemRoutes(store));
 

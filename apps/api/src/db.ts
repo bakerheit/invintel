@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type Db, type ObjectId } from "mongodb";
-import type { LocationType, MovementType, OrgRole } from "@invintel/shared";
+import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -92,6 +92,26 @@ export interface MovementDoc {
 export const movementType = (m: MovementDoc): MovementType =>
   m.type ?? (m.transferId ? "transfer" : m.reason === "Initial stock" ? "receive" : "adjust");
 
+/**
+ * Append-only history of everything that changes in an organization. Each event carries the hash
+ * of the one before it, so editing or removing an event breaks the chain.
+ */
+export interface AuditEventDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  seq: number;
+  at: Date;
+  actor: { id: ObjectId | null; name: string };
+  action: AuditAction;
+  entity: { type: AuditEntityType; id: string; label: string };
+  summary: string;
+  changes?: AuditChange[];
+  snapshot?: Record<string, unknown>;
+  refs?: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -103,6 +123,7 @@ export interface Store {
   items: Collection<ItemDoc>;
   stock: Collection<StockDoc>;
   movements: Collection<MovementDoc>;
+  audit: Collection<AuditEventDoc>;
   close: () => Promise<void>;
 }
 
@@ -127,6 +148,7 @@ export async function connect(
     items: db.collection("items"),
     stock: db.collection("stock"),
     movements: db.collection("stock_movements"),
+    audit: db.collection("audit_events"),
     close: () => client.close(),
   };
 
@@ -158,6 +180,10 @@ export async function connect(
     store.movements.createIndex({ itemId: 1, createdAt: -1 }),
     store.movements.createIndex({ orgId: 1, _id: -1 }),
     store.movements.createIndex({ transferId: 1 }, { sparse: true }),
+    // seq is unique per org: that's what stops two simultaneous writers both claiming the same link.
+    store.audit.createIndex({ orgId: 1, seq: 1 }, { unique: true }),
+    store.audit.createIndex({ orgId: 1, "entity.type": 1, "entity.id": 1, seq: -1 }),
+    store.audit.createIndex({ orgId: 1, action: 1, seq: -1 }),
   ]);
   return store;
 }

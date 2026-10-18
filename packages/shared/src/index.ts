@@ -299,3 +299,93 @@ export function gtinVariants(code: string): string[] {
   }
   return [...forms];
 }
+
+// ---------- audit log ----------
+
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member"] as const;
+export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
+
+export const AUDIT_ACTIONS = [
+  "item.created",
+  "item.updated",
+  "item.deleted",
+  "location.created",
+  "location.updated",
+  "location.deleted",
+  "organization.created",
+  "organization.renamed",
+  "organization.join_code_rotated",
+  "member.joined",
+  "stock.received",
+  "stock.adjusted",
+  "stock.moved",
+  "stock.reversed",
+] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export interface AuditChange {
+  field: string;
+  from: unknown;
+  to: unknown;
+}
+
+export interface AuditEvent {
+  id: string;
+  /** Position in this organization's chain, starting at 1 with no gaps. */
+  seq: number;
+  at: string;
+  actor: { id: string | null; name: string };
+  action: AuditAction;
+  entity: { type: AuditEntityType; id: string; label: string };
+  /** One line a person can read: "Changed unit cost from $1.00 to $1.25". */
+  summary: string;
+  changes?: AuditChange[];
+  /** Full state at creation or deletion. */
+  snapshot?: Record<string, unknown>;
+  /** Links to related records, e.g. the ledger entries behind a stock event. */
+  refs?: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+}
+
+export interface AuditPage {
+  events: AuditEvent[];
+  /** Pass as `before` to get older events. Absent when there are none. */
+  nextBefore?: number;
+}
+
+export interface AuditVerification {
+  ok: boolean;
+  /** Events checked. */
+  checked: number;
+  headSeq: number;
+  /** Fingerprint of the whole history so far. Record it somewhere else to detect truncation later. */
+  headHash: string;
+  /** Where the chain first stops adding up, if it does. */
+  problem?: { seq: number; reason: string };
+  /** Ledger entries made after the audit log began that no audit event refers to. */
+  ledgerGaps: number;
+}
+
+/** Friendly names for fields that show up in audit diffs. */
+export const AUDIT_FIELD_LABELS: Record<string, string> = {
+  sku: "SKU",
+  name: "name",
+  description: "description",
+  category: "category",
+  reorderLevel: "reorder level",
+  unitCostCents: "unit cost",
+  barcodes: "barcodes",
+  type: "type",
+  code: "code",
+  parent: "location it's inside",
+};
+
+/** One value from an audit diff, as text. Used for both the stored summaries and the screen. */
+export function formatAuditValue(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "none";
+  if (field === "unitCostCents" && typeof value === "number") return `$${(value / 100).toFixed(2)}`;
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
+  const text = String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+}

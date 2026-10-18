@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import type { MovementType } from "@invintel/shared";
+import { itemEntity, recordAudit } from "./audit.js";
 import { isDuplicateKey, type MovementDoc, type Store } from "./db.js";
 
 export interface Actor {
@@ -71,9 +72,8 @@ export async function postAdjustment(
   input: { itemId: ObjectId; locationId: ObjectId; delta: number; reason: string; type: Extract<MovementType, "adjust" | "receive"> },
 ): Promise<Posted | Failure> {
   const { itemId, locationId, delta, reason, type } = input;
-  if (!(await store.items.findOne({ _id: itemId, orgId }, { projection: { _id: 1 } }))) {
-    return { ok: false, status: 404, error: "Item not found" };
-  }
+  const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1 } });
+  if (!item) return { ok: false, status: 404, error: "Item not found" };
   const location = await store.locations.findOne({ _id: locationId, orgId });
   if (!location) return { ok: false, status: 404, error: "Location not found" };
 
@@ -82,6 +82,22 @@ export async function postAdjustment(
     return { ok: false, status: 422, error: `Only ${have} in stock at ${location.name}` };
   }
   const id = await logMovement(store, { orgId, type, itemId, locationId, delta, reason, actor });
+  const amount = Math.abs(delta).toLocaleString("en-US");
+  // "Received: PO 9" reads better as "Received 10 × X at Y (PO 9)".
+  const detail = type === "receive" ? reason.replace(/^Received:?\s*/, "") : reason;
+  const note = detail ? ` (${detail})` : "";
+  await recordAudit(store, {
+    orgId,
+    actor: { id: actor.userId, name: actor.userName },
+    action: type === "receive" ? "stock.received" : "stock.adjusted",
+    entity: itemEntity(itemId, item),
+    summary:
+      type === "receive"
+        ? `Received ${amount} × ${item.name} at ${location.name}${note}`
+        : `${delta > 0 ? "Added" : "Removed"} ${amount} × ${item.name} at ${location.name}${note}`,
+    snapshot: { delta, location: location.name, locationId: locationId.toHexString(), reason },
+    refs: { movementIds: [id.toHexString()], itemId: itemId.toHexString(), locationId: locationId.toHexString() },
+  });
   return { ok: true, movementIds: [id] };
 }
 
@@ -93,9 +109,8 @@ export async function postMove(
   input: { itemId: ObjectId; fromLocationId: ObjectId; toLocationId: ObjectId; quantity: number; reason: string },
 ): Promise<Posted | Failure> {
   const { itemId, fromLocationId: from, toLocationId: to, quantity, reason } = input;
-  if (!(await store.items.findOne({ _id: itemId, orgId }, { projection: { _id: 1 } }))) {
-    return { ok: false, status: 404, error: "Item not found" };
-  }
+  const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1 } });
+  if (!item) return { ok: false, status: 404, error: "Item not found" };
   const [fromLoc, toLoc] = await Promise.all([
     store.locations.findOne({ _id: from, orgId }),
     store.locations.findOne({ _id: to, orgId }),
@@ -116,6 +131,15 @@ export async function postMove(
   const note = reason || `Transfer ${fromLoc.name} → ${toLoc.name}`;
   const out = await logMovement(store, { orgId, type: "transfer", itemId, locationId: from, delta: -quantity, reason: note, transferId, actor });
   const into = await logMovement(store, { orgId, type: "transfer", itemId, locationId: to, delta: quantity, reason: note, transferId, actor });
+  await recordAudit(store, {
+    orgId,
+    actor: { id: actor.userId, name: actor.userName },
+    action: "stock.moved",
+    entity: itemEntity(itemId, item),
+    summary: `Moved ${quantity.toLocaleString("en-US")} × ${item.name} from ${fromLoc.name} to ${toLoc.name}${reason ? ` (${reason})` : ""}`,
+    snapshot: { quantity, from: fromLoc.name, to: toLoc.name, fromId: from.toHexString(), toId: to.toHexString(), reason: note },
+    refs: { movementIds: [out.toHexString(), into.toHexString()], itemId: itemId.toHexString(), transferId: transferId.toHexString() },
+  });
   return { ok: true, movementIds: [out, into] };
 }
 

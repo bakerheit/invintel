@@ -65,7 +65,7 @@ export default function InventoryPage() {
     async (item: Item) => {
       const ok = await confirm({
         title: `Delete ${item.name}?`,
-        description: "This removes the item and its stock history from every location. It can't be undone.",
+        description: "The item disappears from the inventory and any stock on hand is written off. Its history stays in Activity and the audit log.",
         confirmLabel: "Delete item",
         destructive: true,
       });

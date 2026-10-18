@@ -51,7 +51,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await Promise.all(
-    [store.users, store.sessions, store.orgs, store.memberships, store.locations, store.items, store.stock, store.movements].map(
+    [store.users, store.sessions, store.orgs, store.memberships, store.locations, store.items, store.stock, store.movements, store.audit].map(
       (c) => c.deleteMany({}),
     ),
   );
@@ -429,7 +429,7 @@ describe("items and stock", () => {
     expect((await adjust(item.id, { locationId: main.id, delta: 2 }, member)).status).toBe(200);
   });
 
-  it("ignores quantity on PATCH, updates other fields, and deletes with its history", async () => {
+  it("ignores quantity on PATCH, updates other fields, and deletes while keeping the ledger", async () => {
     const item = await (await create({ sku: "D-1", name: "Cog", initialStock: { locationId: main.id, quantity: 4 } })).json();
 
     const patched = await (
@@ -440,7 +440,10 @@ describe("items and stock", () => {
     expect((await call(`${base}/items/${item.id}`, { method: "DELETE", cookie: owner.cookie })).status).toBe(204);
     expect((await call(`${base}/items/${item.id}`, { cookie: owner.cookie })).status).toBe(404);
     expect(await store.stock.countDocuments({ itemId: { $exists: true } })).toBe(0);
-    expect(await store.movements.countDocuments()).toBe(0);
+    // The ledger is kept: the receipt, plus a write-off that brings the item back to zero.
+    const history = await store.movements.find({}).sort({ _id: 1 }).toArray();
+    expect(history.map((m) => m.delta)).toEqual([4, -4]);
+    expect(history[1]!.reason).toBe("Item deleted");
   });
 
   it("validates input and ids", async () => {
@@ -916,5 +919,261 @@ describe("item barcodes", () => {
     expect((await stolen.json()).error).toContain("Owner of AAA");
     expect((await patch(other.id, { barcodes: Array.from({ length: 21 }, (_, i) => `C${i}`) })).status).toBe(400);
     expect((await patch(other.id, { sku: "AAA" })).status).toBe(409);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
+describe("audit log", () => {
+  let owner: Account;
+  let member: Account;
+  let base: string;
+  let main: { id: string };
+
+  const post = (path: string, body: object, who = owner) => call(`${base}${path}`, { body, cookie: who.cookie });
+  const patch = (path: string, body: object, who = owner) => call(`${base}${path}`, { method: "PATCH", body, cookie: who.cookie });
+  const del = (path: string, who = owner) => call(`${base}${path}`, { method: "DELETE", cookie: who.cookie });
+  const audit = async (qs = "", who = owner) => (await call(`${base}/audit${qs}`, { cookie: who.cookie })).json();
+  const events = async (qs = "") => (await audit(qs)).events as AuditShape[];
+  const verify = async () => (await call(`${base}/audit/verify`, { cookie: owner.cookie })).json();
+  const last = async () => (await events("?limit=1"))[0]!;
+
+  type AuditShape = {
+    id: string;
+    seq: number;
+    action: string;
+    actor: { id: string | null; name: string };
+    entity: { type: string; id: string; label: string };
+    summary: string;
+    changes?: { field: string; from: unknown; to: unknown }[];
+    snapshot?: Record<string, unknown>;
+    refs?: { movementIds?: string[] };
+    prevHash: string;
+    hash: string;
+  };
+
+  beforeEach(async () => {
+    owner = await newOwner("Acme");
+    member = await newMember(owner);
+    base = `/api/orgs/${owner.org.id}`;
+    main = (await (await call(`${base}/locations`, { cookie: owner.cookie })).json())[0];
+  });
+
+  it("starts the history with the organization and records who joined", async () => {
+    const all = (await events()).reverse();
+    expect(all.map((e) => e.action)).toEqual(["organization.created", "member.joined"]);
+    expect(all[0]).toMatchObject({ seq: 1, actor: { name: "Ada" }, entity: { type: "organization", label: "Acme" } });
+    expect(all[1]).toMatchObject({ seq: 2, actor: { name: "Bob" }, entity: { type: "member", label: "Bob" } });
+    expect(all[1]!.summary).toContain("signed up with the join code");
+  });
+
+  it("records item creation, field-level edits, and ignores edits that change nothing", async () => {
+    const item = await (await post("/items", { sku: "A-1", name: "Widget", unitCostCents: 100, barcodes: ["111"] })).json();
+    expect(await last()).toMatchObject({
+      action: "item.created",
+      summary: "Created Widget (A-1)",
+      entity: { type: "item", id: item.id, label: "Widget (A-1)" },
+      snapshot: { sku: "A-1", name: "Widget", unitCostCents: 100, barcodes: ["111"] },
+    });
+
+    await patch(`/items/${item.id}`, { name: "Widget Pro", unitCostCents: 125, barcodes: ["111", "222"] }, member);
+    const edit = await last();
+    expect(edit.action).toBe("item.updated");
+    expect(edit.actor.name).toBe("Bob");
+    expect(edit.changes).toEqual([
+      { field: "name", from: "Widget", to: "Widget Pro" },
+      { field: "unitCostCents", from: 100, to: 125 },
+      { field: "barcodes", from: ["111"], to: ["111", "222"] },
+    ]);
+    expect(edit.summary).toBe("Changed name from Widget to Widget Pro; changed unit cost from $1.00 to $1.25; changed barcodes from 111 to 111, 222");
+
+    const before = (await events()).length;
+    await patch(`/items/${item.id}`, { name: "Widget Pro", unitCostCents: 125 });
+    expect((await events()).length).toBe(before);
+  });
+
+  it("records stock changes against the item, linked to their ledger entries", async () => {
+    const item = await (await post("/items", { sku: "S-1", name: "Stocked" })).json();
+    const shed = await (await post("/locations", { name: "Shed" })).json();
+
+    const rec = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 10, reference: "PO 9" })).json();
+    expect(await last()).toMatchObject({ action: "stock.received", summary: "Received 10 × Stocked at Main (PO 9)", refs: { movementIds: rec.movementIds } });
+
+    await post(`/items/${item.id}/adjust`, { locationId: main.id, delta: -2, reason: "damaged" });
+    expect((await last()).summary).toBe("Removed 2 × Stocked at Main (damaged)");
+
+    const moved = await (await post("/moves", { itemId: item.id, fromLocationId: main.id, toLocationId: shed.id, quantity: 3 })).json();
+    expect(await last()).toMatchObject({ action: "stock.moved", summary: "Moved 3 × Stocked from Main to Shed", refs: { movementIds: moved.movementIds } });
+
+    await call(`${base}/movements/${moved.movementIds[0]}/reverse`, { body: { reason: "wrong shelf" }, cookie: owner.cookie });
+    expect(await last()).toMatchObject({ action: "stock.reversed", summary: "Reversed the move of 3 × Stocked from Main to Shed: wrong shelf" });
+
+    // All of it is on the item's own trail.
+    const trail = await events(`?entityType=item&entityId=${item.id}`);
+    expect(trail.map((e) => e.action).reverse()).toEqual(["item.created", "stock.received", "stock.adjusted", "stock.moved", "stock.reversed"]);
+  });
+
+  it("keeps the ledger and a snapshot when an item is deleted, and refuses to reverse its entries", async () => {
+    const item = await (await post("/items", { sku: "D-1", name: "Doomed" })).json();
+    const rec = await (await post("/receipts", { itemId: item.id, locationId: main.id, quantity: 7 })).json();
+    expect((await del(`/items/${item.id}`)).status).toBe(204);
+
+    const gone = await last();
+    expect(gone).toMatchObject({ action: "item.deleted", summary: "Deleted Doomed (D-1) and wrote off 7 units" });
+    expect(gone.snapshot).toMatchObject({ name: "Doomed", quantityWrittenOff: 7, stock: [{ location: "Main", quantity: 7 }] });
+
+    // Ledger: receipt and write-off both survive and still name the item.
+    const ledger = (await (await call(`${base}/movements`, { cookie: owner.cookie })).json()).entries;
+    expect(ledger.map((e: { delta: number }) => e.delta)).toEqual([-7, 7]);
+    expect(ledger[0].itemName).toBe("Doomed (deleted)");
+    expect(ledger[0].reason).toBe("Item deleted");
+
+    const res = await call(`${base}/movements/${rec.movementIds[0]}/reverse`, { body: {}, cookie: owner.cookie });
+    expect(res.status).toBe(409);
+    expect((await verify()).ledgerGaps).toBe(0);
+  });
+
+  it("records location changes using paths people recognise", async () => {
+    const plant = await (await post("/locations", { name: "Plant 1" })).json();
+    const rack = await (await post("/locations", { name: "Rack A", parentId: plant.id, type: "storage" })).json();
+    expect(await last()).toMatchObject({ action: "location.created", summary: "Created location Plant 1 / Rack A" });
+
+    await patch(`/locations/${rack.id}`, { name: "Rack B", type: "wip", parentId: null });
+    const edit = await last();
+    expect(edit.action).toBe("location.updated");
+    expect(edit.changes).toEqual([
+      { field: "name", from: "Rack A", to: "Rack B" },
+      { field: "type", from: "storage", to: "wip" },
+      { field: "parent", from: "Plant 1", to: "" },
+    ]);
+
+    await del(`/locations/${rack.id}`);
+    expect(await last()).toMatchObject({ action: "location.deleted", summary: "Deleted location Rack B", snapshot: { name: "Rack B", type: "wip" } });
+  });
+
+  it("records org renames and join code changes without writing the codes down", async () => {
+    await patch("", { name: "Acme Inc" });
+    expect(await last()).toMatchObject({ action: "organization.renamed", changes: [{ field: "name", from: "Acme", to: "Acme Inc" }] });
+
+    const before = owner.org.joinCode!;
+    const rotated = await (await post("/join-code", {})).json();
+    expect(await last()).toMatchObject({ action: "organization.join_code_rotated" });
+    const everything = JSON.stringify(await events("?limit=200"));
+    expect(everything).not.toContain(before);
+    expect(everything).not.toContain(rotated.joinCode);
+    expect(everything.toLowerCase()).not.toContain("passwordhash");
+  });
+
+  it("builds an unbroken hash chain, and every organization has its own", async () => {
+    await post("/items", { sku: "C-1", name: "One" });
+    await post("/items", { sku: "C-2", name: "Two" });
+    const all = (await events("?limit=200")).reverse();
+    expect(all.map((e) => e.seq)).toEqual(all.map((_, i) => i + 1));
+    expect(all[0]!.prevHash).toBe("0".repeat(64));
+    all.slice(1).forEach((e, i) => expect(e.prevHash).toBe(all[i]!.hash));
+    const v = await verify();
+    expect(v).toMatchObject({ ok: true, checked: all.length, headSeq: all.length, headHash: all.at(-1)!.hash, ledgerGaps: 0 });
+
+    const other = await newOwner("Other");
+    const theirs = (await (await call(`/api/orgs/${other.org.id}/audit`, { cookie: other.cookie })).json()).events;
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].seq).toBe(1);
+  });
+
+  it("stays consistent when many changes happen at once", async () => {
+    const results = await Promise.all(Array.from({ length: 12 }, (_, i) => post("/items", { sku: `P-${i}`, name: `Parallel ${i}` })));
+    expect(results.every((r) => r.status === 201)).toBe(true);
+    const all = (await events("?limit=200")).reverse();
+    expect(all.map((e) => e.seq)).toEqual(all.map((_, i) => i + 1));
+    expect(all.filter((e) => e.action === "item.created")).toHaveLength(12);
+    expect(await verify()).toMatchObject({ ok: true });
+  });
+
+  it("detects an event that was edited after the fact", async () => {
+    await post("/items", { sku: "T-1", name: "Tampered" });
+    const target = await last();
+    await store.audit.updateOne({ orgId: new (await import("mongodb")).ObjectId(owner.org.id), seq: target.seq }, { $set: { summary: "Nothing to see here" } });
+    const v = await verify();
+    expect(v.ok).toBe(false);
+    expect(v.problem).toMatchObject({ seq: target.seq });
+    expect(v.problem.reason).toContain("changed after being recorded");
+  });
+
+  it("detects a changed actor, and an event deleted from the middle", async () => {
+    const { ObjectId } = await import("mongodb");
+    const orgId = new ObjectId(owner.org.id);
+    await post("/items", { sku: "T-2", name: "Two" });
+    await post("/items", { sku: "T-3", name: "Three" });
+    expect(await verify()).toMatchObject({ ok: true });
+
+    await store.audit.updateOne({ orgId, seq: 3 }, { $set: { "actor.name": "Someone Else" } });
+    expect((await verify()).problem).toMatchObject({ seq: 3 });
+    await store.audit.updateOne({ orgId, seq: 3 }, { $set: { "actor.name": "Ada" } });
+    expect(await verify()).toMatchObject({ ok: true });
+
+    await store.audit.deleteOne({ orgId, seq: 2 });
+    const v = await verify();
+    expect(v.ok).toBe(false);
+    expect(v.problem).toMatchObject({ seq: 2, reason: "Event 2 is missing" });
+  });
+
+  it("notices ledger entries that were never audited", async () => {
+    const { ObjectId } = await import("mongodb");
+    const item = await (await post("/items", { sku: "G-1", name: "Gap" })).json();
+    await store.movements.insertOne({
+      _id: new ObjectId(),
+      orgId: new ObjectId(owner.org.id),
+      type: "adjust",
+      itemId: new ObjectId(item.id),
+      locationId: new ObjectId(main.id),
+      delta: 5,
+      reason: "Slipped in sideways",
+      userName: "Mallory",
+      createdAt: new Date(Date.now() + 1000),
+    });
+    expect(await verify()).toMatchObject({ ok: true, ledgerGaps: 1 });
+  });
+
+  it("is for admins only, and only for your own organization", async () => {
+    expect((await call(`${base}/audit`, { cookie: member.cookie })).status).toBe(403);
+    expect((await call(`${base}/audit/verify`, { cookie: member.cookie })).status).toBe(403);
+    expect((await call(`${base}/audit/export`, { cookie: member.cookie })).status).toBe(403);
+    const stranger = await newOwner("Elsewhere");
+    expect((await call(`${base}/audit`, { cookie: stranger.cookie })).status).toBe(404);
+  });
+
+  it("filters by entity, action group, actor and text, and pages without overlap", async () => {
+    const a = await (await post("/items", { sku: "F-1", name: "Findme" })).json();
+    await post("/items", { sku: "F-2", name: "Other" });
+    await post("/locations", { name: "Elsewhere" });
+    await patch(`/items/${a.id}`, { name: "Findme Too" }, member);
+
+    expect((await events(`?entityId=${a.id}`)).map((e) => e.action).reverse()).toEqual(["item.created", "item.updated"]);
+    expect((await events("?action=location")).map((e) => e.action)).toEqual(["location.created"]);
+    expect((await events("?action=item.updated")).length).toBe(1);
+    expect((await events(`?actorId=${member.user.id}`)).map((e) => e.action).sort()).toEqual(["item.updated", "member.joined"]);
+    expect((await events("?q=findme")).length).toBe(2);
+    expect((await events("?entityType=organization")).length).toBe(1);
+
+    const first = await audit("?limit=3");
+    const second = await audit(`?limit=3&before=${first.nextBefore}`);
+    const seen = [...first.events, ...second.events].map((e: AuditShape) => e.seq);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(Math.max(...second.events.map((e: AuditShape) => e.seq))).toBeLessThan(Math.min(...first.events.map((e: AuditShape) => e.seq)));
+  });
+
+  it("exports a CSV with one row per event and proper quoting", async () => {
+    await post("/items", { sku: "X-1", name: 'Quote "this", please' });
+    const res = await call(`${base}/audit/export`, { cookie: owner.cookie });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/csv");
+    expect(res.headers.get("content-disposition")).toMatch(/attachment; filename="audit-log-\d{4}-\d{2}-\d{2}\.csv"/);
+    const text = await res.text();
+    const lines = text.trim().split("\n");
+    expect(lines[0]).toBe("seq,time,actor,action,entity_type,entity_id,entity,summary,changes,refs,prev_hash,hash");
+    expect(lines).toHaveLength(1 + (await events("?limit=200")).length);
+    expect(text).toContain('"Created Quote ""this"", please (X-1)"');
   });
 });
