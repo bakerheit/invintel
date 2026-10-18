@@ -302,7 +302,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -323,6 +323,16 @@ export const AUDIT_ACTIONS = [
   "stock.adjusted",
   "stock.moved",
   "stock.reversed",
+  "work_center.created",
+  "work_center.updated",
+  "bom.created",
+  "work_order.created",
+  "work_order.released",
+  "work_order.completed",
+  "work_order.cancelled",
+  "production.loaded",
+  "production.consumed",
+  "production.output",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

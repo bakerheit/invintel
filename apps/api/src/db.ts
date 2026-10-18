@@ -112,6 +112,8 @@ export interface AuditEventDoc {
   refs?: Record<string, unknown>;
   prevHash: string;
   hash: string;
+}
+
 export interface WorkCenterDoc {
   _id: ObjectId;
   orgId: ObjectId;

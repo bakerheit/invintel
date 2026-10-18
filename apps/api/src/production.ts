@@ -30,6 +30,7 @@ import {
   type WorkCenterDoc,
   type WorkOrderDoc,
 } from "./db.js";
+import { auditActor, recordAudit } from "./audit.js";
 import { actorOf } from "./items.js";
 import { indexLocations, loadLocations } from "./locations.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
@@ -281,6 +282,14 @@ export function createProductionRoutes(store: Store) {
       if (!isDuplicateKey(e)) throw e;
       return c.json({ error: duplicateField(e) === "code" ? "Another work center already uses that code" : "A work center with that name already exists" }, 409);
     }
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "work_center.created",
+      entity: { type: "work_center", id: doc._id.toHexString(), label: doc.name },
+      summary: `Created work center ${doc.name}`,
+      snapshot: { name: doc.name, code: doc.code, active: doc.active },
+    });
     return c.json((await toCenters(orgId, [doc]))[0], 201);
   });
 
@@ -298,6 +307,14 @@ export function createProductionRoutes(store: Store) {
         { returnDocument: "after" },
       );
       if (!doc) return c.json({ error: "Work center not found" }, 404);
+      await recordAudit(store, {
+        orgId,
+        actor: auditActor(c.get("user")),
+        action: "work_center.updated",
+        entity: { type: "work_center", id: doc._id.toHexString(), label: doc.name },
+        summary: `Edited work center ${doc.name}${rest.active === false ? " (switched off)" : ""}`,
+        snapshot: { ...rest, ...(locationId ? { locationId } : {}) },
+      });
       return c.json((await toCenters(orgId, [doc]))[0]);
     } catch (e) {
       if (!isDuplicateKey(e)) throw e;
@@ -350,7 +367,16 @@ export function createProductionRoutes(store: Store) {
       throw e;
     }
     await store.boms.updateMany({ orgId, outputItemId: doc.outputItemId, _id: { $ne: doc._id }, status: "active" }, { $set: { status: "retired" } });
-    return c.json((await toBom(store, [doc]))[0], 201);
+    const saved = (await toBom(store, [doc]))[0]!;
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "bom.created",
+      entity: { type: "bom", id: doc._id.toHexString(), label: `${saved.outputItemName} v${doc.version}` },
+      summary: `Saved BOM version ${doc.version} for ${saved.outputItemName}`,
+      snapshot: { version: doc.version, outputQuantity: doc.outputQuantity, yieldPct: doc.yieldPct, inputs: saved.inputs.map((i) => ({ item: i.itemName, quantity: i.quantity, scrapPct: i.scrapPct })) },
+    });
+    return c.json(saved, 201);
   });
 
   // ----- work orders -----
@@ -404,7 +430,16 @@ export function createProductionRoutes(store: Store) {
       updatedAt: now,
     };
     await store.workOrders.insertOne(doc);
-    return c.json((await toWorkOrder(store, [doc]))[0], 201);
+    const made = (await toWorkOrder(store, [doc]))[0]!;
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "work_order.created",
+      entity: { type: "work_order", id: doc._id.toHexString(), label: doc.number },
+      summary: `Created ${doc.number}: ${doc.quantity} x ${made.outputItemName} at ${center.name}`,
+      snapshot: { quantity: doc.quantity, bomVersion: doc.bomVersion, workCenter: center.name, dueDate: doc.dueDate },
+    });
+    return c.json(made, 201);
   });
 
   /** release / complete / cancel. Starting (running) happens by itself with the first floor action. */
@@ -425,6 +460,15 @@ export function createProductionRoutes(store: Store) {
       { returnDocument: "after" },
     );
     if (!updated) return c.json({ error: "Someone else just changed this work order" }, 409);
+    const verb = { release: "released", complete: "completed", cancel: "cancelled" } as const;
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: `work_order.${verb[action]}`,
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: `${wo.number} ${verb[action]}`,
+      changes: [{ field: "status", from: wo.status, to: to[action] }],
+    });
     return c.json((await toWorkOrder(store, [updated]))[0]);
   });
 
@@ -449,6 +493,8 @@ export function createProductionRoutes(store: Store) {
     return { workOrder: (await toWorkOrder(store, [fresh]))[0]!, movementIds: movementIds.map((id) => id.toHexString()) };
   };
 
+  const nameOf = async (id: ObjectId) => (await store.items.findOne({ _id: id }, { projection: { name: 1 } }))?.name ?? "item";
+
   const requiresItem = (wo: WorkOrderDoc, itemId: string) => wo.requirements.some((q) => q.itemId.toHexString() === itemId.toLowerCase());
 
   /** Load material onto the machine: stock moves from where it is to the work center's staging location. */
@@ -463,12 +509,22 @@ export function createProductionRoutes(store: Store) {
     const from = await store.locations.findOne({ _id: oid(input.fromLocationId), orgId });
     if (!from) return c.json({ error: "Location not found" }, 404);
     const itemId = oid(input.itemId);
+    const itemName = await nameOf(itemId);
     const note = `Loaded to ${center.name} for ${wo.number}`;
     const res = await postLines(store, orgId, actorOf(c.get("user")), wo, [
       { type: "load", itemId, locationId: from._id, delta: -input.quantity, reason: note },
       { type: "load", itemId, locationId: center.locationId, delta: input.quantity, reason: note },
     ]);
     if (!res.ok) return c.json({ error: res.error }, res.status);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "production.loaded",
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: `Loaded ${input.quantity} ${itemName} to ${center.name} for ${wo.number}`,
+      snapshot: { item: itemName, quantity: input.quantity, from: from.name },
+      refs: { movementIds: res.movementIds.map((id) => id.toHexString()) },
+    });
     return c.json(await afterPost(wo, res.movementIds), 201);
   });
 
@@ -481,6 +537,7 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     if (!requiresItem(wo, input.itemId)) return c.json({ error: "That material isn't on this work order's BOM" }, 422);
     const itemId = oid(input.itemId);
+    const itemName = await nameOf(itemId);
     const lines: Line[] = [
       { type: "consume", itemId, locationId: center.locationId, delta: -input.used, reason: input.reason || `Used on ${wo.number}` },
       { type: "scrap", itemId, locationId: center.locationId, delta: -input.scrap, reason: input.reason || `Scrap on ${wo.number}` },
@@ -497,6 +554,15 @@ export function createProductionRoutes(store: Store) {
     }
     const res = await postLines(store, orgId, actorOf(c.get("user")), wo, lines);
     if (!res.ok) return c.json({ error: res.error }, res.status);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "production.consumed",
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: `Reported usage on ${wo.number}: ${itemName} used ${input.used}, scrap ${input.scrap}, remnant ${input.remnant}`,
+      snapshot: { item: itemName, used: input.used, scrap: input.scrap, remnant: input.remnant },
+      refs: { movementIds: res.movementIds.map((id) => id.toHexString()) },
+    });
     return c.json(await afterPost(wo, res.movementIds), 201);
   });
 
@@ -518,6 +584,15 @@ export function createProductionRoutes(store: Store) {
     ];
     const res = await postLines(store, orgId, actorOf(c.get("user")), wo, lines);
     if (!res.ok) return c.json({ error: res.error }, res.status);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action: "production.output",
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: `Reported output on ${wo.number}: ${input.good} good, ${input.scrap} scrap`,
+      snapshot: { good: input.good, scrap: input.scrap },
+      refs: { movementIds: res.movementIds.map((id) => id.toHexString()) },
+    });
     return c.json(await afterPost(wo, res.movementIds), 201);
   });
 
