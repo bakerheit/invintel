@@ -74,5 +74,9 @@ describe("members", () => {
     // A member can leave on their own; afterwards the org is a 404 for them.
     expect((await send(m1.cookie, `${base}/${m1.id}`, "DELETE")).status).toBe(204);
     expect((await send(m1.cookie, `/api/orgs/${owner.org.id}/overview`, "GET")).status).toBe(404);
+    // Every change is in the audit log.
+    const log = await (await send(owner.cookie, `/api/orgs/${owner.org.id}/audit?limit=100`, "GET")).json();
+    const actions = log.events.map((e: { action: string }) => e.action).filter((a: string) => a !== "member.joined" && a !== "organization.created");
+    expect(actions.sort()).toEqual(["member.left", "member.removed", "member.removed", "member.role_changed", "member.role_changed"].sort());
   });
 });

@@ -316,6 +316,9 @@ export const AUDIT_ACTIONS = [
   "organization.renamed",
   "organization.join_code_rotated",
   "member.joined",
+  "member.role_changed",
+  "member.removed",
+  "member.left",
   "stock.received",
   "stock.adjusted",
   "stock.moved",
@@ -388,6 +391,8 @@ export function formatAuditValue(field: string, value: unknown): string {
   if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
   const text = String(value);
   return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+}
+
 // ---------- overview ----------
 
 export type AttentionStatus = "out" | "low";

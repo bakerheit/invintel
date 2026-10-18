@@ -3,6 +3,7 @@ import { memberRoleInputSchema, objectIdSchema } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
+import { auditActor, recordAudit } from "./audit.js";
 import type { Store } from "./db.js";
 import { ROLE_RANK, type OrgEnv } from "./org-access.js";
 
@@ -19,13 +20,26 @@ export function createMemberRoutes(store: Store) {
 
   const target = async (c: { get: (k: "org") => { _id: ObjectId } }, userId: string) =>
     store.memberships.findOne({ orgId: c.get("org")._id, userId: new ObjectId(userId) });
+  const nameOf = async (userId: ObjectId) => (await store.users.findOne({ _id: userId }))?.name ?? "Unknown";
 
   r.patch("/:userId", zValidator("param", params), zValidator("json", memberRoleInputSchema), async (c) => {
     if (c.get("role") !== "owner") return c.json({ error: "Only the owner can change roles" }, 403);
     const m = await target(c, c.req.valid("param").userId);
     if (!m) return c.json({ error: "Member not found" }, 404);
     if (m.role === "owner") return c.json({ error: "The owner's role can't be changed" }, 409);
-    await store.memberships.updateOne({ _id: m._id }, { $set: { role: c.req.valid("json").role } });
+    const role = c.req.valid("json").role;
+    await store.memberships.updateOne({ _id: m._id }, { $set: { role } });
+    if (role !== m.role) {
+      const name = await nameOf(m.userId);
+      await recordAudit(store, {
+        orgId: m.orgId,
+        actor: auditActor(c.get("user")),
+        action: "member.role_changed",
+        entity: { type: "member", id: m.userId.toHexString(), label: name },
+        summary: `Changed ${name}'s role from ${m.role} to ${role}`,
+        changes: [{ field: "role", from: m.role, to: role }],
+      });
+    }
     return c.json({ userId: m.userId.toHexString(), role: c.req.valid("json").role });
   });
 
@@ -41,6 +55,14 @@ export function createMemberRoutes(store: Store) {
       return c.json({ error: m.role === "admin" ? "Only the owner can remove an admin" : "You need to be an admin to remove people" }, 403);
     }
     await store.memberships.deleteOne({ _id: m._id });
+    const name = await nameOf(m.userId);
+    await recordAudit(store, {
+      orgId: m.orgId,
+      actor: auditActor(c.get("user")),
+      action: leaving ? "member.left" : "member.removed",
+      entity: { type: "member", id: m.userId.toHexString(), label: name },
+      summary: leaving ? `${name} left the organization` : `Removed ${name} (${m.role}) from the organization`,
+    });
     return c.body(null, 204);
   });
 
