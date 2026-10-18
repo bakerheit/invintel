@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { importInputSchema, itemInputSchema, type ImportResult, type ImportRow } from "@invintel/shared";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { ObjectId } from "mongodb";
 import { auditActor, itemEntity, recordAudit } from "./audit.js";
 import { csvNumber, csvText, parseCsv } from "./csv.js";
@@ -68,7 +69,7 @@ export function createDataRoutes(store: Store) {
    * Creates new items (and their opening stock) from a spreadsheet. Existing SKUs are never changed, so running the
    * same file twice can't double anything. Rows that repeat a SKU add stock at another location. Send dryRun first.
    */
-  r.post("/items/import", requireRole("admin"), zValidator("json", importInputSchema), async (c) => {
+  r.post("/items/import", requireRole("admin"), bodyLimit({ maxSize: 3 * 1024 * 1024, onError: (c) => c.json({ error: "That file is too big. Split it into smaller files." }, 413) }), zValidator("json", importInputSchema), async (c) => {
     const orgId = c.get("org")._id;
     const { csv, dryRun } = c.req.valid("json");
     const table = parseCsv(csv);

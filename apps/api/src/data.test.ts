@@ -94,5 +94,8 @@ describe("items import and export", () => {
     const stranger = await signUp({ mode: "create", name: "Other" });
     expect((await call(stranger.cookie, `${base}/data/items.csv`)).status).toBe(404);
     expect((await call(cookie, `${base}/data/items/import`, { csv: "name,qty\nX,1", dryRun: true })).status).toBe(400);
+    // A huge body is refused before it is parsed.
+    const huge = await call(cookie, `${base}/data/items/import`, { csv: `sku,name\n${"x".repeat(3 * 1024 * 1024)}`, dryRun: true });
+    expect(huge.status).toBe(413);
   });
 });
