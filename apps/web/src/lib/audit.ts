@@ -18,6 +18,16 @@ export const ACTION_META: Record<AuditAction, { label: string; className: string
   "stock.adjusted": { label: "Stock adjusted", className: "bg-secondary text-secondary-foreground" },
   "stock.moved": { label: "Stock moved", className: "bg-accent text-accent-foreground" },
   "stock.reversed": { label: "Stock reversed", className: "bg-warning-soft text-warning" },
+  "work_center.created": { label: "Work center created", className: "bg-success-soft text-success" },
+  "work_center.updated": { label: "Work center edited", className: "bg-accent text-accent-foreground" },
+  "bom.created": { label: "BOM saved", className: "bg-success-soft text-success" },
+  "work_order.created": { label: "Work order created", className: "bg-success-soft text-success" },
+  "work_order.released": { label: "Work order released", className: "bg-accent text-accent-foreground" },
+  "work_order.completed": { label: "Work order done", className: "bg-success-soft text-success" },
+  "work_order.cancelled": { label: "Work order cancelled", className: "bg-warning-soft text-warning" },
+  "production.loaded": { label: "Material loaded", className: "bg-accent text-accent-foreground" },
+  "production.consumed": { label: "Usage reported", className: "bg-secondary text-secondary-foreground" },
+  "production.output": { label: "Output reported", className: "bg-success-soft text-success" },
 };
 
 /** The "what" filter on the audit page. Each maps to an action prefix. */

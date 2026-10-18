@@ -1,4 +1,17 @@
 import type {
+  Bom,
+  BomInput,
+  ConsumeInput,
+  LoadInput,
+  OutputInput,
+  ProductionPosted,
+  VarianceSummaryRow,
+  WorkCenter,
+  WorkCenterInput,
+  WorkOrder,
+  WorkOrderAction,
+  WorkOrderInput,
+  WorkOrderVariance,
   ActivityPage,
   AuditPage,
   AuditVerification,
@@ -142,4 +155,27 @@ export const api = {
     request<PostedDocument>(`/orgs/${orgId}/receipts`, post(input)),
   move: (orgId: string, input: Partial<MoveInput> & Pick<MoveInput, "itemId" | "fromLocationId" | "toLocationId" | "quantity">) =>
     request<PostedDocument>(`/orgs/${orgId}/moves`, post(input)),
+
+  // Production: work centers, BOMs, work orders, floor actions, variance.
+  workCenters: (orgId: string) => request<WorkCenter[]>(`/orgs/${orgId}/production/work-centers`),
+  createWorkCenter: (orgId: string, input: Partial<WorkCenterInput> & Pick<WorkCenterInput, "name" | "locationId">) =>
+    request<WorkCenter>(`/orgs/${orgId}/production/work-centers`, post(input)),
+  boms: (orgId: string, all = false) => request<Bom[]>(`/orgs/${orgId}/production/boms${all ? "?all=1" : ""}`),
+  createBom: (orgId: string, input: Partial<BomInput> & Pick<BomInput, "outputItemId" | "inputs">) =>
+    request<Bom>(`/orgs/${orgId}/production/boms`, post(input)),
+  workOrders: (orgId: string, status?: string) =>
+    request<WorkOrder[]>(`/orgs/${orgId}/production/work-orders${status ? `?status=${status}` : ""}`),
+  createWorkOrder: (orgId: string, input: Partial<WorkOrderInput> & Pick<WorkOrderInput, "quantity" | "workCenterId">) =>
+    request<WorkOrder>(`/orgs/${orgId}/production/work-orders`, post(input)),
+  workOrderAction: (orgId: string, id: string, action: WorkOrderAction["action"]) =>
+    request<WorkOrder>(`/orgs/${orgId}/production/work-orders/${id}/action`, post({ action })),
+  loadMaterial: (orgId: string, id: string, input: LoadInput) =>
+    request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/load`, post(input)),
+  reportUsage: (orgId: string, id: string, input: Partial<ConsumeInput> & Pick<ConsumeInput, "itemId" | "used">) =>
+    request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/consume`, post(input)),
+  reportOutput: (orgId: string, id: string, input: Partial<OutputInput> & Pick<OutputInput, "good" | "toLocationId">) =>
+    request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/output`, post(input)),
+  workOrderVariance: (orgId: string, id: string) =>
+    request<WorkOrderVariance>(`/orgs/${orgId}/production/work-orders/${id}/variance`),
+  varianceSummary: (orgId: string) => request<VarianceSummaryRow[]>(`/orgs/${orgId}/production/variance`),
 };

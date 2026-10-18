@@ -16,6 +16,8 @@ import AuditPage from "./pages/audit";
 import FloorHome from "./pages/floor/home";
 import LookupPage from "./pages/floor/lookup";
 import MovePage from "./pages/floor/move";
+import ProductionFloorPage from "./pages/floor/production";
+import ProductionPage from "./pages/production";
 import ReceivePage from "./pages/floor/receive";
 import InventoryPage from "./pages/inventory";
 import ItemDetailPage from "./pages/item-detail";
@@ -72,12 +74,14 @@ createRoot(document.getElementById("root")!).render(
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />
+              <Route path="production" element={<ProductionPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="floor" element={<FloorLayout />}>
               <Route index element={<FloorHome />} />
               <Route path="receive" element={<ReceivePage />} />
               <Route path="move" element={<MovePage />} />
+              <Route path="production" element={<ProductionFloorPage />} />
               <Route path="lookup" element={<LookupPage />} />
             </Route>
           </Route>

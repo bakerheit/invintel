@@ -27,6 +27,10 @@ const TYPE_STYLE: Record<MovementType, { label: string; className: string }> = {
   adjust: { label: "Adjusted", className: "bg-secondary text-secondary-foreground" },
   transfer: { label: "Moved", className: "bg-accent text-accent-foreground" },
   reversal: { label: "Reversal", className: "bg-warning-soft text-warning" },
+  load: { label: "Loaded", className: "bg-accent text-accent-foreground" },
+  consume: { label: "Used", className: "bg-secondary text-secondary-foreground" },
+  produce: { label: "Produced", className: "bg-success-soft text-success" },
+  scrap: { label: "Scrap", className: "bg-warning-soft text-warning" },
 };
 
 function useDebounced<T>(value: T, ms = 300) {

@@ -1,5 +1,5 @@
 import type { OrgSummary } from "@invintel/shared";
-import { Check, ChevronsUpDown, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, Sun } from "lucide-react";
+import { Check, ChevronsUpDown, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -44,6 +44,7 @@ export const navItems = (orgId: string) => [
   { to: `/o/${orgId}/inventory`, end: false, label: "Inventory", icon: Package, adminOnly: false },
   { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History, adminOnly: false },
   { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin, adminOnly: false },
+  { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false },
   { to: `/o/${orgId}/audit`, end: false, label: "Audit log", icon: ShieldCheck, adminOnly: true },
   { to: `/o/${orgId}/settings`, end: false, label: "Settings", icon: Settings, adminOnly: false },
 ];

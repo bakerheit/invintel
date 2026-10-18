@@ -196,7 +196,7 @@ export const transferInputSchema = z
   });
 export type TransferInput = z.infer<typeof transferInputSchema>;
 
-export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal"]);
+export const movementTypeSchema = z.enum(["receive", "adjust", "transfer", "reversal", "load", "consume", "produce", "scrap"]);
 export type MovementType = z.infer<typeof movementTypeSchema>;
 export const MOVEMENT_TYPES = movementTypeSchema.options;
 
@@ -308,7 +308,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -329,6 +329,16 @@ export const AUDIT_ACTIONS = [
   "stock.adjusted",
   "stock.moved",
   "stock.reversed",
+  "work_center.created",
+  "work_center.updated",
+  "bom.created",
+  "work_order.created",
+  "work_order.released",
+  "work_order.completed",
+  "work_order.cancelled",
+  "production.loaded",
+  "production.consumed",
+  "production.output",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -531,3 +541,4 @@ export interface UnitsPosted {
   units: StockUnit[];
   movementIds: string[];
 }
+export * from "./production.js";

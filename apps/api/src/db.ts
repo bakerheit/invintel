@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type Db, type ObjectId } from "mongodb";
-import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole } from "@invintel/shared";
+import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -134,6 +134,48 @@ export interface AuditEventDoc {
   hash: string;
 }
 
+export interface WorkCenterDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  code: string;
+  description: string;
+  locationId: ObjectId;
+  active: boolean;
+  createdAt: Date;
+}
+
+export interface BomDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  outputItemId: ObjectId;
+  outputQuantity: number;
+  yieldPct: number;
+  inputs: { itemId: ObjectId; quantity: number; scrapPct: number }[];
+  note: string;
+  version: number;
+  status: "active" | "retired";
+  createdAt: Date;
+}
+
+export interface WorkOrderDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  number: string;
+  status: WorkOrderStatus;
+  bomId: ObjectId;
+  bomVersion: number;
+  outputItemId: ObjectId;
+  quantity: number;
+  workCenterId: ObjectId;
+  dueDate: string | null;
+  note: string;
+  /** Snapshot taken when the order was made, so a later BOM version can't change an open order. */
+  requirements: { itemId: ObjectId; expected: number }[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -147,6 +189,9 @@ export interface Store {
   movements: Collection<MovementDoc>;
   audit: Collection<AuditEventDoc>;
   units: Collection<StockUnitDoc>;
+  workCenters: Collection<WorkCenterDoc>;
+  boms: Collection<BomDoc>;
+  workOrders: Collection<WorkOrderDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -174,6 +219,9 @@ export async function connect(
     movements: db.collection("stock_movements"),
     audit: db.collection("audit_events"),
     units: db.collection("stock_units"),
+    workCenters: db.collection("work_centers"),
+    boms: db.collection("boms"),
+    workOrders: db.collection("work_orders"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -213,6 +261,15 @@ export async function connect(
     store.audit.createIndex({ orgId: 1, seq: 1 }, { unique: true }),
     store.audit.createIndex({ orgId: 1, "entity.type": 1, "entity.id": 1, seq: -1 }),
     store.audit.createIndex({ orgId: 1, action: 1, seq: -1 }),
+    store.movements.createIndex({ workOrderId: 1 }, { sparse: true }),
+    store.workCenters.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.workCenters.createIndex(
+      { orgId: 1, code: 1 },
+      { unique: true, collation: caseInsensitive, partialFilterExpression: { code: { $gt: "" } } },
+    ),
+    store.boms.createIndex({ orgId: 1, outputItemId: 1, version: 1 }, { unique: true }),
+    store.workOrders.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.workOrders.createIndex({ orgId: 1, status: 1 }),
   ]);
   return store;
 }
