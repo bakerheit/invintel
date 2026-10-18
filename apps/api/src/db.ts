@@ -387,6 +387,17 @@ export interface B2BMessageDoc {
   updatedAt: Date;
 }
 
+export interface ExchangeIdentityDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  exchangeId: string;
+  publicKey: string;
+  /** Sealed with EXCHANGE_KEY_SECRET when that is set. */
+  privateKey: string;
+  baseUrl: string;
+  createdAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -413,6 +424,7 @@ export interface Store {
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
   tradingPartners: Collection<TradingPartnerDoc>;
+  exchangeIdentities: Collection<ExchangeIdentityDoc>;
   b2bMessages: Collection<B2BMessageDoc>;
   drills: Collection<DrillDoc>;
   close: () => Promise<void>;
@@ -454,6 +466,7 @@ export async function connect(
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
     tradingPartners: db.collection("trading_partners"),
+    exchangeIdentities: db.collection("exchange_identities"),
     b2bMessages: db.collection("b2b_messages"),
     drills: db.collection("recall_drills"),
     close: () => client.close(),
@@ -507,6 +520,8 @@ export async function connect(
     store.ncrs.createIndex({ orgId: 1, status: 1, heldAt: -1 }),
     store.ncrs.createIndex({ unitId: 1 }, { sparse: true }),
     store.tradingPartners.createIndex({ orgId: 1, name: 1 }, { unique: true, collation: caseInsensitive }),
+    store.exchangeIdentities.createIndex({ orgId: 1 }, { unique: true }),
+    store.exchangeIdentities.createIndex({ exchangeId: 1 }, { unique: true }),
     // The same key from the same partner in the same direction is the same document.
     store.b2bMessages.createIndex({ orgId: 1, partnerId: 1, direction: 1, idempotencyKey: 1 }, { unique: true }),
     store.b2bMessages.createIndex({ orgId: 1, createdAt: -1 }),

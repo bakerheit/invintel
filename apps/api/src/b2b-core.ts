@@ -45,6 +45,14 @@ export const registerBridge = (b: Bridge) => { bridges.set(b.id, b); };
 export const getBridge = (id: string) => bridges.get(id);
 export const bridgeIds = () => [...bridges.keys()];
 
+/**
+ * What to do with a document once it has been verified and stored (answer a question, record an acknowledgement...).
+ * A hook runs after the message is safely stored; if it throws, the message stays stored and the error is logged.
+ */
+export type InboundHook = (store: Store, orgId: ObjectId, partner: TradingPartnerDoc, message: B2BMessageDoc) => Promise<void>;
+const inboundHooks = new Map<string, InboundHook>();
+export const registerInboundHook = (bridgeId: string, hook: InboundHook) => { inboundHooks.set(bridgeId, hook); };
+
 /** A bridge that does nothing outside the process: accepts every document, answers like a cooperative partner. For tests and demos. */
 export const loopbackBridge: Bridge = {
   id: "loopback",
@@ -188,6 +196,11 @@ export async function receiveMessage(store: Store, orgId: ObjectId, partnerId: O
     return { ok: true, message: (await store.b2bMessages.findOne({ orgId, partnerId, direction: "in", idempotencyKey: verified.idempotencyKey }))!, duplicate: true };
   }
   await audit(store, orgId, { id: null, name: partner.name }, "b2b.message_received", msg, partner, `${partner.name}: ${msg.docType} received${partner.mode === "test" ? " (test partner)" : ""}`);
+  try {
+    await inboundHooks.get(partner.bridge)?.(store, orgId, partner, msg);
+  } catch (e) {
+    console.error(`inbound hook for ${partner.bridge} failed`, e);
+  }
   return { ok: true, message: msg, duplicate: false };
 }
 

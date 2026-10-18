@@ -1,3 +1,4 @@
+import { createExchangeInboxRoutes, registerInvintelExchange } from "./exchange.js";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { createAuth, type AuthEnv, type AuthOptions } from "./auth.js";
@@ -16,6 +17,9 @@ export function createApp(store: Store, authOptions: AuthOptions) {
   app.route("/api/auth", auth.routes);
   // Partners post documents here without a session; each partner's bridge verifies the request itself.
   app.route("/api/b2b/inbound", createB2BInboundRoutes(store));
+  // Invintel partners deliver signed documents here; the signature, not a session, is what is checked.
+  app.route("/api/exchange", createExchangeInboxRoutes(store));
+  registerInvintelExchange(store);
 
   // Everything else needs a session. Inventory lives under /api/orgs/:orgId.
   const api = new Hono<AuthEnv>();
