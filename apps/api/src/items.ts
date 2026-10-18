@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import {
   adjustmentInputSchema,
   itemCreateSchema,
+  formatQty,
   itemUpdateSchema,
   lineValueCents,
   objectIdSchema,
@@ -36,7 +37,7 @@ const toMovement = (m: MovementDoc): StockMovement => ({
 });
 
 /** The fields of an item that are worth recording. */
-const itemSnapshot = (i: ItemDoc) => ({
+export const itemSnapshot = (i: ItemDoc) => ({
   sku: i.sku,
   name: i.name,
   description: i.description,
@@ -54,6 +55,59 @@ export const actorOf = (user: { id: string; name: string }): Actor => ({
   userId: new ObjectId(user.id),
   userName: user.name,
 });
+
+export type DeleteItemResult = { ok: true } | { ok: false; status: 404 | 409; error: string };
+
+/**
+ * Removes an item. Whatever was on hand is written off through the ledger first, so history still
+ * adds up. `writeOffReason` and `verb` let callers (import undo) say why in the ledger and audit log.
+ */
+export async function deleteItem(
+  store: Store,
+  orgId: ObjectId,
+  user: { id: string; name: string },
+  _id: ObjectId,
+  opts: { writeOffReason?: string; verb?: string } = {},
+): Promise<DeleteItemResult> {
+  const doc = await store.items.findOne({ _id, orgId });
+  if (!doc) return { ok: false, status: 404, error: "Item not found" };
+  // Rolls and pallets belong to the item: deleting it would leave them orphaned and still counted as stock.
+  if (await store.units.findOne({ itemId: _id, status: { $ne: "consumed" } }, { projection: { _id: 1 } })) {
+    return { ok: false, status: 409, error: "This item still has rolls or pallets in stock. Use them up first." };
+  }
+
+  const actor = actorOf(user);
+  const stock = await store.stock.find({ itemId: _id, quantity: { $gt: 0 } }).toArray();
+  const locations = await store.locations.find({ _id: { $in: stock.map((s) => s.locationId) } }).toArray();
+  const locationName = new Map(locations.map((l) => [l._id.toHexString(), l.name]));
+  const total = stock.reduce((sum, s) => sum + s.quantity, 0);
+
+  const itemGone = await store.items.deleteOne({ _id, orgId });
+  if (!itemGone.deletedCount) return { ok: false, status: 404, error: "Item not found" };
+
+  // The ledger is never erased. Whatever was on hand is written off through it, so history still adds up.
+  const writeOffs: string[] = [];
+  for (const s of stock) {
+    const id = await logMovement(store, { orgId, type: "adjust", itemId: _id, locationId: s.locationId, delta: -s.quantity, reason: opts.writeOffReason ?? "Item deleted", actor });
+    writeOffs.push(id.toHexString());
+  }
+  await store.stock.deleteMany({ itemId: _id });
+
+  await recordAudit(store, {
+    orgId,
+    actor: auditActor(user),
+    action: "item.deleted",
+    entity: itemEntity(_id, doc),
+    summary: `${opts.verb ?? "Deleted"} ${doc.name} (${doc.sku})${total ? ` and wrote off ${doc.unit && doc.unit !== "ea" ? formatQty(total, doc) : `${total.toLocaleString("en-US")} units`}` : ""}`,
+    snapshot: {
+      ...itemSnapshot(doc),
+      quantityWrittenOff: total,
+      stock: stock.map((s) => ({ location: locationName.get(s.locationId.toHexString()) ?? "Unknown", quantity: s.quantity })),
+    },
+    refs: { movementIds: writeOffs, itemId: _id.toHexString() },
+  });
+  return { ok: true };
+}
 
 export function createItemRoutes(store: Store) {
   const r = new Hono<OrgEnv>();
@@ -174,46 +228,8 @@ export function createItemRoutes(store: Store) {
   });
 
   r.delete("/:id", zValidator("param", idParam), async (c) => {
-    const orgId = c.get("org")._id;
-    const _id = new ObjectId(c.req.valid("param").id);
-    const doc = await store.items.findOne({ _id, orgId });
-    if (!doc) return c.json({ error: "Item not found" }, 404);
-    // Rolls and pallets belong to the item: deleting it would leave them orphaned and still counted as stock.
-    if (await store.units.findOne({ itemId: _id, status: { $ne: "consumed" } }, { projection: { _id: 1 } })) {
-      return c.json({ error: "This item still has rolls or pallets in stock. Use them up first." }, 409);
-    }
-
-    const actor = actorOf(c.get("user"));
-    const stock = await store.stock.find({ itemId: _id, quantity: { $gt: 0 } }).toArray();
-    const locations = await store.locations.find({ _id: { $in: stock.map((s) => s.locationId) } }).toArray();
-    const locationName = new Map(locations.map((l) => [l._id.toHexString(), l.name]));
-    const total = stock.reduce((sum, s) => sum + s.quantity, 0);
-
-    const itemGone = await store.items.deleteOne({ _id, orgId });
-    if (!itemGone.deletedCount) return c.json({ error: "Item not found" }, 404);
-
-    // The ledger is never erased. Whatever was on hand is written off through it, so history still adds up.
-    const writeOffs: string[] = [];
-    for (const s of stock) {
-      const id = await logMovement(store, { orgId, type: "adjust", itemId: _id, locationId: s.locationId, delta: -s.quantity, reason: "Item deleted", actor });
-      writeOffs.push(id.toHexString());
-    }
-    await store.stock.deleteMany({ itemId: _id });
-
-    await recordAudit(store, {
-      orgId,
-      actor: auditActor(c.get("user")),
-      action: "item.deleted",
-      entity: itemEntity(_id, doc),
-      summary: `Deleted ${doc.name} (${doc.sku})${total ? ` and wrote off ${total.toLocaleString("en-US")} units` : ""}`,
-      snapshot: {
-        ...itemSnapshot(doc),
-        quantityWrittenOff: total,
-        stock: stock.map((s) => ({ location: locationName.get(s.locationId.toHexString()) ?? "Unknown", quantity: s.quantity })),
-      },
-      refs: { movementIds: writeOffs, itemId: _id.toHexString() },
-    });
-    return c.body(null, 204);
+    const result = await deleteItem(store, c.get("org")._id, c.get("user"), new ObjectId(c.req.valid("param").id));
+    return result.ok ? c.body(null, 204) : c.json({ error: result.error }, result.status);
   });
 
   r.get("/:id/movements", zValidator("param", idParam), async (c) => {
