@@ -1,4 +1,6 @@
 import type {
+  Count,
+  CountListRow,
   Bom,
   BomInput,
   ConsumeInput,
@@ -132,6 +134,16 @@ export const api = {
     request<PurchaseOrder>(`/orgs/${orgId}/purchasing/orders/${id}/${action}`, post({})),
   receiveOrder: (orgId: string, id: string, input: PoReceiveInput) =>
     request<PoReceiveResult>(`/orgs/${orgId}/purchasing/orders/${id}/receive`, post(input)),
+  listCounts: (orgId: string) => request<CountListRow[]>(`/orgs/${orgId}/counts`),
+  getCount: (orgId: string, id: string) => request<Count>(`/orgs/${orgId}/counts/${id}`),
+  startCount: (orgId: string, locationId: string) => request<Count>(`/orgs/${orgId}/counts`, post({ locationId })),
+  countItem: (orgId: string, id: string, itemId: string, counted: number) =>
+    request<Count>(`/orgs/${orgId}/counts/${id}/lines`, { method: "PUT", body: body({ itemId, counted }) }),
+  uncountItem: (orgId: string, id: string, itemId: string) =>
+    request<Count>(`/orgs/${orgId}/counts/${id}/lines/${itemId}`, { method: "DELETE" }),
+  postCount: (orgId: string, id: string, zeroUncounted: boolean) =>
+    request<{ count: Count; adjustments: number; failures: string[] }>(`/orgs/${orgId}/counts/${id}/post`, post({ zeroUncounted })),
+  cancelCount: (orgId: string, id: string) => request<Count>(`/orgs/${orgId}/counts/${id}/cancel`, post({})),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 

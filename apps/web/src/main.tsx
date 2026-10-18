@@ -26,6 +26,8 @@ import LocationsPage from "./pages/locations";
 import LoginPage from "./pages/login";
 import NewOrgPage from "./pages/new-org";
 import OrgRedirect from "./pages/org-redirect";
+import CountsPage from "./pages/counts";
+import CountFloorPage from "./pages/floor/count";
 import PurchasingPage from "./pages/purchasing";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
@@ -72,6 +74,7 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<OverviewPage />} />
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="inventory/:itemId" element={<ItemDetailPage />} />
+              <Route path="counts" element={<CountsPage />} />
               <Route path="purchasing" element={<PurchasingPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
@@ -84,6 +87,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="receive" element={<ReceivePage />} />
               <Route path="move" element={<MovePage />} />
               <Route path="production" element={<ProductionFloorPage />} />
+              <Route path="count" element={<CountFloorPage />} />
               <Route path="lookup" element={<LookupPage />} />
             </Route>
           </Route>
