@@ -141,6 +141,8 @@ const itemFields = {
   category: z.string().trim().max(100),
   reorderLevel: z.number().int().min(0),
   unitCostCents: z.number().int().min(0),
+  /** "unit" items (rolls, pallets) are held as individually labelled units with their own remaining quantity. */
+  tracking: z.enum(["quantity", "unit"]),
   /** Product barcodes that identify this item when scanned. An item can have several (each, case, pallet). */
   barcodes: z.array(barcodeSchema).max(20).transform((codes) => [...new Set(codes)]),
 };
@@ -152,6 +154,7 @@ export const itemInputSchema = z.object({
   reorderLevel: itemFields.reorderLevel.default(0),
   unitCostCents: itemFields.unitCostCents.default(0),
   barcodes: itemFields.barcodes.default([]),
+  tracking: itemFields.tracking.default("quantity"),
 });
 export type ItemInput = z.infer<typeof itemInputSchema>;
 
@@ -253,12 +256,15 @@ export interface PostedDocument {
 export type LookupResult =
   | { kind: "item"; item: Item }
   | { kind: "location"; location: Location }
+  | { kind: "unit"; unit: StockUnit }
   | { kind: "none" };
 
 // ---------- activity (the ledger) ----------
 
 export interface ActivityEntry {
   id: string;
+  /** The roll or pallet this entry is about, for unit-tracked items. */
+  unitCode?: string;
   type: MovementType;
   itemId: string;
   itemSku: string;
@@ -494,5 +500,64 @@ export const importInputSchema = z.object({
   dryRun: z.boolean().default(true),
 });
 export type ImportInput = z.input<typeof importInputSchema>;
+// ---------- stock units (rolls, pallets) ----------
+
+export const unitStatusSchema = z.enum(["available", "quarantined", "consumed"]);
+export type UnitStatus = z.infer<typeof unitStatusSchema>;
+
+export interface StockUnit {
+  id: string;
+  /** What's printed on the label and read by a scanner. */
+  code: string;
+  itemId: string;
+  itemSku: string;
+  itemName: string;
+  lot: string;
+  /** What's left. Shrinks as the unit is used. */
+  quantity: number;
+  initialQuantity: number;
+  locationId: string;
+  locationPath: string;
+  status: UnitStatus;
+  createdAt: string;
+}
+
+export const receiveUnitsInputSchema = z
+  .object({
+    itemId: objectIdSchema,
+    locationId: objectIdSchema,
+    /** Quantity in each unit (e.g. kg on a roll). */
+    quantity: z.number().int().positive(),
+    /** How many identical units arrived. */
+    count: z.number().int().min(1).max(200).default(1),
+    lot: z.string().trim().max(64).default(""),
+    /** Pre-printed labels to use, one per unit. Otherwise codes are generated. */
+    codes: z.array(z.string().trim().min(1).max(64)).max(200).optional(),
+    reference: z.string().trim().max(200).default(""),
+  })
+  .refine((v) => !v.codes || v.codes.length === v.count, { message: "Give one code per unit", path: ["codes"] });
+export type ReceiveUnitsInput = z.infer<typeof receiveUnitsInputSchema>;
+
+export const moveUnitInputSchema = z.object({
+  toLocationId: objectIdSchema,
+  reason: z.string().trim().max(200).default(""),
+});
+export type MoveUnitInput = z.infer<typeof moveUnitInputSchema>;
+
+export const adjustUnitInputSchema = z.object({
+  delta: z.number().int().refine((n) => n !== 0, "Change must not be 0"),
+  reason: z.string().trim().max(200).default(""),
+});
+export type AdjustUnitInput = z.infer<typeof adjustUnitInputSchema>;
+
+export interface UnitsPage {
+  units: StockUnit[];
+  nextBefore?: string;
+}
+
+export interface UnitsPosted {
+  units: StockUnit[];
+  movementIds: string[];
+}
 export * from "./production.js";
 export * from "./purchasing.js";

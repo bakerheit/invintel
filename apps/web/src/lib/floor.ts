@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 /** `unknownCode` is set when nothing matched at all, so the caller can offer to add it. */
 type Resolved<T> = { ok: true; value: T } | { ok: false; error: string; unknownCode?: string };
 
-const describe = (kind: "item" | "location") => (kind === "item" ? "an item" : "a location");
+const describe = (kind: "item" | "location" | "unit") => (kind === "item" ? "an item" : kind === "unit" ? "a roll or pallet label" : "a location");
 
 /** Turn whatever the scanner read into an item, or an error worth showing to someone in gloves. */
 export async function resolveItem(orgId: string, code: string): Promise<Resolved<Item>> {

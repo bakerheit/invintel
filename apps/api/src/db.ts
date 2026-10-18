@@ -60,6 +60,8 @@ export interface ItemDoc {
   unitCostCents: number;
   /** Absent on items created before barcodes existed. */
   barcodes?: string[];
+  /** Absent means "quantity". Unit-tracked items hold stock only as StockUnitDocs. */
+  tracking?: "quantity" | "unit";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,9 +76,29 @@ export interface StockDoc {
   updatedAt: Date;
 }
 
+/** One physical roll or pallet with its own label and remaining quantity. */
+export interface StockUnitDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  itemId: ObjectId;
+  code: string;
+  lot: string;
+  quantity: number;
+  initialQuantity: number;
+  locationId: ObjectId;
+  status: "available" | "quarantined" | "consumed";
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface MovementDoc {
   _id: ObjectId;
   orgId: ObjectId;
+  /** The work order that caused this movement, if any. */
+  workOrderId?: ObjectId;
+  /** Set when the movement is about one specific roll or pallet. */
+  unitId?: ObjectId;
+  unitCode?: string;
   /** Absent on movements recorded before types existed. Use movementType() to read. */
   type?: MovementType;
   itemId: ObjectId;
@@ -90,8 +112,6 @@ export interface MovementDoc {
   reversalOf?: ObjectId;
   /** On an original: the reversal that undid it. */
   reversedBy?: ObjectId;
-  /** Production lines (load, consume, produce, scrap, remnant transfers) carry the work order they belong to. */
-  workOrderId?: ObjectId;
   /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
   purchaseOrderId?: ObjectId;
   createdAt: Date;
@@ -202,6 +222,7 @@ export interface Store {
   stock: Collection<StockDoc>;
   movements: Collection<MovementDoc>;
   audit: Collection<AuditEventDoc>;
+  units: Collection<StockUnitDoc>;
   workCenters: Collection<WorkCenterDoc>;
   boms: Collection<BomDoc>;
   workOrders: Collection<WorkOrderDoc>;
@@ -233,6 +254,7 @@ export async function connect(
     stock: db.collection("stock"),
     movements: db.collection("stock_movements"),
     audit: db.collection("audit_events"),
+    units: db.collection("stock_units"),
     workCenters: db.collection("work_centers"),
     boms: db.collection("boms"),
     workOrders: db.collection("work_orders"),
@@ -270,6 +292,9 @@ export async function connect(
     store.movements.createIndex({ itemId: 1, createdAt: -1 }),
     store.movements.createIndex({ orgId: 1, _id: -1 }),
     store.movements.createIndex({ transferId: 1 }, { sparse: true }),
+    store.units.createIndex({ orgId: 1, code: 1 }, { unique: true, collation: caseInsensitive }),
+    store.units.createIndex({ orgId: 1, itemId: 1, status: 1 }),
+    store.units.createIndex({ orgId: 1, locationId: 1, status: 1 }),
     // seq is unique per org: that's what stops two simultaneous writers both claiming the same link.
     store.audit.createIndex({ orgId: 1, seq: 1 }, { unique: true }),
     store.audit.createIndex({ orgId: 1, "entity.type": 1, "entity.id": 1, seq: -1 }),

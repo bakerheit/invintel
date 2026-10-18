@@ -10,6 +10,7 @@ export const toItem = ({ _id, orgId: _orgId, stock, createdAt, updatedAt, ...res
   id: _id.toHexString(),
   ...rest,
   barcodes: rest.barcodes ?? [],
+  tracking: rest.tracking ?? "quantity",
   quantity: stock.reduce((sum, s) => sum + s.quantity, 0),
   stock: stock.map((s) => ({ locationId: s.locationId.toHexString(), quantity: s.quantity })),
   createdAt: createdAt.toISOString(),

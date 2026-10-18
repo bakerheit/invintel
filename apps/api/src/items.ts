@@ -16,6 +16,7 @@ import { conflictMessage, findCodeConflict } from "./item-codes.js";
 import { loadItem, loadItems, toItem } from "./item-queries.js";
 import type { OrgEnv } from "./org-access.js";
 import { logMovement, postAdjustment, postMove, type Actor } from "./stock-service.js";
+import { unitCodeTaken } from "./units.js";
 
 const idParam = z.object({ id: objectIdSchema });
 
@@ -40,6 +41,7 @@ const itemSnapshot = (i: ItemDoc) => ({
   reorderLevel: i.reorderLevel,
   unitCostCents: i.unitCostCents,
   barcodes: i.barcodes ?? [],
+  tracking: i.tracking ?? "quantity",
 });
 
 export const actorOf = (user: { id: string; name: string }): Actor => ({
@@ -66,6 +68,12 @@ export function createItemRoutes(store: Store) {
       !(await store.locations.findOne({ _id: locationId, orgId }, { projection: { _id: 1 } }))
     ) {
       return c.json({ error: "Location not found" }, 400);
+    }
+    if (input.tracking === "unit" && initialStock) {
+      return c.json({ error: "Unit-tracked items get their stock by receiving units. Create the item first, then receive rolls or pallets." }, 400);
+    }
+    if (await unitCodeTaken(store, orgId, [input.sku, ...input.barcodes])) {
+      return c.json({ error: "That code is already printed on a roll or pallet label" }, 409);
     }
     const barcodeClash = await findCodeConflict(store, orgId, input.barcodes, { against: ["sku", "barcodes"] });
     if (barcodeClash) return c.json({ error: conflictMessage(barcodeClash, "Barcode") }, 409);
@@ -106,6 +114,18 @@ export function createItemRoutes(store: Store) {
     const orgId = c.get("org")._id;
     const _id = new ObjectId(c.req.valid("param").id);
     const patch = c.req.valid("json");
+    if (await unitCodeTaken(store, orgId, [...(patch.sku ? [patch.sku] : []), ...(patch.barcodes ?? [])])) {
+      return c.json({ error: "That code is already printed on a roll or pallet label" }, 409);
+    }
+    if (patch.tracking) {
+      // Switching how an item is tracked while it has stock would make the counts disagree.
+      const current = await store.items.findOne({ _id, orgId }, { projection: { tracking: 1 } });
+      if (current && (current.tracking ?? "quantity") !== patch.tracking) {
+        const hasStock = await store.stock.findOne({ itemId: _id, quantity: { $gt: 0 } }, { projection: { _id: 1 } });
+        const hasUnits = await store.units.findOne({ itemId: _id, status: { $ne: "consumed" } }, { projection: { _id: 1 } });
+        if (hasStock || hasUnits) return c.json({ error: "Can't change how this item is tracked while it still has stock" }, 409);
+      }
+    }
     if (patch.barcodes) {
       const clash = await findCodeConflict(store, orgId, patch.barcodes, { selfId: _id, against: ["sku", "barcodes"] });
       if (clash) return c.json({ error: conflictMessage(clash, "Barcode") }, 409);
