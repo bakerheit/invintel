@@ -53,7 +53,7 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 
 ### Features on and off
 
-**Settings > Features** (admins) hides Purchasing and Production for organizations that don't use them: the sidebar entries, the Cmd-K results and the Floor tile all disappear, so a small shop sees inventory and nothing else. It only hides: no data is touched, and the API stays available. Turning one back on brings everything back. Changes are in the audit log.
+**Settings > Features** (admins) hides Purchasing and Production for organizations that don't use them: the sidebar entries, the Cmd-K results and the Floor tile all disappear, so a small shop sees inventory and nothing else. No data is touched, and turning one back on brings everything back. While it is off its API answers 403 too, so scripts can't use it either. Changes are in the audit log.
 
 ### Purchasing
 
