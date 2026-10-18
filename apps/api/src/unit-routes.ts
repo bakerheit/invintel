@@ -15,6 +15,7 @@ import type { StockUnitDoc, Store } from "./db.js";
 import { actorOf } from "./items.js";
 import { indexLocations, loadLocations } from "./locations.js";
 import type { OrgEnv } from "./org-access.js";
+import { INSPECT_REASON, openHold } from "./quality.js";
 import { adjustUnit, moveUnit, presentUnits, receiveUnits, type UnitsResult } from "./units.js";
 
 const idParam = z.object({ id: objectIdSchema });
@@ -87,7 +88,19 @@ export function createUnitRoutes(store: Store) {
         locationId: new ObjectId(input.locationId),
       }),
     );
-    return "error" in out ? c.json({ error: out.error }, out.status) : c.json(out.body, 201);
+    if ("error" in out) return c.json({ error: out.error }, out.status);
+    if (input.inspect) {
+      const ncrs: { id: string; number: string }[] = [];
+      for (const u of out.body.units) {
+        const hold = await openHold(store, orgId, actorOf(c.get("user")), { reason: INSPECT_REASON, note: input.reference, source: "receiving", unitId: u.id });
+        if (!hold.ok) return c.json({ error: `Received, but ${u.code} could not be put on hold: ${hold.error}` }, hold.status);
+        ncrs.push({ id: hold.ncr._id.toHexString(), number: hold.ncr.number });
+      }
+      // The unit documents above were read before the hold; show them as held.
+      const held = await presentUnits(store, orgId, await store.units.find({ _id: { $in: out.body.units.map((u) => new ObjectId(u.id)) } }).toArray());
+      return c.json({ ...out.body, units: held, ncrs }, 201);
+    }
+    return c.json(out.body, 201);
   });
 
   r.post("/:id/move", zValidator("param", idParam), zValidator("json", moveUnitInputSchema), async (c) => {

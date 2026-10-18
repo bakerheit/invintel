@@ -120,6 +120,9 @@ const po = await call<{ id: string }>(`${base}/purchasing/orders`, {
 });
 await call(`${base}/purchasing/orders/${po.id}/place`, {});
 
+// Quality: a few bags of starch found wet, put on hold for an admin to decide.
+await call(`${base}/quality/holds`, { itemId: starch, locationId: chem, quantity: 3, reason: "Damaged", note: "Bags wet from a roof leak (demo)" });
+
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();
 process.exit(0);

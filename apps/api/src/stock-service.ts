@@ -10,6 +10,9 @@ export interface Actor {
   userName: string;
 }
 
+/** Stock in a quality hold area is managed from Quality, not by ordinary moves and adjustments. */
+export const ON_HOLD_AREA = "That place is for stock on quality hold. Use Quality to hold or release stock.";
+
 export type Failure = { ok: false; status: 404 | 409 | 422; error: string };
 export type Posted = { ok: true; movementIds: ObjectId[] };
 
@@ -71,20 +74,21 @@ export async function postAdjustment(
   store: Store,
   orgId: ObjectId,
   actor: Actor,
-  input: { itemId: ObjectId; locationId: ObjectId; delta: number; reason: string; type: Extract<MovementType, "adjust" | "receive"> },
+  input: { itemId: ObjectId; locationId: ObjectId; delta: number; reason: string; type: Extract<MovementType, "adjust" | "receive">; supplierLot?: string },
 ): Promise<Posted | Failure> {
-  const { itemId, locationId, delta, reason, type } = input;
+  const { itemId, locationId, delta, reason, type, supplierLot } = input;
   const item = await store.items.findOne({ _id: itemId, orgId }, { projection: { name: 1, sku: 1, tracking: 1 } });
   if (!item) return { ok: false, status: 404, error: "Item not found" };
   if (item.tracking === "unit") return { ok: false, status: 409, error: UNIT_TRACKED };
   const location = await store.locations.findOne({ _id: locationId, orgId });
   if (!location) return { ok: false, status: 404, error: "Location not found" };
+  if (location.type === "quarantine") return { ok: false, status: 409, error: ON_HOLD_AREA };
 
   if ((await changeStock(store, orgId, itemId, locationId, delta)) === null) {
     const have = await quantityAt(store, orgId, itemId, locationId);
     return { ok: false, status: 422, error: `Only ${have} in stock at ${location.name}` };
   }
-  const id = await logMovement(store, { orgId, type, itemId, locationId, delta, reason, actor });
+  const id = await logMovement(store, { orgId, type, itemId, locationId, delta, reason, actor, ...(supplierLot ? { supplierLot } : {}) });
   const amount = Math.abs(delta).toLocaleString("en-US");
   // "Received: PO 9" reads better as "Received 10 × X at Y (PO 9)".
   const detail = type === "receive" ? reason.replace(/^Received:?\s*/, "") : reason;
@@ -120,6 +124,7 @@ export async function postMove(
     store.locations.findOne({ _id: to, orgId }),
   ]);
   if (!fromLoc || !toLoc) return { ok: false, status: 404, error: "Location not found" };
+  if (fromLoc.type === "quarantine" || toLoc.type === "quarantine") return { ok: false, status: 409, error: ON_HOLD_AREA };
 
   if ((await changeStock(store, orgId, itemId, from, -quantity)) === null) {
     const have = await quantityAt(store, orgId, itemId, from);

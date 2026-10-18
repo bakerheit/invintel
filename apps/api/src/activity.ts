@@ -118,6 +118,7 @@ export function createActivityRoutes(store: Store) {
         delta: m.delta,
         reason: m.reason,
         userName: m.userName,
+        ...(m.supplierLot ? { supplierLot: m.supplierLot } : {}),
         ...(m.transferId ? { transferId: m.transferId.toHexString() } : {}),
         ...(m.reversalOf ? { reversalOf: m.reversalOf.toHexString() } : {}),
         reversed: !!m.reversedBy,
@@ -144,6 +145,7 @@ export function createActivityRoutes(store: Store) {
       return c.json({ error: "A reversal can't be reversed. Record a new receipt or adjustment instead." }, 409);
     }
     if (original.reversedBy) return c.json({ error: "That entry has already been reversed" }, 409);
+    if (original.ncrId) return c.json({ error: "That is part of a quality hold. Decide it from Quality instead." }, 409);
     if (original.unitId) {
       return c.json({ error: "Entries for a roll or pallet can't be reversed yet. Move it back or adjust what's left instead." }, 409);
     }

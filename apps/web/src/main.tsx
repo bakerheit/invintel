@@ -19,6 +19,8 @@ import LookupPage from "./pages/floor/lookup";
 import MovePage from "./pages/floor/move";
 import ProductionFloorPage from "./pages/floor/production";
 import ProductionPage from "./pages/production";
+import QualityFloorPage from "./pages/floor/quality";
+import QualityPage from "./pages/quality";
 import ReceivePage from "./pages/floor/receive";
 import InventoryPage from "./pages/inventory";
 import ItemDetailPage from "./pages/item-detail";
@@ -95,6 +97,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="locations" element={<LocationsPage />} />
               <Route path="labels" element={<LabelsPage />} />
               <Route path="production" element={<ProductionPage />} />
+              <Route path="quality" element={<QualityPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="floor" element={<FloorLayout />}>
@@ -102,6 +105,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="receive" element={<ReceivePage />} />
               <Route path="move" element={<MovePage />} />
               <Route path="production" element={<ProductionFloorPage />} />
+              <Route path="quality" element={<QualityFloorPage />} />
               <Route path="count" element={<CountFloorPage />} />
               <Route path="downtime" element={<DowntimeFloorPage />} />
               <Route path="lookup" element={<LookupPage />} />
