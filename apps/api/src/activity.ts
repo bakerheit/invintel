@@ -227,16 +227,16 @@ export function createActivityRoutes(store: Store) {
     const places = await store.locations.find({ _id: { $in: group.map((m) => m.locationId) } }).toArray();
     const placeName = (id: ObjectId) => places.find((l) => l._id.equals(id))?.name ?? "a deleted location";
     const amount = (n: number) => Math.abs(n).toLocaleString("en-US");
+    const out = group.find((m) => m.delta < 0);
+    const into = group.find((m) => m.delta > 0);
     const what =
-      original.transferId && group.length === 2
-        ? (() => {
-            const out = group.find((m) => m.delta < 0)!;
-            const into = group.find((m) => m.delta > 0)!;
-            return `move of ${amount(into.delta)} × ${item.name} from ${placeName(out.locationId)} to ${placeName(into.locationId)}`;
-          })()
-        : movementType(original) === "receive"
-          ? `receipt of ${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`
-          : `adjustment of ${original.delta > 0 ? "+" : "-"}${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`;
+      original.transferId && group.length === 2 && out && into
+        ? `move of ${amount(into.delta)} × ${item.name} from ${placeName(out.locationId)} to ${placeName(into.locationId)}`
+        : group.length > 1
+          ? `${movementType(original)} entry of ${group.length} lines (${item.name})`
+          : movementType(original) === "receive"
+            ? `receipt of ${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`
+            : `adjustment of ${original.delta > 0 ? "+" : "-"}${amount(original.delta)} × ${item.name} at ${placeName(original.locationId)}`;
     await recordAudit(store, {
       orgId,
       actor: auditActor(user),

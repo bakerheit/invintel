@@ -124,6 +124,15 @@ await call(`${base}/purchasing/orders/${po.id}/place`, {});
 // Quality: a few bags of starch found wet, put on hold for an admin to decide.
 await call(`${base}/quality/holds`, { itemId: starch, locationId: chem, quantity: 3, reason: "Damaged", note: "Bags wet from a roof leak (demo)" });
 
+// Scrap: a finished run of RSC-1296 with scrap on material and output, each with a reason (Reports > Scrap and yield trends).
+const wo3 = await call<{ id: string }>(`${prod}/work-orders`, { outputItemId: rsc, quantity: 50, workCenterId: wc.id });
+await call(`${prod}/work-orders/${wo3.id}/action`, { action: "release" });
+await call(`${prod}/work-orders/${wo3.id}/load`, { itemId: kraft, fromLocationId: rackA, quantity: 4 });
+await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, scrap: 1, scrapReason: "Trim" });
+await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, scrap: 1, scrapReason: "Setup" });
+await call(`${prod}/work-orders/${wo3.id}/output`, { good: 44, scrap: 6, scrapReason: "Damaged", toLocationId: fg });
+await call(`${prod}/work-orders/${wo3.id}/action`, { action: "complete" });
+
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();
 process.exit(0);

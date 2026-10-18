@@ -58,7 +58,7 @@ export async function consumeUnit(store: Store, orgId: ObjectId, actor: Actor, w
   const ids: ObjectId[] = [];
   const step = async (delta: number, type: "consume" | "scrap", reason: string) => {
     if (delta === 0) return null;
-    const r = await adjustUnit(store, orgId, actor, unit._id, delta, reason, { type, workOrderId: wo._id, transferId: group });
+    const r = await adjustUnit(store, orgId, actor, unit._id, delta, reason, { type, workOrderId: wo._id, transferId: group, ...(type === "scrap" && input.scrapReason ? { reasonCode: input.scrapReason } : {}) });
     if (r.ok) ids.push(...r.movementIds);
     return r.ok ? null : r;
   };

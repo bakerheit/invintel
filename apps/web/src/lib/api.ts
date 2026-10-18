@@ -1,4 +1,5 @@
 import type {
+  ScrapReport,
   DisposeInput,
   HoldInput,
   Ncr,
@@ -292,4 +293,10 @@ export const api = {
   disposeNcr: (orgId: string, id: string, input: DisposeInput) => request<Ncr>(`/orgs/${orgId}/quality/ncrs/${id}/dispose`, post(input)),
   reasons: (orgId: string) => request<Reasons>(`/orgs/${orgId}/reasons`),
   saveReasons: (orgId: string, input: ReasonsUpdate) => request<Reasons>(`/orgs/${orgId}/reasons`, { method: "PUT", body: JSON.stringify(input) }),
+
+  // Scrap and yield trends (production reports).
+  scrapReport: (orgId: string, days: number, workCenterId?: string) =>
+    request<ScrapReport>(`/orgs/${orgId}/production/scrap?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`),
+  scrapCsvUrl: (orgId: string, days: number, workCenterId?: string) =>
+    `/api/orgs/${orgId}/production/scrap/lines.csv?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`,
 };

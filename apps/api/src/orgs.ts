@@ -26,6 +26,7 @@ import { createOverviewRoutes } from "./overview.js";
 import { createProductionRoutes } from "./production.js";
 import { createQualityRoutes } from "./quality.js";
 import { createReasonRoutes } from "./reasons.js";
+import { createScrapReportRoutes } from "./scrap-report.js";
 import { createReportRoutes } from "./reports.js";
 import { createPurchasingRoutes } from "./purchasing.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
@@ -181,6 +182,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/", createFloorRoutes(store));
   scoped.route("/items", createItemRoutes(store));
   scoped.route("/production/downtime", createDowntimeRoutes(store));
+  scoped.route("/production/scrap", createScrapReportRoutes(store));
   scoped.route("/production", createProductionRoutes(store));
 
   orgs.route("/:orgId", scoped);

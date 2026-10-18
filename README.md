@@ -217,6 +217,12 @@ Anyone can **put stock on hold** so it can't be used: on the desk (**Quality**) 
 
 API under `/api/orgs/:orgId`: `POST /quality/holds`, `GET /quality/ncrs?status=open|closed|all`, `GET /quality/ncrs/:id`, `POST /quality/ncrs/:id/dispose` (admin), `GET /quality/summary`, `GET|PUT /reasons` (PUT is admin).
 
+### Scrap and yield trends
+
+On the floor, anything scrapped now needs a **reason** from a short list: the Production tile asks "Why was it scrapped?" once the scrap count is above zero (material scrapped at Report usage, finished output scrapped at Report output), and scrap decided from a quality hold uses the same list. Admins edit the list under Quality > Reason lists. **Reports > Scrap and yield trends** (Production switch) shows, for the last 7, 30, 90 or 180 days and optionally one work center: scrap value (quantity x each item's current unit cost), **yield** (good output / good + scrapped output), the biggest reason, scrap with no reason, a bar chart by reason, a trend (per day, or per week from Monday for long windows), tables by work center (value, entries, good, scrapped, yield) and by material, where the scrap came from (material used, output, quality hold), and a CSV of every scrap entry. Scrap that was reversed in Activity is ignored.
+
+API: `GET /api/orgs/:orgId/production/scrap?days=7|30|90|180&workCenterId=` and `GET .../production/scrap/lines.csv`. `POST .../production/work-orders/:id/consume` and `/output` take an optional `scrapReason` (must be on the org's scrap list; stored on the ledger line as `reasonCode`).
+
 ## API
 
 Auth (no session needed except `/me`):

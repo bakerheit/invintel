@@ -165,6 +165,8 @@ export const consumeInputSchema = z
     scrap: z.number().int().min(0).default(0),
     remnant: z.number().int().min(0).default(0),
     remnantLocationId: objectIdSchema.optional(),
+    /** Why material was scrapped: a reason from the org's scrap list. Scrap reports group by it. */
+    scrapReason: z.string().trim().max(60).optional(),
     reason: z.string().trim().max(200).default(""),
   })
   .refine((c) => c.used + c.scrap + c.remnant > 0, { message: "Report something: used, scrap or a remnant", path: ["used"] })
@@ -180,6 +182,8 @@ export const outputInputSchema = z
     /** Output items tracked by unit: how many go on each new pallet or roll, and the lot. */
     unitSize: qty.optional(),
     lot: z.string().trim().max(100).default(""),
+    /** Why output was scrapped: a reason from the org's scrap list. */
+    scrapReason: z.string().trim().max(60).optional(),
     reason: z.string().trim().max(200).default(""),
   })
   .refine((o) => o.good + o.scrap > 0, { message: "Report good or scrapped quantity", path: ["good"] });

@@ -591,6 +591,7 @@ export interface UnitsPosted {
 export * from "./production.js";
 export * from "./quality.js";
 export * from "./reasons.js";
+export * from "./scrap.js";
 export * from "./purchasing.js";
 export * from "./counts.js";
 export * from "./reports.js";
