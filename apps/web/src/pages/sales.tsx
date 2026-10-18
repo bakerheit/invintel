@@ -1,6 +1,6 @@
 import { formatQty, qtyErrorMessage, type PickLine, type SalesOrder, type SoShipInput, type SoStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, PackageCheck, Pencil, Plus, Receipt, Trash2, Truck } from "lucide-react";
+import { AlertTriangle, Check, FileText, Mail, PackageCheck, Pencil, Plus, Receipt, Trash2, Truck } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import { useConfirm } from "@/components/confirm";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -238,6 +238,16 @@ function OrderDetail({ order, onClose, onShip, onEdit, onRewritten }: { order: S
     onSuccess: async (copy) => { await done(`${order.number} cancelled and its stock released. ${copy.number} is a draft copy: change it, then confirm it.`); onRewritten(copy.id); },
     onError: (e: Error) => toast.error(e.message),
   });
+  const sendConf = useMutation({
+    mutationFn: () => api.sendSalesConfirmation(orgId, order.id),
+    onSuccess: async (r) => { await done(r.alreadySent ? "That confirmation had already been sent" : `Confirmation sent to ${order.customer.name}`); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const sendInv = useMutation({
+    mutationFn: (shipment: string) => api.sendSalesInvoice(orgId, order.id, shipment),
+    onSuccess: async (r) => { await done(r.alreadySent ? `${r.invoiceNumber} had already been sent` : `${r.invoiceNumber} sent to ${order.customer.name}`); },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const resend = useMutation({
     mutationFn: (n: string) => api.resendShipNotice(orgId, order.id, n),
     onSuccess: async () => { await done("Ship notice sent"); },
@@ -292,6 +302,15 @@ function OrderDetail({ order, onClose, onShip, onEdit, onRewritten }: { order: S
             {admin && <Button size="sm" variant="outline" onClick={() => doConfirm.mutate(true)} disabled={doConfirm.isPending}>Confirm anyway (back-order)</Button>}
           </div>
         )}
+        {order.status !== "draft" && (
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium">Documents</p>
+            <div className="flex flex-wrap gap-2">
+              <a href={api.salesDocUrl(orgId, order.id, "confirmation")} target="_blank" rel="noreferrer" className={buttonVariants({ variant: "outline", size: "sm" })}><FileText /> Order confirmation</a>
+              {admin && order.sendDocs.confirmation && <Button size="sm" variant="outline" onClick={() => sendConf.mutate()} disabled={sendConf.isPending}><Mail /> Email it to {order.customer.name}</Button>}
+            </div>
+          </div>
+        )}
         {order.shipments.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-sm font-medium">Shipments</p>
@@ -302,6 +321,11 @@ function OrderDetail({ order, onClose, onShip, onEdit, onRewritten }: { order: S
                   <span className="text-xs text-muted-foreground">{s.at.slice(0, 10)} · {s.by}{s.carrier || s.trackingNumber ? ` · ${[s.carrier, s.trackingNumber].filter(Boolean).join(" ")}` : ""}</span>
                   <span className="min-w-0 flex-1 truncate text-xs">{s.lines.map((l) => `${formatQty(l.quantity, l.uom)} ${l.itemName}`).join(", ")}</span>
                   {s.reversed && <Badge variant="secondary" className="bg-warning-soft text-warning">undone</Badge>}
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <a href={api.salesDocUrl(orgId, order.id, { shipment: s.number, doc: "packing-slip" })} target="_blank" rel="noreferrer" className={buttonVariants({ variant: "ghost", size: "sm" })}><FileText /> Packing slip</a>
+                    {admin && <a href={api.salesDocUrl(orgId, order.id, { shipment: s.number, doc: "invoice" })} target="_blank" rel="noreferrer" className={buttonVariants({ variant: "ghost", size: "sm" })}><FileText /> {s.invoiceNumber ? `Invoice ${s.invoiceNumber}` : "Make invoice"}</a>}
+                    {admin && order.sendDocs.invoice && <Button size="sm" variant="ghost" onClick={() => sendInv.mutate(s.number)} disabled={sendInv.isPending}><Mail /> Email invoice</Button>}
+                  </span>
                   {s.notice === "sent" && <Badge variant="secondary" className="bg-success-soft text-success"><Receipt className="size-3" /> told the customer</Badge>}
                   {s.notice === "failed" && (
                     <span className="flex items-center gap-1.5"><Badge variant="secondary" className="bg-warning-soft text-warning">notice not sent</Badge>{admin && <Button size="sm" variant="outline" onClick={() => resend.mutate(s.number)} disabled={resend.isPending}>Send again</Button>}</span>

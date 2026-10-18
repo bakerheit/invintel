@@ -32,6 +32,7 @@ import { createTraceabilityRoutes } from "./traceability.js";
 import { createScrapReportRoutes } from "./scrap-report.js";
 import { createReportRoutes } from "./reports.js";
 import { createPurchasingRoutes } from "./purchasing.js";
+import { createDocumentRoutes } from "./doc-settings.js";
 import { createSalesRoutes } from "./sales.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
 import {
@@ -182,6 +183,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/traceability", createTraceabilityRoutes(store));
   scoped.route("/purchasing", createPurchasingRoutes(store));
   scoped.route("/sales", createSalesRoutes(store));
+  scoped.route("/documents", createDocumentRoutes(store));
   scoped.route("/overview", createOverviewRoutes(store));
   scoped.route("/locations", createLocationRoutes(store));
   scoped.route("/movements", createActivityRoutes(store));

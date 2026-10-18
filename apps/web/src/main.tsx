@@ -45,6 +45,7 @@ import DowntimeFloorPage from "./pages/floor/downtime";
 import AlertsPage from "./pages/alerts";
 import PurchasingPage from "./pages/purchasing";
 import SalesPage from "./pages/sales";
+import DocumentSettingsPage from "./pages/document-settings";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
 import { useAuth } from "./stores/auth";
@@ -111,6 +112,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="quality" element={<QualityPage />} />
               <Route path="documents" element={<DocumentsPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="settings/documents" element={<DocumentSettingsPage />} />
             </Route>
             <Route path="floor" element={<FloorLayout />}>
               <Route index element={<FloorHome />} />

@@ -1,4 +1,4 @@
-import { B2B_DOC_LABELS, type B2BMessage, type CapturedInvoice, type TradingPartner } from "@invintel/shared";
+import { ACCENTS, DEFAULT_TITLES, DOC_LABELS, B2B_DOC_LABELS, type B2BMessage, type CapturedInvoice, type TradingPartner } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Handshake, Inbox, Mail, Plus, Upload } from "lucide-react";
 import { Fragment, useState, type ReactNode } from "react";
@@ -66,6 +66,7 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
   const [transport, setTransport] = useState(c.transport ?? "loopback");
   const [uomMap, setUomMap] = useState(c.uomMap ?? "");
   const [ack997, setAck997] = useState(c.ack997 !== "off");
+  const [docTemplates, setDocTemplates] = useState<NonNullable<TradingPartner["docTemplates"]>>(partner?.docTemplates ?? {});
   const save = useMutation({
     mutationFn: () => {
       const bridgeConfig: Record<string, string> =
@@ -73,7 +74,7 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
         : bridge === "invoice-inbox" ? { secretEnv }
         : bridge === "x12" ? { ourQual, ourId, theirQual, theirId, version, ...(transport ? { transport } : {}), ...(secretEnv ? { secretEnv } : {}), ...(uomMap.trim() ? { uomMap: uomMap.trim() } : {}), ...(ack997 ? {} : { ack997: "off" }) }
         : {};
-      const input = { name, kind, bridge, bridgeConfig, mode, supplierId: supplierId || null };
+      const input = { name, kind, bridge, bridgeConfig, mode, supplierId: supplierId || null, docTemplates };
       return partner ? api.updateB2bPartner(orgId, partner.id, input) : api.createB2bPartner(orgId, input);
     },
     onSuccess: () => { toast.success(partner ? "Partner saved" : "Partner added"); void invalidateOrg(qc, orgId); onDone(); },
@@ -127,6 +128,32 @@ function PartnerForm({ orgId, partner, onDone }: { orgId: string; partner?: Trad
           <label className="flex items-center gap-2 text-sm sm:col-span-3"><input type="checkbox" checked={ack997} onChange={(e) => setAck997(e.target.checked)} /> Send a receipt (997) for every document they send us</label>
         </>
       )}
+      <details className="rounded-md border p-3 sm:col-span-3">
+        <summary className="cursor-pointer text-sm font-medium">Document look for {name.trim() || "this partner"} <span className="font-normal text-muted-foreground">(optional: their own title, colour and terms)</span></summary>
+        <div className="mt-3 space-y-4">
+          {(kind === "customer" ? (["sales_order", "packing_slip", "invoice"] as const) : (["purchase_order"] as const)).map((k) => {
+            const o = docTemplates[k] ?? {};
+            const set = (patch: Partial<typeof o>) => {
+              const next: Record<string, unknown> = { ...o, ...patch };
+              for (const key of Object.keys(next)) if (next[key] === undefined || next[key] === "") delete next[key];
+              setDocTemplates((d) => { const n = { ...d, [k]: next }; if (!Object.keys(next).length) delete n[k]; return n; });
+            };
+            return (
+              <div key={k} className="grid gap-2 sm:grid-cols-2">
+                <p className="text-sm font-medium sm:col-span-2">{DOC_LABELS[k]}</p>
+                <Field label="Title" hint={`Empty: the organization's (${DEFAULT_TITLES[k]} unless changed in Settings > Documents).`}><Input value={o.title ?? ""} maxLength={40} onChange={(e) => set({ title: e.target.value })} /></Field>
+                <Field label="Colour">
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <button type="button" onClick={() => set({ accent: undefined })} className={cn("h-7 rounded-full border px-2 text-xs", !o.accent ? "border-foreground" : "text-muted-foreground")}>Same as ours</button>
+                    {ACCENTS.map((a) => <button key={a.hex} type="button" aria-label={a.name} title={a.name} onClick={() => set({ accent: a.hex })} className={cn("size-6 rounded-full border-2", o.accent?.toLowerCase() === a.hex ? "border-foreground" : "border-transparent")} style={{ background: a.hex }} />)}
+                  </span>
+                </Field>
+                <Field label="Terms for them" hint="Replaces the organization's terms on their documents." className="sm:col-span-2"><textarea rows={2} maxLength={800} className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={o.terms ?? ""} onChange={(e) => set({ terms: e.target.value })} /></Field>
+              </div>
+            );
+          })}
+        </div>
+      </details>
       <Field label="Mode" hint="Test partners are marked TEST in what they receive. Switch to live when you are ready.">
         <select className={selectClass} value={mode} onChange={(e) => setMode(e.target.value as "test" | "live")}>
           <option value="test">Test</option>

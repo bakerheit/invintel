@@ -81,7 +81,8 @@ describe("the canonical order and its PDF", () => {
     expect(pdf).toContain("PURCHASE ORDER");
     expect(pdf).toContain("Acme Paper \\(Pty\\) Ltd"); // parentheses escaped
     expect(pdf).toContain("12.500 kg");
-    expect(pdf).toContain("Requested delivery date: 2026-11-15");
+    expect(pdf).toContain("(Requested delivery date:)");
+    expect(pdf).toContain("(2026-11-15)");
     expect(pdf).toContain("https://example.test/b2b/s/abc");
     expect(pdf).toMatch(/\/Count 1/);
   });

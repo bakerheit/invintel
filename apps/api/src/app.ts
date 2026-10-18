@@ -1,3 +1,4 @@
+import { registerDocContextLoader } from "./doc-context.js";
 import { createExchangeInboxRoutes, registerInvintelExchange } from "./exchange.js";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
@@ -10,6 +11,7 @@ import { createOrgRoutes } from "./orgs.js";
 export function createApp(store: Store, authOptions: AuthOptions) {
   const app = new Hono();
   const auth = createAuth(store, authOptions);
+  registerDocContextLoader(store); // bridges draw their PDFs with the organization's letterhead and templates
 
   app.use("*", logger());
   // No CORS: the web app talks to the API same-origin (Vite proxies /api in dev).

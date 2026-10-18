@@ -1,5 +1,7 @@
 import { formatQty, uomOf, type CanonicalShipNotice } from "@invintel/shared";
 import type { ObjectId } from "mongodb";
+import { issuerName } from "./doc-context.js";
+import { shippedByOrder } from "./sales-core.js";
 import { getBridge, retryMessage, sendMessage, type Failure, type Sent } from "./b2b-core.js";
 import type { B2BMessageDoc, SalesOrderDoc, Store } from "./db.js";
 import { loadIncomingOrder, sendShipNotice } from "./exchange.js";
@@ -54,19 +56,26 @@ async function settle(store: Store, orgId: ObjectId, actor: Actor, res: Sent | F
 }
 
 /** The ship notice as we mean it: the customer's own order number (ours when they gave none), what went, in the item's own unit. */
-async function buildCanonical(store: Store, doc: SalesOrderDoc, s: ShipmentForNotice): Promise<CanonicalShipNotice & { shipper: string }> {
-  const [items, org] = await Promise.all([
-    store.items.find({ _id: { $in: s.lines.map((l) => l.itemId) } }, { projection: { sku: 1, unit: 1, decimals: 1 } }).toArray(),
-    store.orgs.findOne({ _id: doc.orgId }, { projection: { name: 1 } }),
+export async function buildCanonical(store: Store, doc: SalesOrderDoc, s: ShipmentForNotice): Promise<CanonicalShipNotice & { shipper: string }> {
+  const [items, org, toDate, partner] = await Promise.all([
+    store.items.find({ _id: { $in: s.lines.map((l) => l.itemId) } }, { projection: { sku: 1, name: 1, unit: 1, decimals: 1 } }).toArray(),
+    store.orgs.findOne({ _id: doc.orgId }, { projection: { name: 1, documentProfile: 1 } }),
+    shippedByOrder(store, [doc._id]),
+    doc.customerPartnerId ? store.tradingPartners.findOne({ _id: doc.customerPartnerId }, { projection: { name: 1 } }) : null,
   ]);
   return {
     kind: "despatch_advice", version: 1, shipmentNo: s.number, poNumber: doc.customerRef || doc.number, shipDate: s.shippedDate, carrier: s.carrier, trackingNumber: s.trackingNumber,
     lines: s.lines.map((l) => {
       const i = items.find((x) => x._id.equals(l.itemId));
       const u = uomOf(i);
-      return { lineNo: doc.lines.findIndex((x) => x.itemId.equals(l.itemId)) + 1, sku: i?.sku ?? "", quantity: formatQty(l.quantity, u, { unit: false, group: false }), unit: u.unit };
+      const ordered = doc.lines.find((x) => x.itemId.equals(l.itemId));
+      const text = (n: number) => formatQty(n, u, { unit: false, group: false });
+      return {
+        lineNo: doc.lines.findIndex((x) => x.itemId.equals(l.itemId)) + 1, sku: i?.sku ?? "", quantity: text(l.quantity), unit: u.unit,
+        name: i?.name ?? "", ...(ordered ? { orderedQuantity: text(ordered.quantity) } : {}), shippedToDate: text(toDate.get(`${doc._id.toHexString()}:${l.itemId.toHexString()}`) ?? l.quantity),
+      };
     }),
-    shipper: org?.name ?? "",
+    shipper: issuerName(org), customerName: partner?.name ?? doc.customerName,
   };
 }
 

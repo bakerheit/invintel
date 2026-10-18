@@ -22,7 +22,7 @@ const oid = (s: string) => new ObjectId(s);
 
 const toPartner = (p: TradingPartnerDoc): TradingPartner => ({
   id: p._id.toHexString(), name: p.name, kind: p.kind, supplierId: p.supplierId?.toHexString() ?? null, identifiers: p.identifiers, bridge: p.bridge,
-  bridgeConfig: p.bridgeConfig, mode: p.mode, enabled: p.enabled, contactEmail: p.contactEmail, note: p.note, createdAt: p.createdAt.toISOString(),
+  bridgeConfig: p.bridgeConfig, mode: p.mode, enabled: p.enabled, contactEmail: p.contactEmail, note: p.note, docTemplates: p.docTemplates ?? {}, createdAt: p.createdAt.toISOString(),
 });
 
 /** Trading partners, the message log and the actions on it, for signed-in people (under /api/orgs/:orgId/b2b). */

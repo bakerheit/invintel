@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { docKindSchema, docTemplateOverrideSchema, type DocKind, type DocTemplateOverride } from "./templates.js";
 
 // INV-12: the transport-independent core of business-to-business exchange. A TRADING PARTNER is another business we
 // exchange documents with, over a BRIDGE (an adapter for one way of moving documents: email, an EDI provider, the
@@ -60,6 +61,8 @@ export const partnerFields = {
   enabled: z.boolean(),
   contactEmail: z.string().trim().max(200),
   note: z.string().trim().max(500),
+  /** How documents made for this partner differ from the organization's templates (INV-17): the same fields, all optional. */
+  docTemplates: z.partialRecord(docKindSchema, docTemplateOverrideSchema),
 };
 export const tradingPartnerInputSchema = z.object({
   ...partnerFields,
@@ -70,6 +73,7 @@ export const tradingPartnerInputSchema = z.object({
   enabled: partnerFields.enabled.default(true),
   contactEmail: partnerFields.contactEmail.default(""),
   note: partnerFields.note.default(""),
+  docTemplates: partnerFields.docTemplates.default({}),
 });
 export type TradingPartnerInput = z.input<typeof tradingPartnerInputSchema>;
 export const tradingPartnerUpdateSchema = z.object(partnerFields).partial();
@@ -87,6 +91,7 @@ export interface TradingPartner {
   enabled: boolean;
   contactEmail: string;
   note: string;
+  docTemplates: Partial<Record<DocKind, DocTemplateOverride>>;
   createdAt: string;
 }
 

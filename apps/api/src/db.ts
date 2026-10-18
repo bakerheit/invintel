@@ -1,5 +1,5 @@
-import { MongoClient, type Collection, type Db, type ObjectId } from "mongodb";
-import type { AuditAction, AuditChange, AuditEntityType, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
+import { MongoClient, type Binary, type Collection, type Db, type ObjectId } from "mongodb";
+import type { AuditAction, AuditChange, AuditEntityType, CompanyProfile, DocKind, DocTemplate, DocTemplateOverride, LocationType, MovementType, OrgRole, WorkOrderStatus } from "@invintel/shared";
 
 export interface UserDoc {
   _id: ObjectId;
@@ -25,6 +25,8 @@ export interface OrgDoc {
   createdBy: ObjectId;
   /** Absent means everything is on. */
   modules?: Partial<{ purchasing: boolean; production: boolean; sales: boolean }>;
+  /** The letterhead and templates for the documents we produce (INV-17). Absent: the organization's name and each kind's own look. */
+  documentProfile?: { company: CompanyProfile; templates: Partial<Record<DocKind, DocTemplate>> };
   /** Absent means nothing needs a second person. */
   /** Downtime: the pick-list and the hours a machine is meant to run each day. Defaults apply when absent. */
   /** Pick-lists for scrap and quality-hold reasons. Defaults apply when absent. */
@@ -180,7 +182,7 @@ export interface SalesOrderDoc {
   /** Set while a confirmation is being checked against stock, so nothing is shipped, cancelled or closed in that moment. Expires on its own. */
   confirmingUntil?: Date;
   /** One entry per shipment, for history. Quantities that count come from the ledger. */
-  shipments: { number: string; at: Date; shippedDate?: string; by: { id: ObjectId | null; name: string }; carrier: string; trackingNumber: string; movementIds: ObjectId[]; lines: { itemId: ObjectId; quantity: number }[]; notice: "sent" | "failed" | null }[];
+  shipments: { number: string; at: Date; shippedDate?: string; /** The invoice made for this shipment, numbered the first time it is asked for. */ invoiceNumber?: string; invoicedAt?: Date; /** The invoice as issued (a canonical invoice), kept so it never changes. */ invoice?: Record<string, unknown>; by: { id: ObjectId | null; name: string }; carrier: string; trackingNumber: string; movementIds: ObjectId[]; lines: { itemId: ObjectId; quantity: number }[]; notice: "sent" | "failed" | null }[];
   confirmedAt?: Date;
   createdBy: { id: ObjectId | null; name: string };
   createdAt: Date;
@@ -403,6 +405,21 @@ export interface TradingPartnerDoc {
   enabled: boolean;
   contactEmail: string;
   note: string;
+  /** Document look for this partner, on top of the organization's templates (INV-17). */
+  docTemplates?: Partial<Record<DocKind, DocTemplateOverride>>;
+  createdAt: Date;
+}
+
+/** The one logo an organization puts on its documents (PNG or JPEG, validated; INV-17). */
+export interface DocLogoDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  contentType: "image/png" | "image/jpeg";
+  width: number;
+  height: number;
+  bytes: Binary;
+  hash: string;
+  uploadedBy: { id: ObjectId | null; name: string };
   createdAt: Date;
 }
 
@@ -519,6 +536,7 @@ export interface Store {
   portalLinks: Collection<PortalLinkDoc>;
   capturedInvoices: Collection<CapturedInvoiceDoc>;
   b2bFiles: Collection<B2BFileDoc>;
+  docLogos: Collection<DocLogoDoc>;
   drills: Collection<DrillDoc>;
   close: () => Promise<void>;
 }
@@ -565,6 +583,7 @@ export async function connect(
     portalLinks: db.collection("b2b_portal_links"),
     capturedInvoices: db.collection("captured_invoices"),
     b2bFiles: db.collection("b2b_files"),
+    docLogos: db.collection("doc_logos"),
     drills: db.collection("recall_drills"),
     close: () => client.close(),
   };
@@ -628,6 +647,7 @@ export async function connect(
     store.capturedInvoices.createIndex({ orgId: 1, status: 1, createdAt: -1 }),
     store.capturedInvoices.createIndex({ orgId: 1, partnerId: 1, invoiceNumber: 1 }),
     store.b2bFiles.createIndex({ orgId: 1, messageId: 1 }),
+    store.docLogos.createIndex({ orgId: 1 }, { unique: true }),
     store.drills.createIndex({ orgId: 1, at: -1 }),
     // Trace lookups: lines of one work order, of one unit, and receipts by lot.
     store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),

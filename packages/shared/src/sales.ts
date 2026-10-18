@@ -95,6 +95,8 @@ export interface SoShipment {
   lines: { itemId: string; itemName: string; quantity: number; uom: Uom }[];
   /** True once every ledger line of it has been reversed in Activity. */
   reversed: boolean;
+  /** The invoice made for this shipment, once someone has asked for it. */
+  invoiceNumber: string | null;
   /** Whether a ship notice went to the customer: "sent", "failed" (can be retried), or null when there is no one to send it to. */
   notice: "sent" | "failed" | null;
 }
@@ -106,6 +108,8 @@ export interface SalesOrder {
   customer: { partnerId: string | null; name: string };
   customerRef: string;
   /** How the customer is told when a shipment goes (INV-16): by the Exchange, an X12 856, an email, or another document bridge. Null: they aren't. */
+  /** Which documents can be emailed (or sent) to this customer from the order: an order confirmation, an invoice. */
+  sendDocs: { confirmation: boolean; invoice: boolean };
   noticeVia: "the Exchange" | "an X12 856" | "an email" | "a message" | null;
   /** "exchange" for an order that arrived from a customer over the Exchange. */
   source: "manual" | "exchange";

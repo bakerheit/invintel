@@ -185,7 +185,7 @@ describe("low stock, alerts and suggestions use what is available", () => {
 describe("a ship notice to the customer, over the way we trade with them", () => {
   const files = () => readdirSync(outbox).sort();
   const lastMail = (before: number) => readFileSync(path.join(outbox, files()[before]!), "utf8");
-  const text = (eml: string) => Buffer.from(eml.slice(eml.indexOf("\r\n\r\n") + 4).replace(/\s+/g, ""), "base64").toString("utf8");
+  const text = (eml: string) => Buffer.from(/base64\r\n\r\n([\s\S]*?)\r\n--/.exec(eml)![1]!.replace(/\r\n/g, ""), "base64").toString("utf8");
   const shipped = async (w: Awaited<ReturnType<typeof world>>, customerPartnerId: string, itemId: string, extra: object = {}, qty = 6) => {
     const o = await w.order([{ itemId, quantity: qty }], { customerPartnerId, customerRef: "BP-9", ...extra });
     await w.confirm(o.id);
@@ -207,7 +207,7 @@ describe("a ship notice to the customer, over the way we trade with them", () =>
     const eml = lastMail(before);
     expect(eml).toContain("To: ops@bluebird.example");
     expect(eml).toMatch(/Subject: Shipment SO-0001-1 for your order BP-9 from Plant Co \(TEST\)/);
-    expect(eml).not.toContain("application/pdf"); // a plain notice: no attachment
+    expect(eml).toContain('filename="SO-0001-1-packing-slip.pdf"'); // the packing slip rides along (INV-17)
     const body = text(eml);
     expect(body).toContain("shipped part or all of your order BP-9 (shipment SO-0001-1) on 2026-11-03");
     expect(body).toContain("1. KRAFT: 6 ea");

@@ -85,6 +85,12 @@ export async function availabilityOf(store: Store, orgId: ObjectId, itemIds: Obj
 
 // ---------- presenting ----------
 
+/** Which documents can be sent to a customer from the order, by what their partner's bridge can carry (an Invintel exchange partner and an EDI partner have their own ways). */
+export function sendDocs(bridge?: string): { confirmation: boolean; invoice: boolean } {
+  const b = bridge ? getBridge(bridge) : undefined;
+  return { confirmation: !!b?.carries.includes("order_response") && bridge !== "x12" && bridge !== "invintel", invoice: !!b?.carries.includes("invoice") && bridge !== "invintel" && bridge !== "invoice-inbox" };
+}
+
 /** How a customer is told about a shipment: by what their trading partner can carry (see sales-notices.ts). */
 function noticeVia(d: Pick<SalesOrderDoc, "messageId">, bridge?: string): SalesOrder["noticeVia"] {
   if (!bridge) return null;
@@ -130,11 +136,11 @@ export async function toSalesOrders(store: Store, docs: SalesOrderDoc[]): Promis
     const shipments: SoShipment[] = d.shipments.map((s) => ({
       number: s.number, at: s.at.toISOString(), shippedDate: s.shippedDate ?? s.at.toISOString().slice(0, 10), by: s.by.name, carrier: s.carrier, trackingNumber: s.trackingNumber, notice: s.notice,
       lines: s.lines.map((l) => ({ itemId: l.itemId.toHexString(), itemName: item.get(l.itemId.toHexString())?.name ?? "(deleted item)", quantity: l.quantity, uom: uomOf(item.get(l.itemId.toHexString())) })),
-      reversed: s.movementIds.length > 0 && s.movementIds.every((m) => reversed.has(m.toHexString())),
+      reversed: s.movementIds.length > 0 && s.movementIds.every((m) => reversed.has(m.toHexString())), invoiceNumber: s.invoiceNumber ?? null,
     }));
     return {
       id: d._id.toHexString(), number: d.number, status, customer: { partnerId: d.customerPartnerId?.toHexString() ?? null, name: d.customerPartnerId ? (partnerName.get(d.customerPartnerId.toHexString()) ?? d.customerName) : d.customerName },
-      customerRef: d.customerRef, noticeVia: noticeVia(d, partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), source: d.source, messageId: d.messageId?.toHexString() ?? null, requestedDate: d.requestedDate, note: d.note, lines,
+      customerRef: d.customerRef, sendDocs: sendDocs(partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), noticeVia: noticeVia(d, partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), source: d.source, messageId: d.messageId?.toHexString() ?? null, requestedDate: d.requestedDate, note: d.note, lines,
       totalCents: d.lines.reduce((s, l) => s + lineValueCents(l.quantity, l.unitPriceCents, uomOf(item.get(l.itemId.toHexString())).decimals), 0),
       short: holding && lines.some((l) => l.reserved > 0 && l.available < 0), shipments,
       confirmedAt: d.confirmedAt?.toISOString() ?? null, createdAt: d.createdAt.toISOString(), updatedAt: d.updatedAt.toISOString(),

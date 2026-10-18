@@ -114,7 +114,17 @@ export const canonicalShipNoticeSchema = z.object({
   shipDate: day,
   carrier: z.string().max(60).default(""),
   trackingNumber: z.string().max(80).default(""),
-  lines: z.array(z.object({ lineNo: z.number().int().min(1), sku: z.string().max(64), quantity: qty, unit: z.string().max(16) })).min(1).max(100),
+  lines: z
+    .array(z.object({
+      lineNo: z.number().int().min(1), sku: z.string().max(64), quantity: qty, unit: z.string().max(16),
+      /** For a packing slip (INV-17): what the item is, what was ordered, and what has shipped in all. Optional: X12 doesn't carry them. */
+      name: z.string().max(200).optional(), orderedQuantity: qty.optional(), shippedToDate: qty.optional(),
+    }))
+    .min(1)
+    .max(100),
+  /** Who is shipping and to whom, for the packing slip. */
+  shipper: z.string().max(100).optional(),
+  customerName: z.string().max(200).optional(),
 });
 export type CanonicalShipNotice = z.infer<typeof canonicalShipNoticeSchema>;
 
@@ -133,6 +143,11 @@ export const canonicalInvoiceSchema = z.object({
     .max(200),
   taxCents: z.number().int().min(0).default(0),
   totalCents: z.number().int().min(0),
+  /** For the PDF (INV-17): who it is for, what the tax is called, which shipment it covers, and who issued it. Optional: X12 doesn't carry them. */
+  billTo: z.string().max(200).optional(),
+  taxLabel: z.string().max(20).optional(),
+  shipmentNo: z.string().max(40).optional(),
+  shipper: z.string().max(100).optional(),
 });
 export type CanonicalInvoice = z.infer<typeof canonicalInvoiceSchema>;
 

@@ -288,6 +288,10 @@ export default function SettingsPage() {
           </Section>
         )}
 
+        <Section title="Documents" description="The letterhead, logo and look of the purchase orders, confirmations, packing slips and invoices you send.">
+          <Link to={`/o/${org.id}/settings/documents`} className={buttonVariants({ variant: "outline" })}>Document templates</Link>
+        </Section>
+
         {admin && (
           <Section title="Approvals" description="Ask for a second person's OK on the actions that matter. Off until you switch a rule on.">
             <ApprovalRulesForm orgId={org.id} />

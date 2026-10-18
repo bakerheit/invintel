@@ -8,6 +8,9 @@ import { createApproval, isSoleApprover, ruleFor, toApproval } from "./approvals
 import type { SalesOrderDoc, Store } from "./db.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
+import { loadDocContext } from "./doc-context.js";
+import { renderDocument } from "./doc-render.js";
+import { confirmationOf, invoiceFor, packingSlipOf, sendConfirmation, sendInvoice } from "./sales-docs.js";
 import { sendShipmentNotice } from "./sales-notices.js";
 import { cancelOrder, checkOrderInput, closeOrder, confirmOrderDirect, createDraft, pickList, rewriteOrder, shipOrder, soEntity, toSalesOrders } from "./sales-core.js";
 
@@ -132,6 +135,54 @@ export function createSalesRoutes(store: Store) {
     const notice = await tellCustomer(res.order, res.shipmentNumber, actorOf(c.get("user")));
     const body: SoShipResult = { order: await present(notice.order), shipmentNumber: res.shipmentNumber, movementIds: res.movementIds.map(String), notice: notice.state, ...(notice.error ? { noticeError: notice.error } : {}) };
     return c.json(body, 201);
+  });
+
+  // ---------- documents (INV-17): drawn with the organization's letterhead and templates, adjusted for this customer ----------
+
+  const pdf = (buf: Buffer, name: string) => new Response(new Uint8Array(buf), { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename="${name}"`, "x-content-type-options": "nosniff", "cache-control": "no-store" } });
+  const orderOf = (c: { get: (k: "org") => { _id: ObjectId } }, id: string) => store.salesOrders.findOne({ _id: oid(id), orgId: c.get("org")._id });
+
+  r.get("/orders/:id/confirmation.pdf", zValidator("param", idParam), async (c) => {
+    const doc = await orderOf(c, c.req.valid("param").id);
+    if (!doc) return c.json({ error: "Order not found" }, 404);
+    if (doc.state === "draft") return c.json({ error: "Confirm the order first: a confirmation is a promise" }, 409);
+    const ctx = await loadDocContext(store, doc.orgId, "sales_order", doc.customerPartnerId);
+    return pdf(renderDocument({ kind: "sales_order", doc: await confirmationOf(store, doc) }, ctx), `${doc.number}-confirmation.pdf`);
+  });
+
+  r.get("/orders/:id/shipments/:number/packing-slip.pdf", zValidator("param", shipParam), async (c) => {
+    const doc = await orderOf(c, c.req.valid("param").id);
+    const slip = doc ? await packingSlipOf(store, doc, c.req.valid("param").number) : null;
+    if (!doc || !slip) return c.json({ error: "Shipment not found" }, 404);
+    const ctx = await loadDocContext(store, doc.orgId, "packing_slip", doc.customerPartnerId);
+    return pdf(renderDocument({ kind: "packing_slip", doc: slip }, ctx), `${slip.shipmentNo}-packing-slip.pdf`);
+  });
+
+  /** Asking for the invoice makes it (numbered, kept as issued), so only an admin can. */
+  r.get("/orders/:id/shipments/:number/invoice.pdf", requireRole("admin"), zValidator("param", shipParam), async (c) => {
+    const doc = await orderOf(c, c.req.valid("param").id);
+    if (!doc) return c.json({ error: "Order not found" }, 404);
+    const made = await invoiceFor(store, doc, c.req.valid("param").number);
+    if (!made.ok) return c.json({ error: made.error }, made.status);
+    if (made.created) await recordAudit(store, { orgId: doc.orgId, actor: auditActor(c.get("user")), action: "sales_order.updated", entity: soEntity(doc), summary: `Issued invoice ${made.invoice.invoiceNumber} for ${c.req.valid("param").number}: ${(made.invoice.totalCents / 100).toFixed(2)}` });
+    const ctx = await loadDocContext(store, doc.orgId, "invoice", doc.customerPartnerId);
+    return pdf(renderDocument({ kind: "invoice", doc: made.invoice }, ctx), `${made.invoice.invoiceNumber}.pdf`);
+  });
+
+  r.post("/orders/:id/send-confirmation", requireRole("admin"), zValidator("param", idParam), async (c) => {
+    const doc = await orderOf(c, c.req.valid("param").id);
+    if (!doc) return c.json({ error: "Order not found" }, 404);
+    if (doc.state === "draft") return c.json({ error: "Confirm the order first: a confirmation is a promise" }, 409);
+    const res = await sendConfirmation(store, doc.orgId, actorOf(c.get("user")), doc);
+    return res.ok ? c.json({ state: res.state, alreadySent: res.alreadySent, messageId: res.messageId }, res.alreadySent ? 200 : 201) : c.json({ error: res.error }, res.status);
+  });
+
+  r.post("/orders/:id/shipments/:number/send-invoice", requireRole("admin"), zValidator("param", shipParam), async (c) => {
+    const doc = await orderOf(c, c.req.valid("param").id);
+    if (!doc) return c.json({ error: "Order not found" }, 404);
+    const res = await sendInvoice(store, doc.orgId, actorOf(c.get("user")), doc, c.req.valid("param").number);
+    if (!res.ok) return c.json({ error: res.error }, res.status);
+    return c.json({ state: res.state, alreadySent: res.alreadySent, messageId: res.messageId, invoiceNumber: res.invoiceNumber }, res.alreadySent ? 200 : 201);
   });
 
   /** Sends the ship notice again if it failed. */

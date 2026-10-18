@@ -2,6 +2,7 @@
 //   pnpm --filter @invintel/api seed:demo
 // Signs in as demo@invintel.local with the password below. Local development only: refuses to run
 // twice (it never touches an account that already exists) and prints nothing sensitive.
+import { deflateSync } from "node:zlib";
 import { createApp } from "./app.js";
 import { connect } from "./db.js";
 
@@ -166,6 +167,33 @@ const ediPo = await call<{ id: string }>(`${base}/purchasing/orders`, {
   lines: [{ itemId: inkB, quantity: 10, unitCostCents: 9500 }],
 });
 await call(`${base}/purchasing/orders/${ediPo.id}/place`, {});
+
+// Documents: the letterhead and a small logo (made here, so no file is needed) for the PDFs: Settings > Documents. Try the preview, then
+// Purchasing > a PO > Preview PDF, or Sales > an order > Order confirmation / Packing slip / Make invoice.
+const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = (b: Buffer) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 255]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+const pngChunk = (type: string, data: Buffer) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type), data]); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body)); return Buffer.concat([len, body, crc]); };
+const logoPng = (() => {
+  const w = 160, h = 48;
+  const rows: Buffer[] = [];
+  for (let y = 0; y < h; y++) {
+    const row = Buffer.alloc(1 + w * 3);
+    for (let x = 0; x < w; x++) {
+      const inBox = x < 44;
+      const stripe = x >= 56 && x < 150 && y >= 10 && y < 38 && (Math.floor((x - 56) / 6) % 2 === 0);
+      const c = inBox ? [30, 64, 175] : stripe ? [51, 65, 85] : [255, 255, 255];
+      row[1 + x * 3] = c[0]!; row[2 + x * 3] = c[1]!; row[3 + x * 3] = c[2]!;
+    }
+    rows.push(row);
+  }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk("IHDR", ihdr), pngChunk("IDAT", deflateSync(Buffer.concat(rows))), pngChunk("IEND", Buffer.alloc(0))]);
+})();
+await call(`${base}/documents/settings`, {
+  company: { name: "Demo Corrugated Co.", addressLines: ["1200 Mill Road", "Springfield, IL 62701"], phone: "555-0100", email: "orders@democorrugated.example", website: "democorrugated.example", taxId: "Reg. 12-3456789", paper: "letter", taxLabel: "Sales tax", taxRateBps: 625, paymentTermsDays: 30 },
+  templates: { invoice: { title: "", accent: "#1d4ed8", showLogo: true, columns: ["sku", "description", "quantity", "unitPrice", "amount"], terms: "Payment due within 30 days. Late balances may be charged 1.5% a month.", footer: "Thank you for your business." }, purchase_order: { title: "", accent: "#334155", showLogo: true, columns: ["sku", "description", "quantity", "unitPrice", "amount"], terms: "Please confirm receipt of this order and quote the PO number on all documents.", footer: "" } },
+}, "PUT");
+await call(`${base}/documents/logo`, { contentBase64: logoPng.toString("base64") });
 
 // Sales: Bluebird Packaging is a customer (an email test partner: when a shipment goes, it gets a ship notice by email into the outbox folder). One order is confirmed (its stock is reserved: look at RSC-1296 in Inventory, "promised"
 // and "free"), one is part shipped from Finished goods, and one is a draft waiting to be confirmed (Sales).

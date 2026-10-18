@@ -1,4 +1,9 @@
 import type {
+  CompanyProfile,
+  DocKind,
+  DocPreview,
+  DocTemplate,
+  DocumentSettings,
   PickLine,
   SalesOrder,
   SalesOrderInput,
@@ -254,6 +259,21 @@ export const api = {
   exOrders: (orgId: string) => request<ExIncomingOrder[]>(`/orgs/${orgId}/exchange/orders`),
   exRespond: (orgId: string, id: string, v: { status: "accepted" | "rejected" | "changed"; promisedDate: string | null; note: string; backorder?: boolean }) =>
     request<{ state?: string; approvalRequired?: true; approval?: ApprovalRequest; salesOrder?: { id: string; number: string } }>(`/orgs/${orgId}/exchange/orders/${id}/respond`, post(v)),
+  documentSettings: (orgId: string) => request<DocumentSettings>(`/orgs/${orgId}/documents/settings`),
+  saveDocumentSettings: (orgId: string, input: { company: CompanyProfile; templates: Partial<Record<DocKind, DocTemplate>> }) => request<DocumentSettings>(`/orgs/${orgId}/documents/settings`, { method: "PUT", body: body(input) }),
+  uploadLogo: (orgId: string, contentBase64: string) => request<DocumentSettings>(`/orgs/${orgId}/documents/logo`, post({ contentBase64 })),
+  removeLogo: (orgId: string) => request<DocumentSettings>(`/orgs/${orgId}/documents/logo`, { method: "DELETE" }),
+  logoUrl: (orgId: string, v: string | number) => `/api/orgs/${orgId}/documents/logo?v=${v}`,
+  /** A sample document drawn with these values (saved or not), as a PDF to show. */
+  previewDocument: async (orgId: string, input: DocPreview): Promise<Blob> => {
+    const res = await fetch(`/api/orgs/${orgId}/documents/preview`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: body(input) });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(errorMessage(d, "Couldn't make the preview")); }
+    return res.blob();
+  },
+  salesDocUrl: (orgId: string, id: string, what: "confirmation" | { shipment: string; doc: "packing-slip" | "invoice" }) =>
+    what === "confirmation" ? `/api/orgs/${orgId}/sales/orders/${id}/confirmation.pdf` : `/api/orgs/${orgId}/sales/orders/${id}/shipments/${encodeURIComponent(what.shipment)}/${what.doc}.pdf`,
+  sendSalesConfirmation: (orgId: string, id: string) => request<{ state: string; alreadySent: boolean }>(`/orgs/${orgId}/sales/orders/${id}/send-confirmation`, post({})),
+  sendSalesInvoice: (orgId: string, id: string, shipment: string) => request<{ state: string; alreadySent: boolean; invoiceNumber: string }>(`/orgs/${orgId}/sales/orders/${id}/shipments/${encodeURIComponent(shipment)}/send-invoice`, post({})),
   salesOrders: (orgId: string) => request<SalesOrder[]>(`/orgs/${orgId}/sales/orders`),
   createSalesOrder: (orgId: string, input: SalesOrderInput) => request<SalesOrder>(`/orgs/${orgId}/sales/orders`, post(input)),
   confirmSalesOrder: (orgId: string, id: string, allowShortage: boolean) => request<SalesOrder | ApprovalRequired>(`/orgs/${orgId}/sales/orders/${id}/confirm`, post({ allowShortage })),

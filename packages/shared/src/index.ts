@@ -354,6 +354,7 @@ export const AUDIT_ACTIONS = [
   "organization.created",
   "organization.renamed",
   "organization.modules_changed",
+  "organization.documents_changed",
   "organization.join_code_rotated",
   "member.joined",
   "member.role_changed",
@@ -737,3 +738,4 @@ export * from "./units.js";
 export * from "./archive.js";
 export * from "./exchange.js";
 export * from "./sales.js";
+export * from "./templates.js";

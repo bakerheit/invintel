@@ -1,4 +1,4 @@
-import { canonicalOrderSchema, canonicalShipNoticeSchema, supplierAnswerSchema, type CanonicalOrder, type CanonicalShipNotice, type OrderExchange, type PortalOrder } from "@invintel/shared";
+import { canonicalInvoiceSchema, canonicalOrderSchema, canonicalSalesConfirmationSchema, canonicalShipNoticeSchema, supplierAnswerSchema, type CanonicalInvoice, type CanonicalOrder, type CanonicalSalesConfirmation, type CanonicalShipNotice, type OrderExchange, type PortalOrder } from "@invintel/shared";
 import { zValidator } from "@hono/zod-validator";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Hono } from "hono";
@@ -8,6 +8,8 @@ import { getBridge, recordAck, registerBridge, retryMessage, sendMessage, storeI
 import type { B2BMessageDoc, PortalLinkDoc, Store, TradingPartnerDoc } from "./db.js";
 import { getMailTransport } from "./mail.js";
 import { isEmail } from "./mime.js";
+import { docContextFor, loadDocContext } from "./doc-context.js";
+import { renderDocument } from "./doc-render.js";
 import { buildCanonicalOrder, renderOrderPdf } from "./order-doc.js";
 import { toOrders } from "./purchasing.js";
 import { sendX12Order, X12_BRIDGE } from "./x12-bridge.js";
@@ -45,6 +47,28 @@ export function orderEmailText(o: CanonicalOrder): string {
   ].join("\n");
 }
 
+const fmt = (c: number, cur = "USD") => `${cur === "USD" ? "$" : `${cur} `}${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+
+export function confirmationEmailText(c: CanonicalSalesConfirmation, shipper: string): string {
+  return [
+    "Hello,", "",
+    `Thank you for your order${c.customerRef ? ` ${c.customerRef}` : ""}. This is ${shipper || "our"} confirmation ${c.number}; it is attached as a PDF.`, "",
+    ...c.lines.map((l) => `  ${l.lineNo}. ${l.sku ? `${l.sku} ` : ""}${l.name}: ${l.quantity} ${l.unit} at ${fmt(l.unitPriceCents, c.currency)} = ${fmt(l.lineTotalCents, c.currency)}`), "",
+    `Total: ${fmt(c.totalCents, c.currency)} ${c.currency}`,
+    ...(c.requestedDate ? [`Requested delivery date: ${c.requestedDate}`] : []),
+    ...(c.note ? ["", c.note] : []), "", "Thank you,", shipper || "",
+  ].join("\n");
+}
+
+export function invoiceEmailText(i: CanonicalInvoice, shipper: string): string {
+  return [
+    "Hello,", "",
+    `Please find invoice ${i.invoiceNumber} from ${shipper || "us"} attached as a PDF${i.poNumber ? ` (your order ${i.poNumber})` : ""}.`, "",
+    `Total: ${fmt(i.totalCents, i.currency)} ${i.currency}${i.taxCents > 0 ? ` (including ${i.taxLabel || "tax"} ${fmt(i.taxCents, i.currency)})` : ""}`,
+    ...(i.dueDate ? [`Due: ${i.dueDate}`] : []), "", "Thank you,", shipper || "",
+  ].join("\n");
+}
+
 /** The ship notice as an email (INV-16): what went, when, how, and the tracking, in plain text. */
 export function shipNoticeEmailText(n: CanonicalShipNotice, shipper: string): string {
   return [
@@ -65,7 +89,7 @@ export function shipNoticeEmailText(n: CanonicalShipNotice, shipper: string): st
 /** Sends the canonical order as an email with the PDF attached, and ship notices as plain emails. Partner settings: `to` (required), `cc`, `replyTo`. */
 export const emailBridge: Bridge = {
   id: "email",
-  carries: ["order", "order_change", "despatch_advice"],
+  carries: ["order", "order_change", "despatch_advice", "order_response", "invoice"],
   async send(message, partner) {
     const to = (partner.bridgeConfig.to ?? "").split(/[,;]\s*/).map((s) => s.trim()).filter(Boolean);
     if (!to.length || !to.every(isEmail)) return { ok: false, error: "This partner has no valid email address (setting \"to\")", retryable: false };
@@ -86,6 +110,27 @@ export const emailBridge: Bridge = {
         from: mailFrom(), to, ...(cc.length ? { cc } : {}), ...(replyTo ? { replyTo } : {}),
         subject: `Shipment ${notice.shipmentNo} for your order ${notice.poNumber}${shipper ? ` from ${shipper}` : ""}${partner.mode === "test" ? " (TEST)" : ""}`.replace(/[\r\n]+/g, " "),
         text: shipNoticeEmailText(notice, shipper),
+        attachments: [{ filename: `${notice.shipmentNo}-packing-slip.pdf`, contentType: "application/pdf", content: renderDocument({ kind: "packing_slip", doc: notice }, await docContextFor(partner.orgId, partner._id, "packing_slip", shipper || "Shipper")) }],
+      });
+      return sent.ok ? { ok: true, state: "sent", providerMessageId: sent.messageId } : { ok: false, error: sent.error, retryable: sent.retryable };
+    }
+    if (message.docType === "order_response" || message.docType === "invoice") {
+      // What we send a customer: an order confirmation or an invoice, drawn with our letterhead and templates.
+      let json: unknown;
+      try { json = JSON.parse(message.body); } catch { return { ok: false, error: "The document isn't valid JSON", retryable: false }; }
+      const made = message.docType === "invoice" ? canonicalInvoiceSchema.safeParse(json) : canonicalSalesConfirmationSchema.safeParse(json);
+      if (!made.success) return { ok: false, error: `The document isn't a valid ${message.docType === "invoice" ? "invoice" : "order confirmation"}`, retryable: false };
+      const test = partner.mode === "test" ? " (TEST)" : "";
+      const doc = made.data;
+      const inv = message.docType === "invoice";
+      const number = "invoiceNumber" in doc ? doc.invoiceNumber : doc.number;
+      const shipper = doc.shipper ?? "";
+      const ctx = await docContextFor(partner.orgId, partner._id, inv ? "invoice" : "sales_order", shipper || "Sender");
+      const sent = await getMailTransport().send({
+        from: mailFrom(), to, ...(cc.length ? { cc } : {}), ...(replyTo ? { replyTo } : {}),
+        subject: `${inv ? "Invoice" : "Order confirmation"} ${number}${shipper ? ` from ${shipper}` : ""}${test}`.replace(/[\r\n]+/g, " "),
+        text: inv ? invoiceEmailText(doc as CanonicalInvoice, shipper) : confirmationEmailText(doc as CanonicalSalesConfirmation, shipper),
+        attachments: [{ filename: `${number}.pdf`, contentType: "application/pdf", content: inv ? renderDocument({ kind: "invoice", doc: doc as CanonicalInvoice }, ctx) : renderDocument({ kind: "sales_order", doc: doc as CanonicalSalesConfirmation }, ctx) }],
       });
       return sent.ok ? { ok: true, state: "sent", providerMessageId: sent.messageId } : { ok: false, error: sent.error, retryable: sent.retryable };
     }
@@ -102,7 +147,7 @@ export const emailBridge: Bridge = {
       ...(replyTo ? { replyTo } : {}),
       subject: `Purchase order ${order.poNumber} from ${order.buyer.name}${partner.mode === "test" ? " (TEST)" : ""}`.replace(/[\r\n]+/g, " "),
       text: orderEmailText(order),
-      attachments: [{ filename: `${order.poNumber}.pdf`, contentType: "application/pdf", content: renderOrderPdf(order) }],
+      attachments: [{ filename: `${order.poNumber}.pdf`, contentType: "application/pdf", content: renderOrderPdf(order, await docContextFor(partner.orgId, partner._id, "purchase_order", order.buyer.name)) }],
     });
     return res.ok ? { ok: true, state: "sent", providerMessageId: res.messageId } : { ok: false, error: res.error, retryable: res.retryable };
   },
@@ -159,7 +204,8 @@ export async function previewPurchaseOrder(store: Store, orgId: ObjectId, poId: 
   const [order] = await toOrders(store, [po]);
   const supplier = await store.suppliers.findOne({ _id: po.supplierId });
   const canonical = buildCanonicalOrder(order!, { buyerName: orgName, supplierContact: supplier?.contact ?? "", supplierEmail: supplier?.email ?? "", portalUrl: null });
-  return { ok: true, pdf: renderOrderPdf(canonical), canonical };
+  const partner = await store.tradingPartners.findOne({ orgId, supplierId: po.supplierId, kind: "supplier" }, { projection: { _id: 1 } });
+  return { ok: true, pdf: renderOrderPdf(canonical, await loadDocContext(store, orgId, "purchase_order", partner?._id ?? null)), canonical };
 }
 
 // ---------- what the buyer sees on the order ----------
