@@ -138,6 +138,40 @@ The **owner** can restore an archive into an organization that has no data (a ne
 - Numbering carries on: the next purchase order, work order, count, NCR, import or roll label continues after the highest restored.
 - Dates, whole-number quantities and units survive exactly. The restore is written to the audit log.
 
+### API keys and webhooks
+
+**Settings > API keys** (admins) makes keys for other software. A key is `ivk_` plus 256 random bits, **shown once** when it is made; only a SHA-256 hash is kept, so a database leak doesn't leak keys. Send it as `Authorization: Bearer ivk_...` to `/api/orgs/:orgId/...`.
+
+- **Two kinds.** *Read only* looks things up: items, locations, ledger entries, overview, rolls, purchase orders and suppliers, counts, scan lookup. *Read and write* also creates and edits items, adjusts and transfers stock, receives and moves (`/receipts`, `/moves`), receives rolls and moves or adjusts them, and receives against a purchase order. Nothing else: **no deletes, no imports or archive, no members, settings, approvals, audit log, other keys or webhooks, and no listing or creating organizations.** Anything outside answers `403`.
+- A key belongs to **one organization** (any other answers `404`) and acts like a **member** named "API key: <name>", so the ledger and audit log say which key did something and approval rules still apply (an over-limit adjustment answers `202 { approvalRequired }`).
+- Optional **expiry**; **revoke** stops it straight away (the record stays so the log still makes sense). Each key is limited to 600 requests a minute (`429` with `Retry-After`), and an address that sends 20 wrong keys is locked out for 15 minutes. A wrong key looks exactly like no key (`401`). The key is never written to a log or the audit trail.
+
+**Settings > Webhooks** (admins) tells another system when something happens. Pick the events (or everything): `item.created/updated/deleted`, `stock.received/adjusted/moved/reversed`, `purchase_order.created/ordered/received/cancelled/closed`, `count.posted`, `work_order.created/released/completed`, `approval.requested/approved/rejected`, `import.applied/undone`. Each is a POST of JSON:
+
+```json
+{ "id": "6ad4…", "type": "stock.adjusted", "createdAt": "2026-10-18T14:40:54.466Z", "organizationId": "6ad4…", "seq": 29,
+  "actor": { "name": "Ada" }, "entity": { "type": "item", "id": "6ad4…", "label": "Bolt M8 (BOLT-M8)" },
+  "summary": "Adjusted Bolt M8: -3 (Used)", "changes": [ … ], "refs": { "movementIds": ["…"] } }
+```
+
+Headers: `X-Invintel-Event`, `X-Invintel-Event-Id` (the same on every retry and for every webhook, so a receiver can ignore repeats), `X-Invintel-Delivery`, and **`X-Invintel-Signature: t=<unix seconds>,v1=<hex>`** where `v1` is the HMAC-SHA256 of `"<t>.<raw body>"` with the webhook's secret (`whsec_...`, shown once; "New secret" replaces it). Check it, and reject a `t` that is more than a few minutes old:
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+function verify(secret, rawBody, header) {
+  const m = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(header ?? "");
+  if (!m || Math.abs(Date.now() / 1000 - Number(m[1])) > 300) return false;
+  const want = createHmac("sha256", secret).update(`${m[1]}.${rawBody}`).digest();
+  return timingSafeEqual(want, Buffer.from(m[2], "hex"));
+}
+```
+
+- **Delivery:** answer any 2xx. Anything else (4xx, 5xx, a redirect, a timeout of 8 seconds) is retried after 1 min, 5 min, 30 min, 2 h and 6 h, then it gives up and shows in the log with a "Try again" button. After 10 deliveries in a row give up, the webhook **switches itself off** and says why. *Send test* sends a `webhook.test` event right now, even to a switched-off webhook.
+- **Private networks are blocked.** Only `https://` addresses on the public internet are accepted: no `localhost`, private, link-local (including cloud metadata `169.254.169.254`), carrier-NAT, loopback or reserved ranges, IPv4 hidden inside IPv6, or odd number forms of an IP. The check runs when the address is saved **and again on every connection** against what the name really resolves to, redirects are never followed, and only a few kilobytes of an answer are read. For local development only, `INVINTEL_WEBHOOKS_ALLOW_PRIVATE=true` allows http and private addresses (never set it in production); `INVINTEL_WEBHOOK_TIMEOUT_MS` changes the timeout.
+- The worker that sends deliveries runs inside the API process (every 5 seconds); two API processes are safe, a delivery is claimed atomically. Delivery logs clear after 30 days. Webhook secrets are stored in the database (an HMAC key has to be recoverable), unlike API keys.
+
+API: `GET/POST /api-keys`, `POST /api-keys/:id/revoke`; `GET/POST /webhooks`, `PATCH/DELETE /webhooks/:id`, `POST /webhooks/:id/test`, `POST /webhooks/:id/rotate-secret`, `GET /webhooks/:id/deliveries`, `POST /webhooks/:id/deliveries/:deliveryId/retry`. All need an admin signed in as a person; a key can't call them.
+
 ### Units of measure
 
 Every item says what it is counted in. Set **Unit** and **Decimal places** in the item form (presets for kg, g, lb, m, m², L, ft, or any text up to 16 characters), and optionally **Also bought or counted in**: `1 bag = 25 kg`. Receiving and counting then take `12.5` for a 3-decimal kg item, and the unit picker next to a quantity box converts bags to kilograms as you type (`2 bag = 50.000 kg`) and refuses anything that wouldn't come out as a whole number of the smallest unit.

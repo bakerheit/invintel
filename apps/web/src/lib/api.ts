@@ -49,6 +49,9 @@ import type {
   UnitsPosted,
   AuditPage,
   AuditVerification,
+  ApiKey,
+  ApiKeyCreated,
+  ApiKeyInput,
   ArchiveRestoreResult,
   ImportBatch,
   ImportInput,
@@ -84,6 +87,11 @@ import type {
   StockMovement,
   TransferInput,
   User,
+  Webhook,
+  WebhookDelivery,
+  WebhookInput,
+  WebhookUpdate,
+  WebhookWithSecret,
 } from "@invintel/shared";
 
 const traceParams = (q: TraceQuery) => new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
@@ -165,6 +173,17 @@ export const api = {
     if (res.ok) return data as ArchiveRestoreResult;
     throw new Error(typeof data.error === "string" ? data.error : "Restore failed");
   },
+  listApiKeys: (orgId: string) => request<ApiKey[]>(`/orgs/${orgId}/api-keys`),
+  createApiKey: (orgId: string, input: ApiKeyInput) => request<ApiKeyCreated>(`/orgs/${orgId}/api-keys`, post(input)),
+  revokeApiKey: (orgId: string, id: string) => request<ApiKey>(`/orgs/${orgId}/api-keys/${id}/revoke`, post({})),
+  listWebhooks: (orgId: string) => request<Webhook[]>(`/orgs/${orgId}/webhooks`),
+  createWebhook: (orgId: string, input: WebhookInput) => request<WebhookWithSecret>(`/orgs/${orgId}/webhooks`, post(input)),
+  updateWebhook: (orgId: string, id: string, input: WebhookUpdate) => request<Webhook>(`/orgs/${orgId}/webhooks/${id}`, patch(input)),
+  deleteWebhook: (orgId: string, id: string) => request<void>(`/orgs/${orgId}/webhooks/${id}`, { method: "DELETE" }),
+  testWebhook: (orgId: string, id: string) => request<WebhookDelivery>(`/orgs/${orgId}/webhooks/${id}/test`, post({})),
+  rotateWebhookSecret: (orgId: string, id: string) => request<WebhookWithSecret>(`/orgs/${orgId}/webhooks/${id}/rotate-secret`, post({})),
+  webhookDeliveries: (orgId: string, id: string) => request<WebhookDelivery[]>(`/orgs/${orgId}/webhooks/${id}/deliveries`),
+  retryDelivery: (orgId: string, id: string, deliveryId: string) => request<WebhookDelivery>(`/orgs/${orgId}/webhooks/${id}/deliveries/${deliveryId}/retry`, post({})),
   listImports: (orgId: string) => request<ImportBatch[]>(`/orgs/${orgId}/data/imports`),
   undoImport: async (orgId: string, id: string): Promise<ImportUndoResult> => {
     // A refused undo says which items have been built on since, so carry that text through.

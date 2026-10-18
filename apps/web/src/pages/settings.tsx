@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArchiveCard } from "@/components/archive-card";
+import { ApiKeysCard, WebhooksCard } from "@/components/integrations";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
@@ -295,6 +296,18 @@ export default function SettingsPage() {
         {admin && (
           <Section title="Your data" description="Download everything this organization has as one file, or bring a file back. Nothing is held hostage.">
             <ArchiveCard orgId={org.id} isOwner={org.role === "owner"} />
+          </Section>
+        )}
+
+        {admin && (
+          <Section title="API keys" description="Let other software read your inventory or post receipts, adjustments and moves. A key works for this organization only and can never delete, import or manage people.">
+            <ApiKeysCard orgId={org.id} />
+          </Section>
+        )}
+
+        {admin && (
+          <Section title="Webhooks" description="Have Invintel tell another system when something happens: an item is created, stock changes, a purchase order arrives. Each message is signed so the receiver can check it.">
+            <WebhooksCard orgId={org.id} />
           </Section>
         )}
 
