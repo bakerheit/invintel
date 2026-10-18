@@ -86,7 +86,7 @@ function OrderDialog({ open, onOpenChange, suppliers }: { open: boolean; onOpenC
   const ready = supplierId && lines.every((l) => l.itemId && Number(l.quantity) > 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader><DialogTitle>New purchase order</DialogTitle><DialogDescription>Saved as a draft. Nothing is ordered until you place it.</DialogDescription></DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -151,7 +151,7 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-2">{order.number} <StatusPill status={order.status} short={order.closedShort} /></DialogTitle>
           <DialogDescription>{order.supplierName}{order.expectedDate ? ` · expected ${order.expectedDate}` : ""}{order.note ? ` · ${order.note}` : ""}</DialogDescription>

@@ -66,7 +66,7 @@ function CountDetail({ countId, onClose }: { countId: string; onClose: () => voi
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-2">{c.number} <Badge variant="secondary" className={STATUS[c.status].className}>{STATUS[c.status].label}</Badge></DialogTitle>
           <DialogDescription>{c.locationPath} · started by {c.startedBy} {formatRelative(c.startedAt)}</DialogDescription>

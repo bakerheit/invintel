@@ -56,7 +56,7 @@ export function ImportDialog({ orgId, open, onOpenChange }: { orgId: string; ope
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Import items from CSV</DialogTitle>
           <DialogDescription>

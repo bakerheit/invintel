@@ -99,7 +99,7 @@ export function CommandPalette() {
         <kbd className="hidden rounded border bg-background px-1.5 font-mono text-[10px] sm:inline">⌘K</kbd>
       </button>
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
-        <DialogContent className="top-[20%] max-w-lg translate-y-0 gap-0 p-0" showCloseButton={false}>
+        <DialogContent className="top-[20%] sm:max-w-lg translate-y-0 gap-0 p-0" showCloseButton={false}>
           <DialogTitle className="sr-only">Search</DialogTitle>
           <DialogDescription className="sr-only">Type to find a page, item or location. Arrow keys to move, Enter to open.</DialogDescription>
           <div className="flex items-center gap-2 border-b px-3">

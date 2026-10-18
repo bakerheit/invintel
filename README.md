@@ -55,6 +55,18 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 
 **Settings > Features** (admins) hides Purchasing and Production for organizations that don't use them: the sidebar entries, the Cmd-K results and the Floor tile all disappear, so a small shop sees inventory and nothing else. No data is touched, and turning one back on brings everything back. While it is off its API answers 403 too, so scripts can't use it either. Changes are in the audit log.
 
+### Counts
+
+**Counts** (sidebar, and **Floor mode > Count**) are cycle counts for one place at a time:
+
+- Anyone can count. On the floor you scan the shelf, scan each item and say how many are there. It is a **blind count**: the floor screen never shows what the system expects, so people count what they see.
+- Nothing changes while counting. An admin opens the count on the desk, sees *System says / Counted / Difference / Value* per item (biggest money differences first), can fix a number, and **posts** it. Each difference becomes an ordinary adjustment ("Count CNT-0003") in the ledger, so a wrong one can be reversed in Activity.
+- Items in the place that nobody counted are listed; the admin can leave them alone or treat them as zero.
+- One open count per place: starting where one is open continues it, so two people at one rack share a sheet. Only an admin or whoever started it can cancel.
+- Counts are by quantity. Roll and pallet items are counted by their labels, which isn't built yet.
+
+API under `/api/orgs/:orgId/counts`: `GET /`, `POST /` (`{locationId}`), `GET /:id`, `PUT /:id/lines`, `DELETE /:id/lines/:itemId`, `POST /:id/post`, `POST /:id/cancel`.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:
