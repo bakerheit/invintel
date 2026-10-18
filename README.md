@@ -51,6 +51,10 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 - **Floor mode** (`/o/:orgId/floor`, also in the sidebar) is a full-screen, big-target UI for the plant floor: **Receive**, **Move**, and **Look up**. A scanner types the code and presses Enter; the scan field stays focused and suppresses the on-screen keyboard unless you tap the keyboard button. Items resolve by SKU, locations by code or name. Each flow ends with a result screen and a one-tap **Undo**.
 - To use real scanners, print SKUs and location codes as Code 128 (or QR) labels. Most handheld scanners work as a keyboard ("wedge") with Enter as the suffix.
 
+### Search everywhere
+
+**Ctrl/Cmd+K** (or the Search button in the top bar) opens a palette: type to jump to a page, an item (by name, SKU or any barcode) or a location. Arrow keys and Enter; Esc closes. Admin-only pages stay hidden from members.
+
 ### Import and export
 
 **Inventory > Export** downloads every item as CSV, one row per item and location (`sku, name, category, description, reorder_level, unit_cost, barcodes, location, quantity`). Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet can't run them as formulas.

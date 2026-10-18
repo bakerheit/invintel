@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router";
 import { AppSidebar, navItems } from "@/components/app-sidebar";
+import { CommandPalette } from "@/components/command-palette";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { useCurrentOrg, useOrgs } from "@/lib/org";
@@ -27,6 +28,7 @@ export function AppShell() {
               </>
             )}
           </div>
+          <CommandPalette />
         </header>
         <div className="mx-auto w-full max-w-6xl flex-1 space-y-6 p-4 md:p-8">
           <Outlet />
