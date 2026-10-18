@@ -117,9 +117,13 @@ export interface WorkOrder {
   outputItemId: string;
   outputItemSku: string;
   outputItemName: string;
+  /** Unit-tracked output (pallets, rolls) is reported with a unit size and gets labels. */
+  outputTracking: "quantity" | "unit";
   quantity: number;
   workCenterId: string;
   workCenterName: string;
+  /** Where material staged at the machine sits. */
+  workCenterLocationId: string;
   dueDate: string | null;
   note: string;
   requirements: WorkOrderRequirement[];
