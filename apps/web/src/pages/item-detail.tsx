@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowLeftRight, History, Package, Pencil, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, History, Package, Pencil, Printer, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Link, useParams } from "react-router";
 import { Dialogs } from "@/components/dialogs";
 import { EmptyState } from "@/components/empty-state";
@@ -24,6 +24,7 @@ export default function ItemDetailPage() {
   const { data: locations = [] } = useLocations(org.id);
   const items = useQuery({ queryKey: orgKey(org.id, "items"), queryFn: () => api.listItems(org.id) });
   const history = useQuery({ queryKey: orgKey(org.id, "item-history", itemId), queryFn: () => api.activity(org.id, { itemId }) });
+  const units = useQuery({ queryKey: orgKey(org.id, "units", itemId), queryFn: () => api.listUnits(org.id, { itemId, status: "available", limit: 100 }) });
   const back = (
     <Link to={`/o/${org.id}/inventory`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
       <ArrowLeft /> Inventory
@@ -59,12 +60,20 @@ export default function ItemDetailPage() {
         }
         actions={
           <>
-            <Button variant="outline" onClick={() => openDialog({ kind: "adjust", item })}>
-              <SlidersHorizontal /> Adjust
-            </Button>
-            <Button variant="outline" onClick={() => openDialog({ kind: "transfer", item })} disabled={item.quantity === 0}>
-              <ArrowLeftRight /> Move
-            </Button>
+            {item.tracking === "unit" ? (
+              <Link to={`/o/${org.id}/labels?units=${(units.data?.units ?? []).map((u) => u.id).join(",")}`} className={buttonVariants({ variant: "outline" })}>
+                <Printer /> Print labels
+              </Link>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => openDialog({ kind: "adjust", item })}>
+                  <SlidersHorizontal /> Adjust
+                </Button>
+                <Button variant="outline" onClick={() => openDialog({ kind: "transfer", item })} disabled={item.quantity === 0}>
+                  <ArrowLeftRight /> Move
+                </Button>
+              </>
+            )}
             <Button variant="outline" onClick={() => openDialog({ kind: "edit-item", item })}>
               <Pencil /> Edit
             </Button>
@@ -85,6 +94,34 @@ export default function ItemDetailPage() {
           </Card>
         ))}
       </div>
+
+      {item.tracking === "unit" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Rolls and pallets</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!units.data?.units.length ? (
+              <p className="text-sm text-muted-foreground">{units.isLoading ? "Loading…" : "None in stock. Receive some from Floor mode, then print their labels."}</p>
+            ) : (
+              <ul className="divide-y">
+                {units.data.units.map((u) => (
+                  <li key={u.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-mono font-semibold">{u.code}</p>
+                      <p className="truncate text-xs text-muted-foreground">{u.locationPath}{u.lot ? ` · Lot ${u.lot}` : ""}</p>
+                    </div>
+                    <p className="tabular-nums">
+                      <span className="font-medium">{u.quantity.toLocaleString()}</span>
+                      {u.quantity !== u.initialQuantity && <span className="text-muted-foreground"> of {u.initialQuantity.toLocaleString()}</span>}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

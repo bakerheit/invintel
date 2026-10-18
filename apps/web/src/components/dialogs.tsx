@@ -116,6 +116,9 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
   const [barcodes, setBarcodes] = useState<string[]>(item?.barcodes ?? (initialBarcode ? [initialBarcode] : []));
   // Many small shops use the product barcode as the SKU, so a blank SKU takes the first code scanned.
   const [sku, setSku] = useState(item?.sku ?? initialBarcode ?? "");
+  const [tracking, setTracking] = useState<"quantity" | "unit">(item?.tracking ?? "quantity");
+  // Switching how an item is counted is only safe while nothing is in stock.
+  const canChangeTracking = !item || item.quantity === 0;
   const submit = useSubmit((form) => {
     const base = {
       sku: sku.trim(),
@@ -125,10 +128,11 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
       reorderLevel: Number(text(form, "reorderLevel") || 0),
       unitCostCents: dollarsToCents(text(form, "unitCost")),
       barcodes,
+      ...(canChangeTracking ? { tracking } : {}),
     };
     if (item) return api.updateItem(orgId, item.id, base);
     const quantity = Number(text(form, "quantity") || 0);
-    return api.createItem(orgId, { ...base, ...(quantity > 0 && locationId ? { initialStock: { locationId, quantity } } : {}) });
+    return api.createItem(orgId, { ...base, ...(tracking === "quantity" && quantity > 0 && locationId ? { initialStock: { locationId, quantity } } : {}) });
   }, item ? "Changes saved" : "Item created");
 
   return (
@@ -152,7 +156,26 @@ function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations:
         }}
       />
       <Field label="Description" name="description" defaultValue={item?.description} />
-      {!item && (
+      <div className="grid gap-1.5">
+        <Label>How is it counted?</Label>
+        <Select
+          value={tracking}
+          onValueChange={(v) => v && setTracking(v as "quantity" | "unit")}
+          disabled={!canChangeTracking}
+          items={[
+            { value: "quantity", label: "By quantity (bolts, boxes, gloves)" },
+            { value: "unit", label: "By roll or pallet (each one has its own label)" },
+          ]}
+        >
+          <SelectTrigger aria-label="How is it counted?" className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="quantity">By quantity (bolts, boxes, gloves)</SelectItem>
+            <SelectItem value="unit">By roll or pallet (each one has its own label)</SelectItem>
+          </SelectContent>
+        </Select>
+        {!canChangeTracking && <p className="text-xs text-muted-foreground">Can't change while it has stock.</p>}
+      </div>
+      {!item && tracking === "quantity" && (
         <div className="grid grid-cols-2 gap-4">
           <Field label="Starting quantity" name="quantity" type="number" min={0} defaultValue={0} />
           <LocationSelect label="Stored at" value={locationId} onChange={setLocationId} locations={locationOptions(locations)} />

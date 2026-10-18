@@ -68,6 +68,22 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 
 API: `GET /data/items.csv`, `POST /data/items/import` with `{ csv, dryRun }`.
 
+### Rolls and pallets (unit tracking)
+
+Some stock isn't a pile of identical things: a paper roll has a weight that shrinks as it's used, and you need to know *which* roll is where. Set an item's **How is it counted?** to **By roll or pallet** and each physical roll or pallet becomes its own **unit**: its own label code (`U-000123`, or a pre-printed one), lot, remaining quantity, location and status (available, quarantined, consumed).
+
+- **Receive** (Floor mode > Receive, or `POST /units`): say how much is on each, how many arrived and the lot, and each gets a label. The result screen has a **Print these labels** button.
+- **Move**: scan the roll's label, then the destination. It moves with whatever is left on it. Scanning a unit-tracked *item* instead lists its rolls to pick from.
+- **Use some**: Look up a label, then "Take N from this one". At zero the unit is marked consumed and can't be moved or used again.
+- Everything writes ledger lines that carry the unit (Activity shows the code), updates the per-location stock rows, and is audited. Item totals, the overview and counts keep working because a location's stock for a unit-tracked item is always the sum of its units.
+- Unit-tracked items refuse quantity-style receipts, moves and adjustments (they'd bypass the units), and can't switch tracking while they have stock. A unit label can't equal any SKU or barcode, and vice versa.
+- Not built yet: reversing a unit's ledger entry (it's refused with a message), quarantine controls in the UI, and unit-level counts.
+- For other modules: `receiveUnits`, `moveUnit` and `adjustUnit` in `apps/api/src/units.ts` take `{ type, workOrderId, transferId }` so production can tag the ledger lines it causes and have them reversed together.
+
+### Labels
+
+**Labels** (sidebar, under Tools) prints barcode labels for items (the SKU), locations (the code, else the name) and rolls/pallets (their label). Pick what to print, choose **Code 128** or **QR**, a label size, and how many copies of each, then Print. Barcodes are drawn as SVG so they stay sharp at any size, and the page prints only the label sheet. The codes come straight from the data, so what's on the label is exactly what a scan will look up. Use the browser's print dialog to choose the printer and set margins to "None" or "Default" and scale to 100%.
+
 ### Audit log
 
 Every change is recorded in a single **audit log** (admins and owners only, under "Audit log" in the sidebar): who did it, when, a one-line summary, and for edits the exact before and after of each field.

@@ -8,7 +8,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, History, MoreHorizontal, Pencil, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, ArrowUpDown, History, MoreHorizontal, Package, Pencil, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { StatusBadge } from "@/components/status-badge";
@@ -163,12 +163,20 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
               <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-44">
-              <DropdownMenuItem onClick={() => openDialog({ kind: "adjust", item: row.original, locationId })}>
-                <SlidersHorizontal /> Adjust stock
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => openDialog({ kind: "transfer", item: row.original })}>
-                <ArrowLeftRight /> Move stock
-              </DropdownMenuItem>
+              {row.original.tracking === "unit" ? (
+                <DropdownMenuItem onClick={() => navigate(`/o/${org.id}/inventory/${row.original.id}`)}>
+                  <Package /> Rolls and pallets
+                </DropdownMenuItem>
+              ) : (
+                <>
+                  <DropdownMenuItem onClick={() => openDialog({ kind: "adjust", item: row.original, locationId })}>
+                    <SlidersHorizontal /> Adjust stock
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openDialog({ kind: "transfer", item: row.original })}>
+                    <ArrowLeftRight /> Move stock
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuItem onClick={() => openDialog({ kind: "edit-item", item: row.original })}>
                 <Pencil /> Edit details
               </DropdownMenuItem>
