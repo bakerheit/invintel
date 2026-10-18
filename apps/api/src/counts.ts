@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { countLineSchema, countPostSchema, countStartSchema, objectIdSchema, type Count, type CountListRow } from "@invintel/shared";
+import { countLineSchema, lineValueCents, countPostSchema, countStartSchema, objectIdSchema, type Count, type CountListRow } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
@@ -40,7 +40,7 @@ export function createCountRoutes(store: Store) {
       const variance = l.counted - expected;
       return {
         itemId: l.itemId.toHexString(), itemSku: item?.sku ?? "", itemName: item?.name ?? "Deleted item",
-        expected, counted: l.counted, variance, varianceCents: variance * (item?.unitCostCents ?? 0),
+        expected, counted: l.counted, variance, varianceCents: lineValueCents(variance, item?.unitCostCents ?? 0, item?.decimals ?? 0),
       };
     });
     const counted = new Set(doc.lines.map((l) => l.itemId.toHexString()));

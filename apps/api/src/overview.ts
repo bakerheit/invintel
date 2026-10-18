@@ -1,4 +1,4 @@
-import { LOCATION_TYPES, type AttentionItem, type LocationType, type Overview } from "@invintel/shared";
+import { LOCATION_TYPES, lineValueCents, type AttentionItem, type LocationType, type Overview } from "@invintel/shared";
 import { Hono } from "hono";
 import type { Store } from "./db.js";
 import { loadItems } from "./item-queries.js";
@@ -30,11 +30,11 @@ export function createOverviewRoutes(store: Store) {
     for (const item of items) {
       const quantity = item.stock.reduce((sum, s) => sum + s.quantity, 0);
       units += quantity;
-      valueCents += quantity * item.unitCostCents;
+      valueCents += lineValueCents(quantity, item.unitCostCents, item.decimals ?? 0);
       for (const s of item.stock) {
         const t = totals.get(typeOf.get(s.locationId.toHexString()) ?? "storage")!;
         t.units += s.quantity;
-        t.valueCents += s.quantity * item.unitCostCents;
+        t.valueCents += lineValueCents(s.quantity, item.unitCostCents, item.decimals ?? 0);
       }
       const status = quantity <= 0 ? "out" : item.reorderLevel > 0 && quantity <= item.reorderLevel ? "low" : null;
       if (status) {

@@ -68,6 +68,10 @@ export interface ItemDoc {
   barcodes?: string[];
   /** Absent means "quantity". Unit-tracked items hold stock only as StockUnitDocs. */
   tracking?: "quantity" | "unit";
+  /** How stored whole-number quantities read (see shared units.ts). Absent means each, 0 decimals. */
+  unit?: string;
+  decimals?: number;
+  altUnits?: { name: string; factor: string }[];
   createdAt: Date;
   updatedAt: Date;
 }

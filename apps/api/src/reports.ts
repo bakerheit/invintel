@@ -1,6 +1,7 @@
 import type {
   AbcClass, AgingBucket, AgingReport, AgingRow, CountAccuracyReport, CountScheduleReport, CountScheduleRow, ItemAccuracy, LocationAccuracy,
 } from "@invintel/shared";
+import { lineValueCents } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { csvNumber, csvText } from "./csv.js";
@@ -49,7 +50,7 @@ export async function agingReport(store: Store, orgId: ObjectId, now = new Date(
     rows.push({
       itemId: item._id.toHexString(), sku: item.sku, name: item.name, locationId: s.locationId.toHexString(),
       locationPath: idx.byId.has(s.locationId.toHexString()) ? idx.pathOf(s.locationId.toHexString()) : "Deleted location",
-      quantity: s.quantity, valueCents: s.quantity * item.unitCostCents, lastMovementAt: at.toISOString(), daysSince,
+      quantity: s.quantity, valueCents: lineValueCents(s.quantity, item.unitCostCents, item.decimals ?? 0), lastMovementAt: at.toISOString(), daysSince,
       onActiveBom: wanted.has(item._id.toHexString()), bucket: bucketOf(daysSince).label,
     });
   }
@@ -94,15 +95,16 @@ export async function countAccuracyReport(store: Store, orgId: ObjectId, now = n
     for (const l of c.lines) {
       const expected = l.expectedAtPost ?? l.counted;
       const diff = l.counted - expected;
-      const unitCost = cost.get(l.itemId.toHexString())?.unitCostCents ?? 0;
+      const costed = cost.get(l.itemId.toHexString());
+      const worth = (n: number) => lineValueCents(n, costed?.unitCostCents ?? 0, costed?.decimals ?? 0);
       loc.linesCounted++; lines++;
       if (diff === 0) { loc.linesMatched++; ok++; }
-      loc.absVarianceUnits += Math.abs(diff); loc.absVarianceCents += Math.abs(diff) * unitCost; loc.netVarianceCents += diff * unitCost;
+      loc.absVarianceUnits += Math.abs(diff); loc.absVarianceCents += worth(Math.abs(diff)); loc.netVarianceCents += worth(diff);
       if (month) { month.n++; if (diff === 0) month.ok++; }
       const item = cost.get(l.itemId.toHexString());
       const it = byItem.get(l.itemId.toHexString()) ?? { itemId: l.itemId.toHexString(), sku: item?.sku ?? "", name: item?.name ?? "Deleted item", linesCounted: 0, linesMissed: 0, absVarianceUnits: 0, absVarianceCents: 0 };
       it.linesCounted++; if (diff !== 0) it.linesMissed++;
-      it.absVarianceUnits += Math.abs(diff); it.absVarianceCents += Math.abs(diff) * unitCost;
+      it.absVarianceUnits += Math.abs(diff); it.absVarianceCents += worth(Math.abs(diff));
       byItem.set(it.itemId, it);
     }
     byLoc.set(key, loc);
@@ -128,9 +130,9 @@ export async function countScheduleReport(store: Store, orgId: ObjectId, now = n
     loadLocations(store, orgId),
   ]);
   const idx = indexLocations(locations);
-  const cost = new Map(items.map((i) => [i._id.toHexString(), i.unitCostCents]));
+  const cost = new Map(items.map((i) => [i._id.toHexString(), i]));
   const valueByItem = new Map<string, number>();
-  for (const s of stock) valueByItem.set(s.itemId.toHexString(), (valueByItem.get(s.itemId.toHexString()) ?? 0) + s.quantity * (cost.get(s.itemId.toHexString()) ?? 0));
+  for (const s of stock) valueByItem.set(s.itemId.toHexString(), (valueByItem.get(s.itemId.toHexString()) ?? 0) + lineValueCents(s.quantity, cost.get(s.itemId.toHexString())?.unitCostCents ?? 0, cost.get(s.itemId.toHexString())?.decimals ?? 0));
   const total = [...valueByItem.values()].reduce((a, b) => a + b, 0);
   const ranked = [...valueByItem.entries()].sort((a, b) => b[1] - a[1]);
   const klass = new Map<string, AbcClass>();
@@ -152,7 +154,8 @@ export async function countScheduleReport(store: Store, orgId: ObjectId, now = n
     const k = s.locationId.toHexString();
     const cls = klass.get(s.itemId.toHexString()) ?? "C";
     const cur = perLoc.get(k) ?? { value: 0, best: "C" as AbcClass };
-    cur.value += s.quantity * (cost.get(s.itemId.toHexString()) ?? 0);
+    const it = cost.get(s.itemId.toHexString());
+    cur.value += lineValueCents(s.quantity, it?.unitCostCents ?? 0, it?.decimals ?? 0);
     if (order.indexOf(cls) < order.indexOf(cur.best)) cur.best = cls;
     perLoc.set(k, cur);
   }

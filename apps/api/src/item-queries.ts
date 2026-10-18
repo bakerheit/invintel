@@ -1,4 +1,4 @@
-import type { Item } from "@invintel/shared";
+import { uomOf, type Item } from "@invintel/shared";
 import type { ObjectId } from "mongodb";
 import type { ItemDoc, StockDoc, Store } from "./db.js";
 
@@ -11,6 +11,8 @@ export const toItem = ({ _id, orgId: _orgId, stock, createdAt, updatedAt, ...res
   ...rest,
   barcodes: rest.barcodes ?? [],
   tracking: rest.tracking ?? "quantity",
+  ...uomOf(rest),
+  altUnits: rest.altUnits ?? [],
   quantity: stock.reduce((sum, s) => sum + s.quantity, 0),
   stock: stock.map((s) => ({ locationId: s.locationId.toHexString(), quantity: s.quantity })),
   createdAt: createdAt.toISOString(),

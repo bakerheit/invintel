@@ -1,5 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import {
+  lineValueCents,
   objectIdSchema,
   poFromSuggestionsSchema,
   poReceiveInputSchema,
@@ -46,7 +47,7 @@ export async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<
   if (!docs.length) return [];
   const [suppliers, items, received] = await Promise.all([
     store.suppliers.find({ _id: { $in: docs.map((d) => d.supplierId) } }).toArray(),
-    store.items.find({ _id: { $in: docs.flatMap((d) => d.lines.map((l) => l.itemId)) } }, { projection: { sku: 1, name: 1 } }).toArray(),
+    store.items.find({ _id: { $in: docs.flatMap((d) => d.lines.map((l) => l.itemId)) } }, { projection: { sku: 1, name: 1, decimals: 1 } }).toArray(),
     receivedByOrder(store, docs.map((d) => d._id)),
   ]);
   const supplierName = new Map(suppliers.map((s) => [s._id.toHexString(), s.name]));
@@ -77,7 +78,7 @@ export async function toOrders(store: Store, docs: PurchaseOrderDoc[]): Promise<
       expectedDate: d.expectedDate,
       note: d.note,
       lines,
-      totalCents: lines.reduce((s, l) => s + l.quantity * l.unitCostCents, 0),
+      totalCents: lines.reduce((s, l) => s + lineValueCents(l.quantity, l.unitCostCents, item.get(l.itemId)?.decimals ?? 0), 0),
       orderedUnits,
       receivedUnits,
       createdAt: d.createdAt.toISOString(),
