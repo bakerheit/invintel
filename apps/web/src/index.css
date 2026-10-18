@@ -146,3 +146,11 @@
   0%, 100% { top: 6%; }
   50% { top: calc(94% - 2px); }
 }
+
+/* Label printing: hide everything except the label sheet. */
+@media print {
+  @page { margin: 8mm; }
+  body * { visibility: hidden; }
+  .label-sheet, .label-sheet * { visibility: visible; }
+  .label-sheet { position: absolute; top: 0; left: 0; }
+}

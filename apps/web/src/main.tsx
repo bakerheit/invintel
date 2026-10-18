@@ -13,6 +13,7 @@ import { queryClient } from "./lib/query";
 import { ThemeProvider } from "./lib/theme";
 import ActivityPage from "./pages/activity";
 import AuditPage from "./pages/audit";
+import LabelsPage from "./pages/labels";
 import FloorHome from "./pages/floor/home";
 import LookupPage from "./pages/floor/lookup";
 import MovePage from "./pages/floor/move";
@@ -72,6 +73,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />
+              <Route path="labels" element={<LabelsPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="floor" element={<FloorLayout />}>
