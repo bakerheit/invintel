@@ -1,12 +1,13 @@
 import type { Bom, WorkCenter, WorkOrder, WorkOrderStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Cog, Factory, Gauge, Plus, Trash2 } from "lucide-react";
+import { ClipboardList, Cog, Factory, Gauge, MoreHorizontal, Plus, Trash2, XCircle } from "lucide-react";
 import { Fragment, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
@@ -168,7 +169,6 @@ function WorkOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
               <TableRow>
                 <TableHead>Number</TableHead>
                 <TableHead>Output</TableHead>
-                <TableHead>Machine</TableHead>
                 <TableHead className="text-right">Done / planned</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead />
@@ -179,26 +179,39 @@ function WorkOrders({ orgId, admin }: { orgId: string; admin: boolean }) {
                 <Fragment key={o.id}>
                   <TableRow className="cursor-pointer" onClick={() => setOpen(open === o.id ? null : o.id)}>
                     <TableCell className="font-medium">{o.number}</TableCell>
-                    <TableCell>{o.outputItemName} <span className="text-xs text-muted-foreground">BOM v{o.bomVersion}</span></TableCell>
-                    <TableCell>{o.workCenterName}</TableCell>
+                    <TableCell>
+                      {o.outputItemName} <span className="text-xs text-muted-foreground">BOM v{o.bomVersion}</span>
+                      <span className="block text-xs text-muted-foreground">{o.workCenterName}</span>
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{o.produced.toLocaleString()} / {o.quantity.toLocaleString()}</TableCell>
                     <TableCell>
                       <Badge variant="secondary" className={cn("capitalize", STATUS_STYLE[o.status])}>{o.status}</Badge>
                       {o.approval === "needed" && <Badge variant="secondary" className="ml-1 bg-warning-soft text-warning">Needs approval</Badge>}
                       {o.approval === "approved" && <Badge variant="secondary" className="ml-1 bg-success-soft text-success" title={`Approved by ${o.approvedBy}`}>Approved</Badge>}
                     </TableCell>
-                    <TableCell className="space-x-2 text-right" onClick={(e) => e.stopPropagation()}>
+                    <TableCell className="whitespace-nowrap text-right [&>*]:ml-2" onClick={(e) => e.stopPropagation()}>
                       {admin && o.approval === "needed" && (
                         <Button size="sm" onClick={() => { const note = window.prompt("Why is this variance OK? (optional)"); if (note !== null) approve.mutate({ id: o.id, note }); }}>Approve</Button>
                       )}
                       {admin && o.status === "planned" && <Button size="sm" onClick={() => act.mutate({ id: o.id, action: "release" })}>Release</Button>}
                       {(o.status === "released" || o.status === "running") && <Button size="sm" variant="outline" onClick={() => act.mutate({ id: o.id, action: "complete" })}>Complete</Button>}
-                      {admin && (o.status === "planned" || o.status === "released") && <Button size="sm" variant="ghost" onClick={() => act.mutate({ id: o.id, action: "cancel" })}>Cancel</Button>}
+                      {admin && (o.status === "planned" || o.status === "released") && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${o.number}`} />}>
+                            <MoreHorizontal />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-40">
+                            <DropdownMenuItem variant="destructive" onClick={() => act.mutate({ id: o.id, action: "cancel" })}>
+                              <XCircle /> Cancel work order
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </TableCell>
                   </TableRow>
                   {open === o.id && (
                     <TableRow key={`${o.id}-v`}>
-                      <TableCell colSpan={6} className="p-0"><VariancePanel orgId={orgId} id={o.id} /></TableCell>
+                      <TableCell colSpan={5} className="p-0"><VariancePanel orgId={orgId} id={o.id} /></TableCell>
                     </TableRow>
                   )}
                 </Fragment>
