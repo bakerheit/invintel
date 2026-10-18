@@ -353,6 +353,7 @@ export const AUDIT_ACTIONS = [
   "downtime.ended",
   "downtime.settings_changed",
   "reasons.changed",
+  "traceability.drill",
   "ncr.opened",
   "ncr.dispositioned",
   "alert.acknowledged",
@@ -591,6 +592,7 @@ export interface UnitsPosted {
 export * from "./production.js";
 export * from "./quality.js";
 export * from "./reasons.js";
+export * from "./traceability.js";
 export * from "./purchasing.js";
 export * from "./counts.js";
 export * from "./reports.js";

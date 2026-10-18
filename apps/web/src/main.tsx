@@ -36,6 +36,7 @@ import AgingReportPage from "./pages/reports/aging";
 import CountingReportPage from "./pages/reports/counting";
 import ApprovalsPage from "./pages/approvals";
 import DowntimeReportPage from "./pages/reports/downtime";
+import TraceReportPage from "./pages/reports/trace";
 import DowntimeFloorPage from "./pages/floor/downtime";
 import AlertsPage from "./pages/alerts";
 import PurchasingPage from "./pages/purchasing";
@@ -91,6 +92,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="reports/aging" element={<AgingReportPage />} />
               <Route path="reports/counting" element={<CountingReportPage />} />
               <Route path="reports/downtime" element={<DowntimeReportPage />} />
+              <Route path="reports/trace" element={<TraceReportPage />} />
               <Route path="purchasing" element={<PurchasingPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />

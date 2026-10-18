@@ -217,6 +217,14 @@ Anyone can **put stock on hold** so it can't be used: on the desk (**Quality**) 
 
 API under `/api/orgs/:orgId`: `POST /quality/holds`, `GET /quality/ncrs?status=open|closed|all`, `GET /quality/ncrs/:id`, `POST /quality/ncrs/:id/dispose` (admin), `GET /quality/summary`, `GET|PUT /reasons` (PUT is admin).
 
+### Lot trace and mock recall
+
+**Reports > Lot trace and mock recall** follows a supplier lot, a roll or pallet label, or a work order **forward** (where did it go: the work orders that used it, what they made, where that is now and how much is still in stock) or **backward** (what went into this pallet or work order: the rolls, their lots, their receipts and orders). The answer is a tree you can read, a table of the affected stock with where it sits now, and a CSV. **Run as a mock recall** does the same trace, times it, keeps it in a history (who, when, how many units and work orders, how long it took) and writes it to the audit log, so a plant can show how fast it can answer a recall.
+
+The trace is read from the ledger, so it is exact for anything tracked by roll or pallet label and for lots you record at receiving. Plain stock has no lot after receiving, so links that pass through it are shown as **possible** (with a note and the likely receipts), never as fact. Stock on quality hold shows as held. The demo has a traceable chain: try lot `MILL-0712`.
+
+API under `/api/orgs/:orgId/traceability`: `GET /trace` and `GET /trace.csv` (`?lot=` with optional `itemId=`, or `?unit=`, or `?workOrder=`; `&direction=forward|backward`), `POST /drills` (same fields in the body), `GET /drills`.
+
 ## API
 
 Auth (no session needed except `/me`):

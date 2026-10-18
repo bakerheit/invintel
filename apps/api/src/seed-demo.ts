@@ -124,6 +124,19 @@ await call(`${base}/purchasing/orders/${po.id}/place`, {});
 // Quality: a few bags of starch found wet, put on hold for an admin to decide.
 await call(`${base}/quality/holds`, { itemId: starch, locationId: chem, quantity: 3, reason: "Damaged", note: "Bags wet from a roof leak (demo)" });
 
+// Traceability: a labelled roll from lot MILL-0712 is used in a work order that makes labelled pallets, one of which
+// goes into a second order. Try Reports > Lot trace and mock recall with lot MILL-0712.
+const lblRoll = (await call<{ id: string }>(`${base}/items`, { sku: "LINER-LBL", name: "Kraft liner 42 lb (labelled rolls)", category: "Paper", tracking: "unit", unitCostCents: 48000 })).id;
+const lblPallet = (await call<{ id: string }>(`${base}/items`, { sku: "PAL-RSC", name: "Pallet of RSC boxes (labelled)", category: "Finished goods", tracking: "unit" })).id;
+const rollsIn = await call<{ units: { id: string; code: string }[] }>(`${base}/units`, { itemId: lblRoll, locationId: rackA, quantity: 800, count: 2, lot: "MILL-0712" });
+await call(`${base}/production/boms`, { outputItemId: lblPallet, inputs: [{ itemId: lblRoll, quantity: 1 }] });
+const wo2 = await call<{ id: string }>(`${prod}/work-orders`, { outputItemId: lblPallet, quantity: 100, workCenterId: wc.id });
+await call(`${prod}/work-orders/${wo2.id}/action`, { action: "release" });
+await call(`${prod}/work-orders/${wo2.id}/load`, { itemId: lblRoll, unitId: rollsIn.units[0]!.id });
+await call(`${prod}/work-orders/${wo2.id}/consume`, { itemId: lblRoll, unitId: rollsIn.units[0]!.id, used: 780, scrap: 20 });
+await call(`${prod}/work-orders/${wo2.id}/output`, { good: 100, unitSize: 50, lot: "RUN-2291", toLocationId: fg });
+await call(`${prod}/work-orders/${wo2.id}/action`, { action: "complete" });
+
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();
 process.exit(0);
