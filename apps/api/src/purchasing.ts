@@ -345,7 +345,7 @@ export function createPurchasingRoutes(store: Store) {
     const actor = actorOf(c.get("user"));
     const movementIds: ObjectId[] = [];
     for (const l of input.lines) {
-      const res = await postAdjustment(store, orgId, actor, { itemId: oid(l.itemId), locationId: oid(input.locationId), delta: l.quantity, reason: `Received: ${doc.number}`, type: "receive" });
+      const res = await postAdjustment(store, orgId, actor, { itemId: oid(l.itemId), locationId: oid(input.locationId), delta: l.quantity, reason: `Received: ${doc.number}`, type: "receive", supplierLot: l.supplierLot });
       if (!res.ok) {
         // Lines before this one are already posted (and counted against the order); the caller is told.
         return c.json({ error: res.error, partial: movementIds.length > 0 }, res.status);

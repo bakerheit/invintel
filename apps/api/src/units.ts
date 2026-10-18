@@ -125,6 +125,7 @@ export async function receiveUnits(
         type: opts.type ?? "receive",
         ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}),
         ...(opts.transferId ? { transferId: opts.transferId } : {}),
+        ...(input.lot ? { supplierLot: input.lot } : {}),
         itemId: input.itemId,
         locationId: input.locationId,
         unitId: u._id,

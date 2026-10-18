@@ -27,6 +27,9 @@ export interface OrgDoc {
   modules?: Partial<{ purchasing: boolean; production: boolean }>;
   /** Absent means nothing needs a second person. */
   /** Downtime: the pick-list and the hours a machine is meant to run each day. Defaults apply when absent. */
+  /** Pick-lists for scrap and quality-hold reasons. Defaults apply when absent. */
+  scrapReasons?: string[];
+  holdReasons?: string[];
   downtimeReasons?: string[];
   scheduledHoursPerDay?: number;
   alertSettings?: { daysOfSupply: number; machineDownMinutes: number };
@@ -100,6 +103,8 @@ export interface StockUnitDoc {
 export interface MovementDoc {
   _id: ObjectId;
   orgId: ObjectId;
+  /** The supplier's lot or batch number, on receipts that recorded one. */
+  supplierLot?: string;
   /** The work order that caused this movement, if any. */
   workOrderId?: ObjectId;
   /** Set when the movement is about one specific roll or pallet. */

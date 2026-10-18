@@ -41,6 +41,7 @@ export function createFloorRoutes(store: Store) {
       delta: input.quantity,
       reason: input.reference ? `Received: ${input.reference}` : "Received",
       type: "receive",
+      supplierLot: input.supplierLot,
     });
     if (!result.ok) return c.json({ error: result.error }, result.status);
     return c.json(await posted(orgId, itemId, result.movementIds), 201);

@@ -89,7 +89,7 @@ export interface PurchaseOrder {
 
 export const poReceiveInputSchema = z.object({
   locationId: id,
-  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(1_000_000) })).min(1).max(100),
+  lines: z.array(z.object({ itemId: id, quantity: z.number().int().positive().max(1_000_000), supplierLot: z.string().trim().max(64).default('') })).min(1).max(100),
 });
 export type PoReceiveInput = z.input<typeof poReceiveInputSchema>;
 

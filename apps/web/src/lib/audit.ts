@@ -24,6 +24,7 @@ export const ACTION_META: Record<AuditAction, { label: string; className: string
   "approval.rules_changed": { label: "Approval rules changed", className: "bg-secondary text-secondary-foreground" },
   "downtime.started": { label: "Machine down", className: "bg-destructive/10 text-destructive" },
   "downtime.ended": { label: "Machine back up", className: "bg-success-soft text-success" },
+  "reasons.changed": { label: "Reason lists", className: "bg-secondary text-secondary-foreground" },
   "downtime.settings_changed": { label: "Downtime settings", className: "bg-secondary text-secondary-foreground" },
   "alert.acknowledged": { label: "Alert acknowledged", className: "bg-secondary text-secondary-foreground" },
   "alert.snoozed": { label: "Alert snoozed", className: "bg-secondary text-secondary-foreground" },

@@ -229,6 +229,8 @@ export const receiveInputSchema = z.object({
   quantity: z.number().int().positive(),
   /** Free text: PO number, delivery note, supplier. */
   reference: z.string().trim().max(200).default(""),
+  /** The supplier's lot or batch number from the label, kept on the ledger line for traceability. */
+  supplierLot: z.string().trim().max(64).default(""),
 });
 export type ReceiveInput = z.infer<typeof receiveInputSchema>;
 
@@ -275,6 +277,8 @@ export interface ActivityEntry {
   delta: number;
   reason: string;
   userName: string;
+  /** The supplier's lot number, when the receipt recorded one. */
+  supplierLot?: string;
   /** Set on both halves of a transfer. */
   transferId?: string;
   /** Set on a reversal: the movement it undoes. */
@@ -344,6 +348,7 @@ export const AUDIT_ACTIONS = [
   "downtime.started",
   "downtime.ended",
   "downtime.settings_changed",
+  "reasons.changed",
   "alert.acknowledged",
   "alert.snoozed",
   "alert.reopened",
@@ -575,6 +580,7 @@ export interface UnitsPosted {
   movementIds: string[];
 }
 export * from "./production.js";
+export * from "./reasons.js";
 export * from "./purchasing.js";
 export * from "./counts.js";
 export * from "./reports.js";

@@ -118,6 +118,7 @@ export function createActivityRoutes(store: Store) {
         delta: m.delta,
         reason: m.reason,
         userName: m.userName,
+        ...(m.supplierLot ? { supplierLot: m.supplierLot } : {}),
         ...(m.transferId ? { transferId: m.transferId.toHexString() } : {}),
         ...(m.reversalOf ? { reversalOf: m.reversalOf.toHexString() } : {}),
         reversed: !!m.reversedBy,
