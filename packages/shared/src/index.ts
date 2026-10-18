@@ -437,3 +437,32 @@ export interface Overview {
 /** Owners can't be demoted or created here: an organization has exactly the owner it was started with. */
 export const memberRoleInputSchema = z.object({ role: z.enum(["admin", "member"]) });
 export type MemberRoleInput = z.infer<typeof memberRoleInputSchema>;
+
+// ---------- CSV import ----------
+
+export type ImportRowStatus = "create" | "stock" | "skip" | "error";
+
+export interface ImportRow {
+  /** 1-based line in the file, counting the header as line 1. */
+  line: number;
+  sku: string;
+  status: ImportRowStatus;
+  message: string;
+}
+
+export interface ImportResult {
+  /** True when nothing was written: this is the preview. */
+  dryRun: boolean;
+  rows: ImportRow[];
+  itemsToCreate: number;
+  stockLines: number;
+  units: number;
+  skipped: number;
+  errors: number;
+}
+
+export const importInputSchema = z.object({
+  csv: z.string().max(2_000_000),
+  dryRun: z.boolean().default(true),
+});
+export type ImportInput = z.input<typeof importInputSchema>;

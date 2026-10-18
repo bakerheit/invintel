@@ -51,6 +51,19 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 - **Floor mode** (`/o/:orgId/floor`, also in the sidebar) is a full-screen, big-target UI for the plant floor: **Receive**, **Move**, and **Look up**. A scanner types the code and presses Enter; the scan field stays focused and suppresses the on-screen keyboard unless you tap the keyboard button. Items resolve by SKU, locations by code or name. Each flow ends with a result screen and a one-tap **Undo**.
 - To use real scanners, print SKUs and location codes as Code 128 (or QR) labels. Most handheld scanners work as a keyboard ("wedge") with Enter as the suffix.
 
+### Import and export
+
+**Inventory > Export** downloads every item as CSV, one row per item and location (`sku, name, category, description, reorder_level, unit_cost, barcodes, location, quantity`). Text cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet can't run them as formulas.
+
+**Inventory > Import** (admins) takes a CSV and shows a preview before anything is written: new items, stock lines, rows skipped and problems per line. Rules:
+
+- Needs a SKU and a name column. Common header names work (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...). Optional: category, notes, reorder level, unit cost (`$12.50` is fine), barcodes (separate with `|`), location (its code, full path or unique name) and quantity.
+- It only **creates**: an existing SKU is never changed, so importing the same file twice can't double anything. Repeat a SKU on another line to put stock in a second location.
+- Opening stock goes through the ledger as receipts ("Imported from CSV"), and each new item is in the audit log.
+- One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 5000 rows, about 2 MB.
+
+API: `GET /data/items.csv`, `POST /data/items/import` with `{ csv, dryRun }`.
+
 ### Audit log
 
 Every change is recorded in a single **audit log** (admins and owners only, under "Audit log" in the sidebar): who did it, when, a one-line summary, and for edits the exact before and after of each field.

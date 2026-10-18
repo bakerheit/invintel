@@ -2,6 +2,8 @@ import type {
   ActivityPage,
   AuditPage,
   AuditVerification,
+  ImportInput,
+  ImportResult,
   Overview,
   AdjustmentInput,
   Item,
@@ -85,6 +87,16 @@ export const api = {
   removeMember: (orgId: string, userId: string) =>
     request<void>(`/orgs/${orgId}/members/${userId}`, { method: "DELETE" }),
 
+  importItems: async (orgId: string, input: ImportInput): Promise<ImportResult> => {
+    // A refused import (422) still carries the per-row report, so show that instead of a bare error.
+    const res = await fetch(`/api/orgs/${orgId}/data/items/import`, {
+      method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok || (res.status === 422 && Array.isArray(data.rows))) return data as ImportResult;
+    throw new Error(typeof data.error === "string" ? data.error : "Import failed");
+  },
+  itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 
   listLocations: (orgId: string) => request<Location[]>(`/orgs/${orgId}/locations`),

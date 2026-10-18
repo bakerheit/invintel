@@ -1,30 +1,32 @@
 import type { Item } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, CircleDollarSign, Layers, Package, Plus, Search, TriangleAlert, X } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { Boxes, CircleDollarSign, Download, Layers, Package, Plus, Search, TriangleAlert, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
 import { Dialogs } from "@/components/dialogs";
 import { EmptyState } from "@/components/empty-state";
+import { ImportDialog } from "@/components/import-dialog";
 import { ItemsTable } from "@/components/items-table";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { withDescendants } from "@/lib/locations";
-import { invalidateOrg, orgKey, useCurrentOrg, useLocations } from "@/lib/org";
+import { invalidateOrg, isAdmin, orgKey, useCurrentOrg, useLocations } from "@/lib/org";
 import { needsAttention } from "@/lib/stock";
 import { useUi } from "@/stores/ui";
 
 const ALL = "__all__";
 
 export default function InventoryPage() {
-  const { id: orgId } = useCurrentOrg();
+  const { id: orgId, role } = useCurrentOrg();
+  const [importing, setImporting] = useState(false);
   const qc = useQueryClient();
   const confirm = useConfirm();
   const { search, setSearch, lowStockOnly, setLowStockOnly, openDialog } = useUi();
@@ -92,9 +94,19 @@ export default function InventoryPage() {
         title="Inventory"
         description="Everything you stock, and where it is."
         actions={
-          <Button onClick={() => openDialog({ kind: "create-item" })}>
-            <Plus /> New item
-          </Button>
+          <>
+            <a href={api.itemsCsvUrl(orgId)} download className={buttonVariants({ variant: "outline" })}>
+              <Download /> Export
+            </a>
+            {isAdmin(role) && (
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <Upload /> Import
+              </Button>
+            )}
+            <Button onClick={() => openDialog({ kind: "create-item" })}>
+              <Plus /> New item
+            </Button>
+          </>
         }
       />
 
@@ -171,6 +183,7 @@ export default function InventoryPage() {
         </div>
       )}
       <Dialogs />
+      <ImportDialog orgId={orgId} open={importing} onOpenChange={setImporting} />
     </>
   );
 }
