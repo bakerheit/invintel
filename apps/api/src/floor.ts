@@ -74,11 +74,13 @@ export function createFloorRoutes(store: Store) {
       return { kind: "location", location: toLocation(doc, indexLocations(docs).pathOf(id.toHexString())) };
     };
 
-    // Exact match first; then other zero-padded forms of the same barcode number.
+    // An exact SKU or barcode wins; then other zero-padded forms of the same barcode number.
     const variants = gtinVariants(code);
+    const byCode = (codes: string[]) =>
+      store.items.findOne({ orgId, $or: [{ sku: { $in: codes } }, { barcodes: { $in: codes } }] }, { collation: ci });
     const item =
-      (await store.items.findOne({ orgId, sku: code }, { collation: ci })) ??
-      (variants.length > 1 ? await store.items.findOne({ orgId, sku: { $in: variants } }, { collation: ci }) : null) ??
+      (await byCode([code])) ??
+      (variants.length > 1 ? await byCode(variants) : null) ??
       (isObjectId(code) ? await store.items.findOne({ orgId, _id: new ObjectId(code) }) : null);
     if (item) {
       const full = await loadItem(store, orgId, item._id);

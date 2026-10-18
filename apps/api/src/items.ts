@@ -10,7 +10,8 @@ import {
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { isDuplicateKey, movementType, type ItemDoc, type MovementDoc, type Store } from "./db.js";
+import { duplicateField, isDuplicateKey, movementType, type ItemDoc, type MovementDoc, type Store } from "./db.js";
+import { conflictMessage, findCodeConflict } from "./item-codes.js";
 import { loadItem, loadItems, toItem } from "./item-queries.js";
 import type { OrgEnv } from "./org-access.js";
 import { postAdjustment, postMove, type Actor } from "./stock-service.js";
@@ -54,12 +55,19 @@ export function createItemRoutes(store: Store) {
     ) {
       return c.json({ error: "Location not found" }, 400);
     }
+    const barcodeClash = await findCodeConflict(store, orgId, input.barcodes, { against: ["sku", "barcodes"] });
+    if (barcodeClash) return c.json({ error: conflictMessage(barcodeClash, "Barcode") }, 409);
+    const skuClash = await findCodeConflict(store, orgId, [input.sku], { against: ["barcodes"] });
+    if (skuClash) return c.json({ error: conflictMessage(skuClash, "SKU") }, 409);
+
     const now = new Date();
     const doc: ItemDoc = { _id: new ObjectId(), orgId, ...input, createdAt: now, updatedAt: now };
     try {
       await store.items.insertOne(doc);
     } catch (e) {
-      if (isDuplicateKey(e)) return c.json({ error: `SKU "${input.sku}" already exists` }, 409);
+      if (isDuplicateKey(e)) {
+        return c.json({ error: duplicateField(e) === "barcodes" ? "One of those barcodes is already in use" : `SKU "${input.sku}" already exists` }, 409);
+      }
       throw e;
     }
     if (initialStock && locationId) {
@@ -77,14 +85,22 @@ export function createItemRoutes(store: Store) {
   r.patch("/:id", zValidator("param", idParam), zValidator("json", itemUpdateSchema), async (c) => {
     const orgId = c.get("org")._id;
     const _id = new ObjectId(c.req.valid("param").id);
+    const patch = c.req.valid("json");
+    if (patch.barcodes) {
+      const clash = await findCodeConflict(store, orgId, patch.barcodes, { selfId: _id, against: ["sku", "barcodes"] });
+      if (clash) return c.json({ error: conflictMessage(clash, "Barcode") }, 409);
+    }
+    if (patch.sku) {
+      const clash = await findCodeConflict(store, orgId, [patch.sku], { selfId: _id, against: ["barcodes"] });
+      if (clash) return c.json({ error: conflictMessage(clash, "SKU") }, 409);
+    }
     try {
-      const updated = await store.items.findOneAndUpdate(
-        { _id, orgId },
-        { $set: { ...c.req.valid("json"), updatedAt: new Date() } },
-      );
+      const updated = await store.items.findOneAndUpdate({ _id, orgId }, { $set: { ...patch, updatedAt: new Date() } });
       if (!updated) return c.json({ error: "Item not found" }, 404);
     } catch (e) {
-      if (isDuplicateKey(e)) return c.json({ error: "SKU already exists" }, 409);
+      if (isDuplicateKey(e)) {
+        return c.json({ error: duplicateField(e) === "barcodes" ? "One of those barcodes is already in use" : "SKU already exists" }, 409);
+      }
       throw e;
     }
     return c.json(toItem((await loadItem(store, orgId, _id))!));

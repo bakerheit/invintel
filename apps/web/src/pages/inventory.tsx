@@ -1,7 +1,7 @@
 import type { Item } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, CircleDollarSign, Layers, Package, Plus, Search, TriangleAlert, X } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm";
@@ -31,6 +31,21 @@ export default function InventoryPage() {
   const [params, setParams] = useSearchParams();
   const { data: locations = [] } = useLocations(orgId);
   const items = useQuery({ queryKey: orgKey(orgId, "items"), queryFn: () => api.listItems(orgId) });
+
+  // Floor mode sends unknown scans here as ?newItem=CODE so they can be added as an item.
+  const newItemCode = params.get("newItem");
+  useEffect(() => {
+    if (!newItemCode) return;
+    openDialog({ kind: "create-item", barcode: newItemCode });
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("newItem");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [newItemCode, openDialog, setParams]);
 
   // The filter lives in the URL so a location's "View stock" link is shareable.
   const requested = params.get("location");

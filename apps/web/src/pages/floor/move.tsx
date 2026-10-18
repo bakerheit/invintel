@@ -4,6 +4,7 @@ import { ListChecks, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
+import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { QtyStepper } from "@/components/floor/qty-stepper";
@@ -31,6 +32,7 @@ export default function MovePage() {
   const [qty, setQty] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [done, setDone] = useState<{ doc: PostedDocument; to: Location; from: Location; qty: number } | null>(null);
 
@@ -39,6 +41,7 @@ export default function MovePage() {
 
   const reset = () => {
     setStep("item");
+    setUnknown(null);
     setItem(null);
     setFrom("");
     setQty(1);
@@ -51,6 +54,7 @@ export default function MovePage() {
     setError(null);
     try {
       const r = await resolveItem(orgId, code);
+      setUnknown(r.ok ? null : (r.unknownCode ?? null));
       if (!r.ok) {
         feedback("error");
         setError(r.error);
@@ -143,7 +147,7 @@ export default function MovePage() {
     <>
       <h1 className="text-3xl font-semibold tracking-tight">Move</h1>
 
-      {step === "item" && <ScanInput label="Scan the item" onScan={onItem} disabled={busy} error={error} />}
+      {step === "item" && <ScanInput label="Scan the item" onScan={onItem} disabled={busy} error={error} errorAction={unknown ? <AddItemLink orgId={orgId} code={unknown} /> : undefined} />}
 
       {step === "details" && item && (
         <div className="space-y-6">

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { centsToDollars, dollarsToCents } from "@/lib/format";
+import { BarcodeField } from "@/components/barcode-field";
 import { LOCATION_TYPE_META, withDescendants } from "@/lib/locations";
 import { invalidateOrg, useCurrentOrg, useLocations } from "@/lib/org";
 import { useUi } from "@/stores/ui";
@@ -109,17 +110,21 @@ function FormShell({ onSubmit, error, pending, close, submitLabel, children }: {
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? "");
 
-function ItemForm({ item, locations }: { item?: Item; locations: Location[] }) {
+function ItemForm({ item, locations, initialBarcode }: { item?: Item; locations: Location[]; initialBarcode?: string }) {
   const { id: orgId } = useCurrentOrg();
   const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
+  const [barcodes, setBarcodes] = useState<string[]>(item?.barcodes ?? (initialBarcode ? [initialBarcode] : []));
+  // Many small shops use the product barcode as the SKU, so a blank SKU takes the first code scanned.
+  const [sku, setSku] = useState(item?.sku ?? initialBarcode ?? "");
   const submit = useSubmit((form) => {
     const base = {
-      sku: text(form, "sku"),
+      sku: sku.trim(),
       name: text(form, "name"),
       description: text(form, "description"),
       category: text(form, "category"),
       reorderLevel: Number(text(form, "reorderLevel") || 0),
       unitCostCents: dollarsToCents(text(form, "unitCost")),
+      barcodes,
     };
     if (item) return api.updateItem(orgId, item.id, base);
     const quantity = Number(text(form, "quantity") || 0);
@@ -129,12 +134,23 @@ function ItemForm({ item, locations }: { item?: Item; locations: Location[] }) {
   return (
     <FormShell {...submit} submitLabel={item ? "Save" : "Create"}>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="SKU" name="sku" defaultValue={item?.sku} required />
+        <div className="grid gap-1.5">
+          <Label htmlFor="sku">SKU</Label>
+          <Input id="sku" name="sku" value={sku} onChange={(e) => setSku(e.target.value)} required />
+        </div>
         <Field label="Name" name="name" defaultValue={item?.name} required />
         <Field label="Category" name="category" defaultValue={item?.category} />
         <Field label="Reorder level" name="reorderLevel" type="number" min={0} defaultValue={item?.reorderLevel ?? 0} />
         <Field label="Unit cost ($)" name="unitCost" type="number" min={0} step="0.01" defaultValue={centsToDollars(item?.unitCostCents ?? 0)} />
       </div>
+      <BarcodeField
+        value={barcodes}
+        onChange={setBarcodes}
+        selfId={item?.id}
+        onAdded={(code, first) => {
+          if (first && !sku.trim()) setSku(code);
+        }}
+      />
       <Field label="Description" name="description" defaultValue={item?.description} />
       {!item && (
         <div className="grid grid-cols-2 gap-4">
@@ -341,7 +357,7 @@ export function Dialogs() {
             <DialogHeader>
               <DialogTitle>{TITLES[dialog.kind]}</DialogTitle>
             </DialogHeader>
-            {dialog.kind === "create-item" && <ItemForm locations={locations} />}
+            {dialog.kind === "create-item" && <ItemForm key={dialog.barcode ?? "new"} locations={locations} initialBarcode={dialog.barcode} />}
             {dialog.kind === "edit-item" && <ItemForm key={dialog.item.id} item={dialog.item} locations={locations} />}
             {dialog.kind === "adjust" && (
               <AdjustForm key={dialog.item.id} item={dialog.item} locations={locations} locationId={dialog.locationId} />

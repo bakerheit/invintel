@@ -124,6 +124,9 @@ export interface Location {
 
 // ---------- items and stock ----------
 
+/** A code printed on the product or its packaging. Separate from the SKU, which is ours. */
+export const barcodeSchema = z.string().trim().min(1).max(64);
+
 const itemFields = {
   sku: z.string().trim().min(1).max(64),
   name: z.string().trim().min(1).max(200),
@@ -131,6 +134,8 @@ const itemFields = {
   category: z.string().trim().max(100),
   reorderLevel: z.number().int().min(0),
   unitCostCents: z.number().int().min(0),
+  /** Product barcodes that identify this item when scanned. An item can have several (each, case, pallet). */
+  barcodes: z.array(barcodeSchema).max(20).transform((codes) => [...new Set(codes)]),
 };
 
 export const itemInputSchema = z.object({
@@ -139,6 +144,7 @@ export const itemInputSchema = z.object({
   category: itemFields.category.default(""),
   reorderLevel: itemFields.reorderLevel.default(0),
   unitCostCents: itemFields.unitCostCents.default(0),
+  barcodes: itemFields.barcodes.default([]),
 });
 export type ItemInput = z.infer<typeof itemInputSchema>;
 

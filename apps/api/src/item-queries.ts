@@ -9,6 +9,7 @@ const byName = { locale: "en" } as const;
 export const toItem = ({ _id, orgId: _orgId, stock, createdAt, updatedAt, ...rest }: ItemWithStock): Item => ({
   id: _id.toHexString(),
   ...rest,
+  barcodes: rest.barcodes ?? [],
   quantity: stock.reduce((sum, s) => sum + s.quantity, 0),
   stock: stock.map((s) => ({ locationId: s.locationId.toHexString(), quantity: s.quantity })),
   createdAt: createdAt.toISOString(),

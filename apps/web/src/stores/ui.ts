@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 type Dialog =
   | { kind: "none" }
-  | { kind: "create-item" }
+  | { kind: "create-item"; /** A code scanned elsewhere that should become this item's first barcode. */ barcode?: string }
   | { kind: "edit-item"; item: Item }
   | { kind: "adjust"; item: Item; locationId?: string }
   | { kind: "transfer"; item: Item }

@@ -59,6 +59,16 @@ How the camera works: it uses the browser's own `BarcodeDetector` when the devic
 
 Formats read: Code 128, Code 39, ITF, EAN-13, EAN-8, UPC-A, UPC-E, QR and Data Matrix (the list is in `apps/web/src/lib/scan-formats.ts`). Print SKUs as Code 128 and location codes as QR or Code 128.
 
+### Barcodes on items
+
+An item's **SKU** is your own code. Its **barcodes** are the codes printed on the product or its packaging (UPC/EAN on the unit, a different code on the case). An item can have up to 20, and a scan of either its SKU or any of its barcodes finds it.
+
+- Add them in the New/Edit item form: scan with the camera, type, or let a hardware scanner type into the box and press Enter. Each code is checked as you add it, so a clash shows up while you're holding the product.
+- If the SKU is blank, the first barcode you scan becomes the SKU too (editable). Plenty of small shops just use the product barcode.
+- A barcode can only belong to one item per organization, and can't match another item's SKU (or the other way round). UPC-A, EAN-13 and GTIN-14 forms of the same number count as the same code.
+- In Floor mode, a scan that matches nothing offers **Add as a new item**, which opens the form with that code already captured.
+- The inventory search box also matches barcodes.
+
 Things to know:
 
 - **Browsers only allow the camera on https pages** (or `localhost`). Testing from a phone against your laptop's dev server over plain `http://192.168…` will not work; use an https tunnel or a certificate, or a hardware scanner.

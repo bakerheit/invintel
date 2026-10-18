@@ -54,6 +54,8 @@ export interface ItemDoc {
   category: string;
   reorderLevel: number;
   unitCostCents: number;
+  /** Absent on items created before barcodes existed. */
+  barcodes?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -146,6 +148,11 @@ export async function connect(
       { unique: true, collation: caseInsensitive, partialFilterExpression: { code: { $gt: "" } } },
     ),
     store.items.createIndex({ orgId: 1, sku: 1 }, { unique: true, collation: caseInsensitive }),
+    // A barcode can only point at one item. Items without barcodes are left out of the index.
+    store.items.createIndex(
+      { orgId: 1, barcodes: 1 },
+      { unique: true, collation: caseInsensitive, partialFilterExpression: { barcodes: { $type: "string" } } },
+    ),
     store.stock.createIndex({ itemId: 1, locationId: 1 }, { unique: true }),
     store.stock.createIndex({ orgId: 1, locationId: 1 }),
     store.movements.createIndex({ itemId: 1, createdAt: -1 }),

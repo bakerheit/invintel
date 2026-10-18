@@ -804,3 +804,117 @@ describe("activity ledger", () => {
     expect(await qty()).toBe(4);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Item barcodes
+// ---------------------------------------------------------------------------
+
+describe("item barcodes", () => {
+  let owner: Account;
+  let base: string;
+
+  const post = (path: string, body: object, who = owner) => call(`${base}${path}`, { body, cookie: who.cookie });
+  const patch = (id: string, body: object) => call(`${base}/items/${id}`, { method: "PATCH", body, cookie: owner.cookie });
+  const lookup = async (code: string, who = owner, b = base) =>
+    (await call(`${b}/lookup?code=${encodeURIComponent(code)}`, { cookie: who.cookie })).json();
+
+  beforeEach(async () => {
+    owner = await newOwner();
+    base = `/api/orgs/${owner.org.id}`;
+  });
+
+  it("stores barcodes on an item, trims and de-duplicates them, and defaults to none", async () => {
+    const plain = await (await post("/items", { sku: "NONE", name: "No codes" })).json();
+    expect(plain.barcodes).toEqual([]);
+
+    const item = await (await post("/items", { sku: "B-1", name: "Widget", barcodes: [" 5901234123457 ", "5901234123457", "CASE-24"] })).json();
+    expect(item.barcodes).toEqual(["5901234123457", "CASE-24"]);
+  });
+
+  it("treats items from before barcodes existed as having none", async () => {
+    const { ObjectId } = await import("mongodb");
+    await store.items.insertOne({
+      _id: new ObjectId(),
+      orgId: new ObjectId(owner.org.id),
+      sku: "LEGACY",
+      name: "Old item",
+      description: "",
+      category: "",
+      reorderLevel: 0,
+      unitCostCents: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const items = await (await call(`${base}/items`, { cookie: owner.cookie })).json();
+    expect(items.find((i: { sku: string }) => i.sku === "LEGACY").barcodes).toEqual([]);
+    expect(await lookup("LEGACY")).toMatchObject({ kind: "item" });
+  });
+
+  it("finds an item by any of its barcodes, ignoring case and UPC/EAN zero padding", async () => {
+    const item = await (await post("/items", { sku: "INT-7", name: "Retail", barcodes: ["036000291452", "Case-24"] })).json();
+    for (const scanned of ["036000291452", "0036000291452", "00036000291452", "case-24", "CASE-24"]) {
+      expect(await lookup(scanned)).toMatchObject({ kind: "item", item: { id: item.id } });
+    }
+    // The SKU still works too.
+    expect(await lookup("int-7")).toMatchObject({ kind: "item", item: { id: item.id } });
+    expect(await lookup("036000291453")).toEqual({ kind: "none" });
+  });
+
+  it("won't let one barcode point at two items", async () => {
+    await post("/items", { sku: "A", name: "First thing", barcodes: ["5901234123457"] });
+    const clash = await post("/items", { sku: "B", name: "Second thing", barcodes: ["5901234123457"] });
+    expect(clash.status).toBe(409);
+    expect((await clash.json()).error).toContain("First thing");
+    // The same product number in another zero-padded form is still the same barcode.
+    const padded = await post("/items", { sku: "C", name: "Third thing", barcodes: ["05901234123457"] });
+    expect(padded.status).toBe(409);
+    // Nothing was created by the failed attempts.
+    expect(await store.items.countDocuments({ orgId: new (await import("mongodb")).ObjectId(owner.org.id) })).toBe(1);
+  });
+
+  it("won't let a barcode equal another item's SKU, or a SKU equal another item's barcode", async () => {
+    await post("/items", { sku: "SKU-ONE", name: "Has a SKU" });
+    await post("/items", { sku: "SKU-TWO", name: "Has a barcode", barcodes: ["12345670"] });
+    expect((await post("/items", { sku: "SKU-THREE", name: "x", barcodes: ["sku-one"] })).status).toBe(409);
+    expect((await post("/items", { sku: "12345670", name: "y" })).status).toBe(409);
+  });
+
+  it("allows the same barcode in different organizations", async () => {
+    await post("/items", { sku: "A", name: "Mine", barcodes: ["5901234123457"] });
+    const other = await newOwner("Other");
+    const res = await call(`/api/orgs/${other.org.id}/items`, {
+      body: { sku: "A", name: "Theirs", barcodes: ["5901234123457"] },
+      cookie: other.cookie,
+    });
+    expect(res.status).toBe(201);
+    expect(await lookup("5901234123457", other, `/api/orgs/${other.org.id}`)).toMatchObject({ kind: "item", item: { name: "Theirs" } });
+  });
+
+  it("lets only one of two simultaneous creates claim a barcode", async () => {
+    const results = await Promise.all([
+      post("/items", { sku: "R1", name: "Racer one", barcodes: ["RACE-1"] }),
+      post("/items", { sku: "R2", name: "Racer two", barcodes: ["RACE-1"] }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+  });
+
+  it("updates barcodes on PATCH without disturbing them when they aren't sent", async () => {
+    const item = await (await post("/items", { sku: "P-1", name: "Patchy", barcodes: ["AAA", "BBB"] })).json();
+    expect((await (await patch(item.id, { name: "Renamed" })).json()).barcodes).toEqual(["AAA", "BBB"]);
+    expect((await (await patch(item.id, { barcodes: ["BBB", "CCC"] })).json()).barcodes).toEqual(["BBB", "CCC"]);
+    // Re-saving its own barcodes isn't a conflict with itself.
+    expect((await patch(item.id, { barcodes: ["BBB", "CCC"] })).status).toBe(200);
+    expect((await (await patch(item.id, { barcodes: [] })).json()).barcodes).toEqual([]);
+    expect(await lookup("BBB")).toEqual({ kind: "none" });
+  });
+
+  it("rejects PATCHes that would steal another item's barcode, and too many barcodes", async () => {
+    await post("/items", { sku: "OWNER", name: "Owner of AAA", barcodes: ["AAA"] });
+    const other = await (await post("/items", { sku: "OTHER", name: "Other" })).json();
+    const stolen = await patch(other.id, { barcodes: ["aaa"] });
+    expect(stolen.status).toBe(409);
+    expect((await stolen.json()).error).toContain("Owner of AAA");
+    expect((await patch(other.id, { barcodes: Array.from({ length: 21 }, (_, i) => `C${i}`) })).status).toBe(400);
+    expect((await patch(other.id, { sku: "AAA" })).status).toBe(409);
+  });
+});

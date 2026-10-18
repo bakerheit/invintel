@@ -80,7 +80,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
       {
         id: "name",
         header: "Item",
-        accessorFn: (i) => `${i.name} ${i.sku}`,
+        accessorFn: (i) => `${i.name} ${i.sku} ${i.barcodes.join(" ")}`,
         sortingFn: (a, b) => a.original.name.localeCompare(b.original.name),
         cell: ({ row }) => (
           <div className="min-w-0">

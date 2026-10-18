@@ -1,5 +1,5 @@
 import { Camera, Keyboard } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { CameraScanner } from "@/components/floor/camera-scanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,14 @@ import { cn } from "@/lib/utils";
  * The on-screen keyboard is off by default so it doesn't cover the screen on a handheld; the
  * keyboard button turns it on for typing a code by hand.
  */
-export function ScanInput({ label, placeholder = "Scan or type", onScan, disabled, error }: {
+export function ScanInput({ label, placeholder = "Scan or type", onScan, disabled, error, errorAction }: {
   label: string;
   placeholder?: string;
   onScan: (code: string) => void;
   disabled?: boolean;
   error?: string | null;
+  /** Shown under the error, e.g. a way out of "nothing matches". */
+  errorAction?: ReactNode;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [typing, setTyping] = useState(false);
@@ -100,6 +102,7 @@ export function ScanInput({ label, placeholder = "Scan or type", onScan, disable
           {error}
         </p>
       )}
+      {error && errorAction}
     </form>
   );
 }

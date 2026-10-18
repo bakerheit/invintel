@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeftRight, PackagePlus } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
 import { ScanInput } from "@/components/floor/scan-input";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,7 @@ export default function LookupPage() {
   const [result, setResult] = useState<LookupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState<string | null>(null);
 
   const items = useQuery({
     queryKey: orgKey(orgId, "items"),
@@ -32,6 +34,7 @@ export default function LookupPage() {
     setError(null);
     try {
       const r = await api.lookup(orgId, code);
+      setUnknown(r.kind === "none" ? code : null);
       if (r.kind === "none") {
         feedback("error");
         setError(`Nothing matches "${code}"`);
@@ -56,7 +59,15 @@ export default function LookupPage() {
     <>
       <h1 className="text-3xl font-semibold tracking-tight">Look up</h1>
 
-      {!result && <ScanInput label="Scan an item or a location" onScan={onScan} disabled={busy} error={error} />}
+      {!result && (
+        <ScanInput
+          label="Scan an item or a location"
+          onScan={onScan}
+          disabled={busy}
+          error={error}
+          errorAction={unknown ? <AddItemLink orgId={orgId} code={unknown} /> : undefined}
+        />
+      )}
 
       {result?.kind === "item" && (
         <div className="space-y-4">

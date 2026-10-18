@@ -4,6 +4,7 @@ import { ListChecks, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
+import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { QtyStepper } from "@/components/floor/qty-stepper";
@@ -31,6 +32,7 @@ export default function ReceivePage() {
   const [reference, setReference] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [done, setDone] = useState<{ doc: PostedDocument; to: Location; qty: number } | null>(null);
 
@@ -41,6 +43,7 @@ export default function ReceivePage() {
 
   const reset = () => {
     setStep("item");
+    setUnknown(null);
     setItem(null);
     setQty(1);
     setReference("");
@@ -53,6 +56,7 @@ export default function ReceivePage() {
     setError(null);
     try {
       const r = await resolveItem(orgId, code);
+      setUnknown(r.ok ? null : (r.unknownCode ?? null));
       if (!r.ok) {
         feedback("error");
         setError(r.error);
@@ -136,7 +140,7 @@ export default function ReceivePage() {
     <>
       <h1 className="text-3xl font-semibold tracking-tight">Receive</h1>
 
-      {step === "item" && <ScanInput label="Scan what arrived" onScan={onItem} disabled={busy} error={error} />}
+      {step === "item" && <ScanInput label="Scan what arrived" onScan={onItem} disabled={busy} error={error} errorAction={unknown ? <AddItemLink orgId={orgId} code={unknown} /> : undefined} />}
 
       {step === "details" && item && (
         <div className="space-y-6">
