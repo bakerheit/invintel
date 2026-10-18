@@ -51,6 +51,22 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 - **Floor mode** (`/o/:orgId/floor`, also in the sidebar) is a full-screen, big-target UI for the plant floor: **Receive**, **Move**, and **Look up**. A scanner types the code and presses Enter; the scan field stays focused and suppresses the on-screen keyboard unless you tap the keyboard button. Items resolve by SKU, locations by code or name. Each flow ends with a result screen and a one-tap **Undo**.
 - To use real scanners, print SKUs and location codes as Code 128 (or QR) labels. Most handheld scanners work as a keyboard ("wedge") with Enter as the suffix.
 
+### Features on and off
+
+**Settings > Features** (admins) hides Purchasing and Production for organizations that don't use them: the sidebar entries, the Cmd-K results and the Floor tile all disappear, so a small shop sees inventory and nothing else. It only hides: no data is touched, and the API stays available. Turning one back on brings everything back. Changes are in the audit log.
+
+### Purchasing
+
+**Purchasing** (sidebar) covers suppliers and purchase orders:
+
+- **Running low** lists items at or under their reorder level with a suggested quantity (enough to get back to twice the reorder level, minus what is already on open orders). Tick the ones you want, pick a supplier, and it drafts an order.
+- Orders go **draft > ordered > partly received > received** (or cancelled). Admins write, place and cancel orders; any member can receive against one, so the dock can do it. Placed orders can't have their lines changed: cancel and write a new one.
+- **Receiving** puts stock into a location of your choice through the ledger ("Received: PO-0007") and ties each receipt to the order. What has arrived is *read from the ledger*, so reversing a receipt in Activity takes it off the order automatically. Suppliers over-ship: receiving more than ordered is allowed and flagged.
+- **Close short** finishes a partly received order without waiting for the rest. **Cancel** is only for orders where nothing has arrived.
+- Every supplier and order change is in the audit log.
+
+API under `/api/orgs/:orgId/purchasing`: `GET/POST /suppliers`, `PATCH /suppliers/:id`, `GET /suggestions`, `GET/POST /orders`, `POST /orders/from-suggestions`, `GET/PATCH /orders/:id`, `POST /orders/:id/place|cancel|close|receive`.
+
 ### Search everywhere
 
 **Ctrl/Cmd+K** (or the Search button in the top bar) opens a palette: type to jump to a page, an item (by name, SKU or any barcode) or a location. Arrow keys and Enter; Esc closes. Admin-only pages stay hidden from members.
@@ -64,7 +80,7 @@ The landing page (`/o/:orgId`) answers "what needs attention?": items out of sto
 - Needs a SKU and a name column. Common header names work (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...). Optional: category, notes, reorder level, unit cost (`$12.50` is fine), barcodes (separate with `|`), location (its code, full path or unique name) and quantity.
 - It only **creates**: an existing SKU is never changed, so importing the same file twice can't double anything. Repeat a SKU on another line to put stock in a second location.
 - Opening stock goes through the ledger as receipts ("Imported from CSV"), and each new item is in the audit log.
-- One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 5000 rows, about 2 MB.
+- One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 1000 rows per file, about 2 MB. Unit costs are rounded to the cent.
 
 API: `GET /data/items.csv`, `POST /data/items/import` with `{ csv, dryRun }`.
 

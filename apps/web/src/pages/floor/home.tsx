@@ -1,12 +1,13 @@
-import { ArrowLeftRight, Factory, PackagePlus, ScanSearch } from "lucide-react";
+import type { OrgModules } from "@invintel/shared";
+import { ArrowLeftRight, Factory, PackagePlus, ScanSearch, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { useCurrentOrg } from "@/lib/org";
 import { cn } from "@/lib/utils";
 
-const TILES = [
+const TILES: { to: string; label: string; hint: string; icon: LucideIcon; wide: boolean; module?: keyof OrgModules }[] = [
   { to: "receive", label: "Receive", hint: "Stock coming in", icon: PackagePlus, wide: false },
   { to: "move", label: "Move", hint: "Item to a new place", icon: ArrowLeftRight, wide: false },
-  { to: "production", label: "Production", hint: "Load, report usage, report output", icon: Factory, wide: true },
+  { to: "production", label: "Production", hint: "Load, report usage, report output", icon: Factory, wide: true, module: "production" },
   { to: "lookup", label: "Look up", hint: "What's this? Where is it?", icon: ScanSearch, wide: true },
 ];
 
@@ -19,7 +20,7 @@ export default function FloorHome() {
         <p className="text-base text-muted-foreground">Scan labels with the scanner, or tap the keyboard button to type a code.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        {TILES.map(({ to, label, hint, icon: Icon, wide }) => (
+        {TILES.filter((t) => !t.module || org.modules[t.module]).map(({ to, label, hint, icon: Icon, wide }) => (
           <Link
             key={to}
             to={`/o/${org.id}/floor/${to}`}

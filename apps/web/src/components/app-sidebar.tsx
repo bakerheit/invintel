@@ -1,5 +1,6 @@
-import type { OrgSummary } from "@invintel/shared";
-import { Check, ChevronsUpDown, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, Sun } from "lucide-react";
+import type { OrgModules, OrgSummary } from "@invintel/shared";
+import type { LucideIcon } from "lucide-react";
+import { Check, ChevronsUpDown, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -39,15 +40,22 @@ const initials = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join("") || "?";
 
-export const navItems = (orgId: string) => [
+interface NavItem { to: string; end: boolean; label: string; icon: LucideIcon; adminOnly: boolean; module?: keyof OrgModules }
+
+export const navItems = (orgId: string): NavItem[] => [
   { to: `/o/${orgId}`, end: true, label: "Overview", icon: LayoutDashboard, adminOnly: false },
   { to: `/o/${orgId}/inventory`, end: false, label: "Inventory", icon: Package, adminOnly: false },
+  { to: `/o/${orgId}/purchasing`, end: false, label: "Purchasing", icon: ShoppingCart, adminOnly: false, module: "purchasing" },
+  { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false, module: "production" },
   { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History, adminOnly: false },
   { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin, adminOnly: false },
-  { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false },
   { to: `/o/${orgId}/audit`, end: false, label: "Audit log", icon: ShieldCheck, adminOnly: true },
   { to: `/o/${orgId}/settings`, end: false, label: "Settings", icon: Settings, adminOnly: false },
 ];
+
+/** The pages this person should see: admin-only pages for admins, switched-off modules hidden. */
+export const visibleNav = (org: OrgSummary) =>
+  navItems(org.id).filter((n) => (!n.adminOnly || org.role !== "member") && (!n.module || org.modules[n.module]));
 
 function OrgSwitcher({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] }) {
   const navigate = useNavigate();
@@ -173,7 +181,7 @@ export function AppSidebar({ org, orgs }: { org: OrgSummary; orgs: OrgSummary[] 
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems(org.id).filter((n) => !n.adminOnly || org.role !== "member").map(({ to, end, label, icon: Icon }) => (
+              {visibleNav(org).map(({ to, end, label, icon: Icon }) => (
                 <SidebarMenuItem key={to}>
                   <SidebarMenuButton
                     isActive={end ? pathname === to : pathname.startsWith(to)}

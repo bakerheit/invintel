@@ -30,6 +30,12 @@ export const registrationOrganizationSchema = z.discriminatedUnion("mode", [
 ]);
 export type RegistrationOrganization = z.infer<typeof registrationOrganizationSchema>;
 
+/** Parts of the app an organization can switch off, so a small shop only sees what it uses. Everything is on by default. */
+export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean() });
+export type OrgModules = z.infer<typeof orgModulesSchema>;
+export const orgModulesUpdateSchema = orgModulesSchema.partial().refine((m) => Object.keys(m).length > 0, "Nothing to change");
+export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true };
+
 export interface OrgSummary {
   id: string;
   name: string;
@@ -38,6 +44,7 @@ export interface OrgSummary {
   /** Only sent to owners and admins. */
   joinCode?: string;
   memberCount: number;
+  modules: OrgModules;
   createdAt: string;
 }
 
@@ -308,7 +315,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "work_center", "bom", "work_order", "supplier", "purchase_order"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -320,11 +327,20 @@ export const AUDIT_ACTIONS = [
   "location.deleted",
   "organization.created",
   "organization.renamed",
+  "organization.modules_changed",
   "organization.join_code_rotated",
   "member.joined",
   "member.role_changed",
   "member.removed",
   "member.left",
+  "supplier.created",
+  "supplier.updated",
+  "purchase_order.created",
+  "purchase_order.updated",
+  "purchase_order.ordered",
+  "purchase_order.received",
+  "purchase_order.cancelled",
+  "purchase_order.closed",
   "stock.received",
   "stock.adjusted",
   "stock.moved",
@@ -542,3 +558,4 @@ export interface UnitsPosted {
   movementIds: string[];
 }
 export * from "./production.js";
+export * from "./purchasing.js";

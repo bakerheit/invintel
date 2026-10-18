@@ -1,4 +1,4 @@
-import type { OrgRole, OrgSummary } from "@invintel/shared";
+import { DEFAULT_MODULES, type OrgRole, type OrgSummary } from "@invintel/shared";
 import { randomInt } from "node:crypto";
 import { ObjectId } from "mongodb";
 import { recordAudit } from "./audit.js";
@@ -22,6 +22,7 @@ export function toOrgSummary(org: OrgDoc, role: OrgRole, memberCount: number): O
     role,
     ...(canSeeJoinCode(role) ? { joinCode: org.joinCode } : {}),
     memberCount,
+    modules: { ...DEFAULT_MODULES, ...org.modules },
     createdAt: org.createdAt.toISOString(),
   };
 }

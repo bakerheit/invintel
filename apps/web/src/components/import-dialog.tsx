@@ -36,7 +36,10 @@ export function ImportDialog({ orgId, open, onOpenChange }: { orgId: string; ope
     onSuccess: async (result, { dryRun }) => {
       if (dryRun) return setPreview(result);
       await invalidateOrg(qc, orgId);
-      toast.success(`Imported ${result.itemsToCreate} ${result.itemsToCreate === 1 ? "item" : "items"}`);
+      if (result.errors > 0) {
+        const bad = result.rows.filter((r) => r.status === "error").slice(0, 3).map((r) => `line ${r.line}: ${r.message}`).join("; ");
+        toast.warning(`Imported ${result.itemsToCreate}, but ${result.errors} ${result.errors === 1 ? "row" : "rows"} had trouble (${bad}). Running the file again is safe.`);
+      } else toast.success(`Imported ${result.itemsToCreate} ${result.itemsToCreate === 1 ? "item" : "items"}`);
       close(false);
     },
     onError: (e: Error) => toast.error(e.message),
