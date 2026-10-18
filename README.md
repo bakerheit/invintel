@@ -80,6 +80,12 @@ Some actions can need a second person's OK. **Settings > Approvals** (admins) sw
 
 API under `/api/orgs/:orgId/approvals`: `GET /rules`, `PUT /rules`, `GET /`, `GET /pending-count`, `POST /:id/approve|reject|cancel`. A gated endpoint answers `202 { approvalRequired, approval }`.
 
+### Downtime and OEE-lite
+
+**Floor mode > Downtime** lets an operator say a machine is down (tap a reason from a short list) and when it is back. **Reports > Downtime and availability** shows, per machine and window (7/30/90 days), minutes down, stops, the biggest reason, a "down now" tag, and a rough **availability** = (scheduled hours - downtime) / scheduled hours. It ignores speed and quality, so it is OEE-lite, not OEE. Admins set the reason list and the scheduled hours per day. One open stop per machine; everything is audited. It lives under the Production feature switch.
+
+API under `/api/orgs/:orgId/production/downtime`: `GET /settings`, `PUT /settings`, `POST /start`, `POST /:id/end`, `GET /` (`?open=1`, `?workCenterId=`), `GET /summary?days=`.
+
 ### Purchasing
 
 **Purchasing** (sidebar) covers suppliers and purchase orders:

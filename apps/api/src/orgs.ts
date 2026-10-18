@@ -18,6 +18,7 @@ import { createItemRoutes } from "./items.js";
 import { createApprovalRoutes } from "./approvals.js";
 import { createCountRoutes } from "./counts.js";
 import { createDataRoutes } from "./data.js";
+import { createDowntimeRoutes } from "./downtime.js";
 import { createLocationRoutes } from "./locations.js";
 import { createMemberRoutes } from "./members.js";
 import { createOverviewRoutes } from "./overview.js";
@@ -173,6 +174,7 @@ export function createOrgRoutes(store: Store) {
   scoped.route("/units", createUnitRoutes(store));
   scoped.route("/", createFloorRoutes(store));
   scoped.route("/items", createItemRoutes(store));
+  scoped.route("/production/downtime", createDowntimeRoutes(store));
   scoped.route("/production", createProductionRoutes(store));
 
   orgs.route("/:orgId", scoped);

@@ -1,4 +1,7 @@
 import type {
+  DowntimeEvent,
+  DowntimeSettings,
+  DowntimeSummary,
   ApprovalDecisionInput,
   ApprovalRequest,
   ApprovalRequired,
@@ -167,6 +170,14 @@ export const api = {
   pendingApprovals: (orgId: string) => request<{ count: number }>(`/orgs/${orgId}/approvals/pending-count`),
   decideApproval: (orgId: string, id: string, action: "approve" | "reject" | "cancel", input: ApprovalDecisionInput = {}) =>
     request<ApprovalRequest>(`/orgs/${orgId}/approvals/${id}/${action}`, post(input)),
+  downtimeSettings: (orgId: string) => request<DowntimeSettings>(`/orgs/${orgId}/production/downtime/settings`),
+  saveDowntimeSettings: (orgId: string, input: DowntimeSettings) => request<DowntimeSettings>(`/orgs/${orgId}/production/downtime/settings`, { method: "PUT", body: body(input) }),
+  downtimeOpen: (orgId: string) => request<DowntimeEvent[]>(`/orgs/${orgId}/production/downtime?open=1`),
+  downtimeEvents: (orgId: string) => request<DowntimeEvent[]>(`/orgs/${orgId}/production/downtime`),
+  downtimeSummary: (orgId: string, days: number) => request<DowntimeSummary>(`/orgs/${orgId}/production/downtime/summary?days=${days}`),
+  startDowntime: (orgId: string, workCenterId: string, reason: string, note = "") =>
+    request<DowntimeEvent>(`/orgs/${orgId}/production/downtime/start`, post({ workCenterId, reason, note })),
+  endDowntime: (orgId: string, id: string) => request<DowntimeEvent>(`/orgs/${orgId}/production/downtime/${id}/end`, post({})),
   itemsCsvUrl: (orgId: string) => `/api/orgs/${orgId}/data/items.csv`,
   overview: (orgId: string) => request<Overview>(`/orgs/${orgId}/overview`),
 

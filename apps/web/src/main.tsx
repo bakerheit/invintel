@@ -33,6 +33,8 @@ import ReportsHome from "./pages/reports";
 import AgingReportPage from "./pages/reports/aging";
 import CountingReportPage from "./pages/reports/counting";
 import ApprovalsPage from "./pages/approvals";
+import DowntimeReportPage from "./pages/reports/downtime";
+import DowntimeFloorPage from "./pages/floor/downtime";
 import PurchasingPage from "./pages/purchasing";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
@@ -84,6 +86,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="reports" element={<ReportsHome />} />
               <Route path="reports/aging" element={<AgingReportPage />} />
               <Route path="reports/counting" element={<CountingReportPage />} />
+              <Route path="reports/downtime" element={<DowntimeReportPage />} />
               <Route path="purchasing" element={<PurchasingPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
@@ -98,6 +101,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="move" element={<MovePage />} />
               <Route path="production" element={<ProductionFloorPage />} />
               <Route path="count" element={<CountFloorPage />} />
+              <Route path="downtime" element={<DowntimeFloorPage />} />
               <Route path="lookup" element={<LookupPage />} />
             </Route>
           </Route>

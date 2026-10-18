@@ -26,6 +26,9 @@ export interface OrgDoc {
   /** Absent means everything is on. */
   modules?: Partial<{ purchasing: boolean; production: boolean }>;
   /** Absent means nothing needs a second person. */
+  /** Downtime: the pick-list and the hours a machine is meant to run each day. Defaults apply when absent. */
+  downtimeReasons?: string[];
+  scheduledHoursPerDay?: number;
   approvalRules?: { kind: "adjustment" | "purchase_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
@@ -244,6 +247,20 @@ export interface ApprovalDoc {
   failure?: string;
 }
 
+export interface DowntimeDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  workCenterId: ObjectId;
+  reason: string;
+  note: string;
+  startedAt: Date;
+  endedAt?: Date;
+  /** True while the machine is down. Removed when it ends. A partial index needs a real field to match on. */
+  open?: true;
+  startedBy: { id: ObjectId; name: string };
+  endedBy?: { id: ObjectId; name: string };
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -264,6 +281,7 @@ export interface Store {
   purchaseOrders: Collection<PurchaseOrderDoc>;
   counts: Collection<CountDoc>;
   approvals: Collection<ApprovalDoc>;
+  downtime: Collection<DowntimeDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   close: () => Promise<void>;
 }
@@ -298,6 +316,7 @@ export async function connect(
     purchaseOrders: db.collection("purchase_orders"),
     counts: db.collection("counts"),
     approvals: db.collection("approvals"),
+    downtime: db.collection("downtime"),
     counters: db.collection("counters"),
     close: () => client.close(),
   };
@@ -351,6 +370,9 @@ export async function connect(
     store.purchaseOrders.createIndex({ orgId: 1, state: 1 }),
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.approvals.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.downtime.createIndex({ orgId: 1, workCenterId: 1, startedAt: -1 }),
+    // One machine can only be down once at a time.
+    store.downtime.createIndex({ orgId: 1, workCenterId: 1 }, { unique: true, partialFilterExpression: { open: true } }),
     store.approvals.createIndex({ orgId: 1, status: 1, requestedAt: -1 }),
     // One open count per location: two people counting the same shelf into different sheets is how counts go wrong.
     store.counts.createIndex({ orgId: 1, locationId: 1 }, { unique: true, partialFilterExpression: { status: "open" } }),

@@ -341,6 +341,9 @@ export const AUDIT_ACTIONS = [
   "approval.rejected",
   "approval.cancelled",
   "approval.rules_changed",
+  "downtime.started",
+  "downtime.ended",
+  "downtime.settings_changed",
   "supplier.created",
   "supplier.updated",
   "purchase_order.created",
@@ -572,3 +575,4 @@ export * from "./purchasing.js";
 export * from "./counts.js";
 export * from "./reports.js";
 export * from "./approvals.js";
+export * from "./downtime.js";
