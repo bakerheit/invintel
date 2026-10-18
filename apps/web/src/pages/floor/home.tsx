@@ -1,4 +1,4 @@
-import { ArrowLeftRight, PackagePlus, ScanSearch } from "lucide-react";
+import { ArrowLeftRight, Factory, PackagePlus, ScanSearch } from "lucide-react";
 import { Link } from "react-router";
 import { useCurrentOrg } from "@/lib/org";
 import { cn } from "@/lib/utils";
@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 const TILES = [
   { to: "receive", label: "Receive", hint: "Stock coming in", icon: PackagePlus, wide: false },
   { to: "move", label: "Move", hint: "Item to a new place", icon: ArrowLeftRight, wide: false },
+  { to: "production", label: "Production", hint: "Load, report usage, report output", icon: Factory, wide: true },
   { to: "lookup", label: "Look up", hint: "What's this? Where is it?", icon: ScanSearch, wide: true },
 ];
 
