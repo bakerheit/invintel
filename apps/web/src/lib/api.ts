@@ -39,7 +39,9 @@ import type {
   UnitsPosted,
   AuditPage,
   AuditVerification,
+  ImportBatch,
   ImportInput,
+  ImportUndoResult,
   PoReceiveInput,
   PoReceiveResult,
   PurchaseOrder,
@@ -141,6 +143,15 @@ export const api = {
     const data = await res.json().catch(() => ({}));
     if (res.ok || (res.status === 422 && Array.isArray(data.rows))) return data as ImportResult;
     throw new Error(typeof data.error === "string" ? data.error : "Import failed");
+  },
+  listImports: (orgId: string) => request<ImportBatch[]>(`/orgs/${orgId}/data/imports`),
+  undoImport: async (orgId: string, id: string): Promise<ImportUndoResult> => {
+    // A refused undo says which items have been built on since, so carry that text through.
+    const res = await fetch(`/api/orgs/${orgId}/data/imports/${id}/undo`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return data as ImportUndoResult;
+    const problems = Array.isArray(data.problems) ? ` ${data.problems.join(" ")}` : "";
+    throw new Error(`${typeof data.error === "string" ? data.error : "Undo failed"}${problems}`);
   },
   listSuppliers: (orgId: string) => request<Supplier[]>(`/orgs/${orgId}/purchasing/suppliers`),
   createSupplier: (orgId: string, input: SupplierInput) => request<Supplier>(`/orgs/${orgId}/purchasing/suppliers`, post(input)),
