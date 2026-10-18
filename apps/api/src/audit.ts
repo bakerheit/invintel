@@ -76,6 +76,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * This runs after the change it describes has been made. If it can't be written, the event is
  * logged in full for manual recovery rather than failing a request whose change already happened.
  */
+/**
+ * Something that wants to know about every audit event as it is written (webhooks do). One listener per
+ * store, set when the app starts. It runs after the event is safely in the chain and can never fail a request.
+ */
+const listeners = new WeakMap<Store, (event: AuditEventDoc) => Promise<void> | void>();
+export const onAuditEvent = (store: Store, fn: (event: AuditEventDoc) => Promise<void> | void) => void listeners.set(store, fn);
+
 export async function recordAudit(store: Store, input: AuditInput): Promise<AuditEventDoc | null> {
   const body = {
     orgId: input.orgId,
@@ -103,6 +110,11 @@ export async function recordAudit(store: Store, input: AuditInput): Promise<Audi
       };
       try {
         await store.audit.insertOne(event);
+        try {
+          await listeners.get(store)?.(event);
+        } catch (e) {
+          console.error("audit listener failed", e);
+        }
         return event;
       } catch (e) {
         if (!isDuplicateKey(e)) throw e;

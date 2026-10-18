@@ -402,6 +402,13 @@ export const AUDIT_ACTIONS = [
   "import.undone",
   "archive.exported",
   "archive.restored",
+  "api_key.created",
+  "api_key.revoked",
+  "webhook.created",
+  "webhook.updated",
+  "webhook.deleted",
+  "webhook.secret_rotated",
+  "webhook.disabled",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -703,3 +710,4 @@ export * from "./downtime.js";
 export * from "./alerts.js";
 export * from "./units.js";
 export * from "./archive.js";
+export * from "./integrations.js";

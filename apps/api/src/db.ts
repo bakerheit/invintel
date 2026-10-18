@@ -294,6 +294,61 @@ export interface DowntimeDoc {
   endedBy?: { id: ObjectId; name: string };
 }
 
+/** A key for other software. Only a hash of it is kept: the key itself is shown once, when it is made. */
+export interface ApiKeyDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  scope: "read" | "write";
+  /** The first characters of the secret part, used to find the key and to tell keys apart on screen. */
+  prefix: string;
+  /** SHA-256 of the whole key. The key is 256 random bits, so a fast hash is enough. */
+  hash: string;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  lastUsedAt?: Date;
+  expiresAt?: Date;
+  revokedAt?: Date;
+}
+
+/** Where to send events. The secret signs each delivery so the receiver can tell it is really from here. */
+export interface WebhookDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  url: string;
+  /** Event names, or ["*"] for every event a webhook can have. */
+  events: string[];
+  description: string;
+  secret: string;
+  enabled: boolean;
+  /** Deliveries that gave up in a row. Reset by a success. Too many switches the webhook off. */
+  failures: number;
+  disabledReason?: string;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface WebhookDeliveryDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  webhookId: ObjectId;
+  /** The audit event this tells about (or a fresh id for a test). The same across retries and across webhooks. */
+  eventId: string;
+  type: string;
+  /** The exact bytes that are sent and signed. */
+  body: string;
+  status: "pending" | "delivered" | "retrying" | "failed";
+  attempts: number;
+  nextAttemptAt: Date | null;
+  /** Held by a worker until then, so two workers don't send the same delivery. */
+  leaseUntil?: Date;
+  responseStatus?: number;
+  error?: string;
+  createdAt: Date;
+  deliveredAt?: Date;
+}
+
 export interface AlertStateDoc {
   _id: ObjectId;
   orgId: ObjectId;
@@ -375,6 +430,9 @@ export interface Store {
   downtime: Collection<DowntimeDoc>;
   alertStates: Collection<AlertStateDoc>;
   importBatches: Collection<ImportBatchDoc>;
+  apiKeys: Collection<ApiKeyDoc>;
+  webhooks: Collection<WebhookDoc>;
+  webhookDeliveries: Collection<WebhookDeliveryDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
   drills: Collection<DrillDoc>;
@@ -414,6 +472,9 @@ export async function connect(
     downtime: db.collection("downtime"),
     alertStates: db.collection("alert_states"),
     importBatches: db.collection("import_batches"),
+    apiKeys: db.collection("api_keys"),
+    webhooks: db.collection("webhooks"),
+    webhookDeliveries: db.collection("webhook_deliveries"),
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
     drills: db.collection("recall_drills"),
@@ -478,6 +539,13 @@ export async function connect(
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, at: -1 }),
+    store.apiKeys.createIndex({ prefix: 1 }),
+    store.apiKeys.createIndex({ orgId: 1, createdAt: -1 }),
+    store.webhooks.createIndex({ orgId: 1, enabled: 1 }),
+    store.webhookDeliveries.createIndex({ webhookId: 1, createdAt: -1 }),
+    store.webhookDeliveries.createIndex({ status: 1, nextAttemptAt: 1 }),
+    // Old finished deliveries clear themselves after 30 days.
+    store.webhookDeliveries.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 86400 }),
     store.approvals.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.alertStates.createIndex({ orgId: 1, key: 1 }, { unique: true }),
     store.downtime.createIndex({ orgId: 1, workCenterId: 1, startedAt: -1 }),

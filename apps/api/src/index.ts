@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { connect } from "./db.js";
+import { startWebhookWorker } from "./webhooks.js";
 
 const port = Number(process.env.PORT ?? 3001);
 // Loopback only by default: the API is reached through the Vite dev proxy or nginx, never directly from the network.
@@ -16,7 +17,10 @@ const server = serve({ fetch: app.fetch, port, hostname }, ({ port }) => {
   console.log(`invintel api listening on http://${hostname}:${port}`);
 });
 
+const stopWebhooks = startWebhookWorker(store);
+
 const shutdown = () => {
+  stopWebhooks();
   server.close();
   void store.close().then(() => process.exit(0));
 };
