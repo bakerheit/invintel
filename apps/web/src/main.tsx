@@ -40,6 +40,8 @@ import TraceReportPage from "./pages/reports/trace";
 import ScrapReportPage from "./pages/reports/scrap";
 import DowntimeFloorPage from "./pages/floor/downtime";
 import AlertsPage from "./pages/alerts";
+import PayablesPage from "./pages/payables";
+import RemittancePage from "./pages/remittance";
 import PurchasingPage from "./pages/purchasing";
 import RegisterPage from "./pages/register";
 import SettingsPage from "./pages/settings";
@@ -96,6 +98,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="reports/trace" element={<TraceReportPage />} />
               <Route path="reports/scrap" element={<ScrapReportPage />} />
               <Route path="purchasing" element={<PurchasingPage />} />
+              <Route path="payables" element={<PayablesPage />} />
               <Route path="activity" element={<ActivityPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="locations" element={<LocationsPage />} />
@@ -104,6 +107,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="quality" element={<QualityPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
+            <Route path="remittance/:paymentId" element={<RemittancePage />} />
             <Route path="floor" element={<FloorLayout />}>
               <Route index element={<FloorHome />} />
               <Route path="receive" element={<ReceivePage />} />

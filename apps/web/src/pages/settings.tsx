@@ -96,13 +96,15 @@ function ApprovalRulesForm({ orgId }: { orgId: string }) {
   const kinds = [
     ["adjustment", "Stock adjustments", "A change to stock worth at least this much waits for another admin."],
     ["purchase_order", "Purchase orders", "Placing an order worth at least this much waits for another admin."],
+    ["invoice", "Supplier invoices", "Approving an invoice worth at least this much waits for another admin."],
+    ["supplier_payment_details", "Changes to how a supplier is paid", "Any change to a supplier's payment details waits for another admin. This is the classic invoice-fraud route."],
   ] as const;
   const state = draft ?? Object.fromEntries(kinds.map(([k]) => {
     const r = rules.data?.rules.find((x) => x.kind === k);
     return [k, { on: !!r, dollars: r ? String(r.thresholdCents / 100) : "100", appliesTo: r?.appliesTo ?? (k === "adjustment" ? "members" : "everyone") }];
   }));
   const save = useMutation({
-    mutationFn: () => api.saveApprovalRules(orgId, kinds.flatMap(([k]) => (state[k]!.on ? [{ kind: k, thresholdCents: Math.round(Number(state[k]!.dollars || 0) * 100), appliesTo: state[k]!.appliesTo }] : []))),
+    mutationFn: () => api.saveApprovalRules(orgId, kinds.flatMap(([k]) => (state[k]!.on ? [{ kind: k, thresholdCents: k === "supplier_payment_details" ? 0 : Math.round(Number(state[k]!.dollars || 0) * 100), appliesTo: state[k]!.appliesTo }] : []))),
     onSuccess: async () => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "approval-rules") }); setDraft(null); toast.success("Approval rules saved"); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -117,9 +119,13 @@ function ApprovalRulesForm({ orgId }: { orgId: string }) {
           </label>
           {state[k]!.on && (
             <div className="flex flex-wrap items-center gap-2 pl-7 text-sm">
-              <span>From $</span>
-              <Input aria-label={`${label} threshold in dollars`} className="h-8 w-28" type="number" min={0} step="0.01" value={state[k]!.dollars} onChange={(e) => set(k, { dollars: e.target.value })} />
-              <span>for</span>
+              {k !== "supplier_payment_details" && (
+                <>
+                  <span>From $</span>
+                  <Input aria-label={`${label} threshold in dollars`} className="h-8 w-28" type="number" min={0} step="0.01" value={state[k]!.dollars} onChange={(e) => set(k, { dollars: e.target.value })} />
+                </>
+              )}
+              <span>{k === "supplier_payment_details" ? "Applies to" : "for"}</span>
               <select aria-label={`${label} applies to`} className="h-8 rounded-md border bg-background px-2" value={state[k]!.appliesTo} onChange={(e) => set(k, { appliesTo: e.target.value as "members" | "everyone" })}>
                 <option value="members">members only</option>
                 <option value="everyone">everyone, admins too</option>

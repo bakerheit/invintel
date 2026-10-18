@@ -1,6 +1,14 @@
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 export const formatCents = (cents: number) => usd.format(cents / 100);
+/** Money in the currency it is in. Falls back to the code if the browser doesn't know it. */
+export const formatMoney = (cents: number, currency = "USD") => {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency}`;
+  }
+};
 export const dollarsToCents = (dollars: string) => Math.round(Number(dollars || 0) * 100);
 export const centsToDollars = (cents: number) => (cents / 100).toFixed(2);
 

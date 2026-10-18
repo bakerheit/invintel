@@ -35,7 +35,7 @@ function Row({ a }: { a: ApprovalRequest }) {
     onSuccess: async (r, v) => { await invalidateOrg(qc, orgId); toast.success(v.action === "approve" ? `${r.number} approved and carried out` : v.action === "reject" ? `${r.number} rejected` : `${r.number} cancelled`); setRejecting(false); },
     onError: (e: Error) => { toast.error(e.message); void invalidateOrg(qc, orgId); },
   });
-  const link = a.subject.type === "item" ? `/o/${orgId}/inventory/${a.subject.id}` : `/o/${orgId}/purchasing`;
+  const link = a.subject.type === "item" ? `/o/${orgId}/inventory/${a.subject.id}` : a.subject.type === "invoice" || a.subject.type === "supplier" ? `/o/${orgId}/payables` : `/o/${orgId}/purchasing`;
   return (
     <li className="space-y-2 py-3 text-sm">
       <div className="flex flex-wrap items-start gap-3">
