@@ -37,6 +37,7 @@ import type {
   MoveInput,
   MovementType,
   OrganizationInput,
+  OrgModules,
   OrgMember,
   OrgSummary,
   RegisterInput,
@@ -100,6 +101,7 @@ export const api = {
   createOrg: (input: OrganizationInput) => request<OrgSummary>("/orgs", post(input)),
   joinOrg: (input: { joinCode: string }) => request<OrgSummary>("/orgs/join", post(input)),
   renameOrg: (orgId: string, input: OrganizationInput) => request<OrgSummary>(`/orgs/${orgId}`, patch(input)),
+  setModules: (orgId: string, modules: Partial<OrgModules>) => request<OrgSummary>(`/orgs/${orgId}/modules`, patch(modules)),
   rotateJoinCode: (orgId: string) => request<OrgSummary>(`/orgs/${orgId}/join-code`, post()),
   listMembers: (orgId: string) => request<OrgMember[]>(`/orgs/${orgId}/members`),
   setMemberRole: (orgId: string, userId: string, role: "admin" | "member") =>

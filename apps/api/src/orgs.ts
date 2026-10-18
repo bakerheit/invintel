@@ -1,7 +1,9 @@
 import { zValidator } from "@hono/zod-validator";
 import {
+  DEFAULT_MODULES,
   joinOrganizationInputSchema,
   organizationInputSchema,
+  orgModulesUpdateSchema,
   type OrgMember,
 } from "@invintel/shared";
 import { Hono } from "hono";
@@ -90,6 +92,29 @@ export function createOrgRoutes(store: Store) {
         entity: { type: "organization", id: before._id.toHexString(), label: org!.name },
         summary: `Renamed the organization from ${before.name} to ${org!.name}`,
         changes: [{ field: "name", from: before.name, to: org!.name }],
+      });
+    }
+    return c.json(await summarizeOrg(store, org!, c.get("role")));
+  });
+
+  scoped.patch("/modules", requireRole("admin"), zValidator("json", orgModulesUpdateSchema), async (c) => {
+    const before = c.get("org");
+    const patch = c.req.valid("json");
+    const org = await store.orgs.findOneAndUpdate(
+      { _id: before._id },
+      { $set: Object.fromEntries(Object.entries(patch).map(([k, v]) => [`modules.${k}`, v])) },
+      { returnDocument: "after" },
+    );
+    const was = { ...DEFAULT_MODULES, ...before.modules };
+    const changes = Object.entries(patch).filter(([k, v]) => was[k as keyof typeof was] !== v).map(([field, to]) => ({ field, from: was[field as keyof typeof was], to }));
+    if (changes.length) {
+      await recordAudit(store, {
+        orgId: before._id,
+        actor: auditActor(c.get("user")),
+        action: "organization.modules_changed",
+        entity: { type: "organization", id: before._id.toHexString(), label: org!.name },
+        summary: changes.map((x) => `${x.to ? "Turned on" : "Turned off"} ${x.field}`).join(", "),
+        changes,
       });
     }
     return c.json(await summarizeOrg(store, org!, c.get("role")));

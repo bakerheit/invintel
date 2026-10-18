@@ -21,6 +21,8 @@ export interface OrgDoc {
   name: string;
   joinCode: string;
   createdBy: ObjectId;
+  /** Absent means everything is on. */
+  modules?: Partial<{ purchasing: boolean; production: boolean }>;
   createdAt: Date;
 }
 

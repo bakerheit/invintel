@@ -8,6 +8,7 @@ export const ACTION_META: Record<AuditAction, { label: string; className: string
   "location.updated": { label: "Location edited", className: "bg-accent text-accent-foreground" },
   "location.deleted": { label: "Location deleted", className: "bg-destructive/10 text-destructive dark:bg-destructive/20" },
   "organization.created": { label: "Organization created", className: "bg-success-soft text-success" },
+  "organization.modules_changed": { label: "Features changed", className: "bg-secondary text-secondary-foreground" },
   "organization.renamed": { label: "Organization renamed", className: "bg-accent text-accent-foreground" },
   "organization.join_code_rotated": { label: "Join code changed", className: "bg-warning-soft text-warning" },
   "member.joined": { label: "Member joined", className: "bg-secondary text-secondary-foreground" },

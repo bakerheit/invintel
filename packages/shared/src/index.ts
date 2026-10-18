@@ -30,6 +30,12 @@ export const registrationOrganizationSchema = z.discriminatedUnion("mode", [
 ]);
 export type RegistrationOrganization = z.infer<typeof registrationOrganizationSchema>;
 
+/** Parts of the app an organization can switch off, so a small shop only sees what it uses. Everything is on by default. */
+export const orgModulesSchema = z.object({ purchasing: z.boolean(), production: z.boolean() });
+export type OrgModules = z.infer<typeof orgModulesSchema>;
+export const orgModulesUpdateSchema = orgModulesSchema.partial().refine((m) => Object.keys(m).length > 0, "Nothing to change");
+export const DEFAULT_MODULES: OrgModules = { purchasing: true, production: true };
+
 export interface OrgSummary {
   id: string;
   name: string;
@@ -38,6 +44,7 @@ export interface OrgSummary {
   /** Only sent to owners and admins. */
   joinCode?: string;
   memberCount: number;
+  modules: OrgModules;
   createdAt: string;
 }
 
@@ -314,6 +321,7 @@ export const AUDIT_ACTIONS = [
   "location.deleted",
   "organization.created",
   "organization.renamed",
+  "organization.modules_changed",
   "organization.join_code_rotated",
   "member.joined",
   "member.role_changed",

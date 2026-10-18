@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { MapPin, Package, ScanLine, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { navItems } from "@/components/app-sidebar";
+import { visibleNav } from "@/components/app-sidebar";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { orgKey, useCurrentOrg, useLocations } from "@/lib/org";
@@ -47,7 +47,7 @@ export function CommandPalette() {
     const q = query.trim().toLowerCase();
     const go = (to: string) => () => void navigate(to);
     const pages: Hit[] = [
-      ...navItems(org.id).filter((n) => !n.adminOnly || org.role !== "member").map((n) => ({
+      ...visibleNav(org).map((n) => ({
         key: n.to, group: "Go to" as const, label: n.label, icon: <n.icon className="size-4" />, run: go(n.to),
       })),
       { key: "floor", group: "Go to" as const, label: "Floor mode", icon: <ScanLine className="size-4" />, run: go(`/o/${org.id}/floor`) },
