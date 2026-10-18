@@ -268,6 +268,19 @@ Code: `packages/shared/src/b2b.ts` (types, states, allowed transitions), `apps/a
 
 API under `/api/orgs/:orgId/b2b`: `GET /bridges`, `GET|POST /partners`, `PATCH /partners/:id` (admin writes), `GET /messages` (`?partnerId=&direction=&state=`), `GET /messages/:id` (with the raw body), `POST /partners/:id/messages` (send, admin), `POST /messages/:id/retry`, `POST /messages/:id/ack` (admin; record an answer by hand). Partners post documents to `POST /api/b2b/inbound/:partnerId` (no session; the partner's bridge verifies the request; anything not accepted gets the same plain refusal; 2 MB and 120 requests a minute per partner).
 
+### Partners, email orders and invoice capture
+
+The first real bridge on the B2B core (INV-12). Everything is on the **Documents** page (`/o/:id/documents`): Partners, Documents (the message log with every attempt and answer), Incoming invoices.
+
+- **Email orders.** A partner with bridge `email` gets purchase orders as a plain email with a PDF attached (made by our own small PDF writer, `apps/api/src/pdf.ts`) and a private link. In a purchase order's dialog, "Email to supplier" sends it, "Preview PDF" shows it first, "Send again" makes a new revision and switches the old link off. Test partners put TEST in the subject.
+- **Supplier page.** The link opens `/b2b/s/:token` with no account: the supplier confirms (optionally a ship date), declines with a reason, or sends a ship notice (date, carrier, tracking). Links are stored hashed, expire after 60 days and stop working when a newer one is sent. Answers are kept as received messages, mark the sent order acknowledged, and show in the purchase order dialog and the log. They never change stock or the order by themselves.
+- **Invoice capture.** Invoices come in by upload or to a partner's invoice inbox (`invoice-inbox` bridge, secret read from the environment variable named in the partner's `bridgeConfig.secretEnv`). UBL XML and JSON are read exactly (XML with a DOCTYPE or entities is refused); a PDF is kept as it came and typed in by a person; nothing is OCR'd and no bank details are read. A captured invoice shows what was read (each field marked read, guessed or missing), whether the total matches the order, and whether the same number already came in. It never becomes a payable on its own: `GET /b2b/invoices/:id/invoice-input` gives the shape for the invoice entry and `POST /b2b/invoices/:id/converted {invoiceId}` links it once one is created.
+- **Retries.** A failed send can be retried from the log; automatic retry schedules are not built yet.
+
+Mail goes through `apps/api/src/mail.ts`. With no settings it writes `.eml` files (to `INVINTEL_OUTBOX_DIR`, default the system temp folder), so nothing leaves the machine. For real mail set `INVINTEL_SMTP_URL` (`smtp://` with STARTTLS or `smtps://`), `INVINTEL_MAIL_FROM`, and `INVINTEL_PUBLIC_URL` (used in the supplier link). Plain-text SMTP login is refused unless `INVINTEL_SMTP_ALLOW_PLAIN_AUTH=1`.
+
+Code: `b2b-orders.ts`, `order-doc.ts`, `mime.ts`, `mail.ts`, `invoice-capture.ts`, `b2b-capture-routes.ts`; shared types in `packages/shared/src/b2bdocs.ts` and `b2bcapture.ts`. Demo data has a test partner "Midwest Paper Mill" and an uploaded invoice for the demo purchase order.
+
 ## API
 
 Auth (no session needed except `/me`):

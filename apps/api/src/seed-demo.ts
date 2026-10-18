@@ -145,6 +145,15 @@ await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, sc
 await call(`${prod}/work-orders/${wo3.id}/output`, { good: 44, scrap: 6, scrapReason: "Damaged", toLocationId: fg });
 await call(`${prod}/work-orders/${wo3.id}/action`, { action: "complete" });
 
+// Email exchange: Midwest Paper Mill is a trading partner reached by email (a test partner: nothing leaves this machine, mail
+// goes to an outbox folder), and an invoice from them has arrived as a file for checking (Documents > Incoming invoices).
+const mailPartner = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Midwest Paper Mill", kind: "supplier", supplierId: supplier.id, bridge: "email", bridgeConfig: { to: "orders@midwestpaper.example" }, mode: "test" });
+const poNumber = (await call<{ number: string }>(`${base}/purchasing/orders/${po.id}`)).number;
+await call(`${base}/b2b/invoices/upload`, {
+  partnerId: mailPartner.id, filename: "MWP-20418.json", contentType: "application/json",
+  contentBase64: Buffer.from(JSON.stringify({ invoiceNumber: "MWP-20418", issueDate: new Date().toISOString().slice(0, 10), poNumber, total: "3280.00", lines: [{ description: "Test liner 33 lb, 60 in roll", quantity: "6", unitPrice: "420.00" }, { description: "Flexo ink, black, 5 gal", quantity: "8", unitPrice: "95.00" }] })).toString("base64"),
+});
+
 // Exchange: a second organization on the same server (a paper supplier) is connected to the demo plant, so you can play both
 // sides: switch organizations in the sidebar. The plant has a placed order for the supplier waiting to be sent from the order's dialog.
 const sunrise = await call<{ id: string }>("/api/orgs", { name: "Sunrise Paper Co." });

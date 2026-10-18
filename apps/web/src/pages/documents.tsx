@@ -129,7 +129,7 @@ function Partners({ orgId, admin }: { orgId: string; admin: boolean }) {
             <tbody className="divide-y">
               {partners.data?.map((p) => (
                 <tr key={p.id}>
-                  <td className="p-2"><span className="font-medium">{p.name}</span><span className="block text-xs capitalize text-muted-foreground">{p.kind}{p.bridgeConfig.to ? ` · ${p.bridgeConfig.to}` : ""}</span>
+                  <td className="p-2"><span className="font-medium">{p.name}</span><span className="block text-xs text-muted-foreground"><span className="capitalize">{p.kind}</span>{p.bridgeConfig.to ? ` · ${p.bridgeConfig.to}` : ""}</span>
                     {p.bridge === "invoice-inbox" && <span className="block break-all font-mono text-xs text-muted-foreground">POST {window.location.origin}/api/b2b/inbound/{p.id}</span>}
                   </td>
                   <td className="p-2">{p.bridge}</td>
@@ -257,12 +257,12 @@ function InvoiceCard({ orgId, inv, admin }: { orgId: string; inv: CapturedInvoic
         <span className="text-xs text-muted-foreground">{formatDateTime(inv.createdAt)}{inv.from ? ` · ${inv.from}` : ""}</span>
       </div>
       {inv.subject && <p className="text-sm text-muted-foreground">Subject: {inv.subject}</p>}
-      <div className="grid gap-3 sm:grid-cols-5">
-        <Field label="Invoice number"><span className="flex items-center"><Input disabled={!editable} value={number} onChange={(e) => setNumber(e.target.value)} />{badge("invoiceNumber")}</span></Field>
-        <Field label="Order number"><span className="flex items-center"><Input disabled={!editable} value={po} onChange={(e) => setPo(e.target.value)} />{badge("poNumber")}</span></Field>
-        <Field label="Invoice date"><span className="flex items-center"><Input disabled={!editable} type="date" value={date} onChange={(e) => setDate(e.target.value)} />{badge("invoiceDate")}</span></Field>
-        <Field label="Due date"><span className="flex items-center"><Input disabled={!editable} type="date" value={due} onChange={(e) => setDue(e.target.value)} />{badge("dueDate")}</span></Field>
-        <Field label="Total"><span className="flex items-center"><Input disabled={!editable} inputMode="decimal" value={total} onChange={(e) => setTotal(e.target.value)} />{badge("totalCents")}</span></Field>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Field label="Invoice number"><span className="flex min-w-0 flex-wrap items-center gap-1"><Input disabled={!editable} value={number} onChange={(e) => setNumber(e.target.value)} />{badge("invoiceNumber")}</span></Field>
+        <Field label="Order number"><span className="flex min-w-0 flex-wrap items-center gap-1"><Input disabled={!editable} value={po} onChange={(e) => setPo(e.target.value)} />{badge("poNumber")}</span></Field>
+        <Field label="Invoice date"><span className="flex min-w-0 flex-wrap items-center gap-1"><Input disabled={!editable} type="date" value={date} onChange={(e) => setDate(e.target.value)} />{badge("invoiceDate")}</span></Field>
+        <Field label="Due date"><span className="flex min-w-0 flex-wrap items-center gap-1"><Input disabled={!editable} type="date" value={due} onChange={(e) => setDue(e.target.value)} />{badge("dueDate")}</span></Field>
+        <Field label="Total"><span className="flex min-w-0 flex-wrap items-center gap-1"><Input disabled={!editable} inputMode="decimal" value={total} onChange={(e) => setTotal(e.target.value)} />{badge("totalCents")}</span></Field>
       </div>
       {inv.lines.length > 0 && (
         <table className="w-full text-sm"><thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Line</th><th className="py-1 text-right">Qty</th><th className="py-1 text-right">Price</th><th className="py-1 text-right">Amount</th></tr></thead>

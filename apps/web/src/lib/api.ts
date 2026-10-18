@@ -387,6 +387,8 @@ export const api = {
   // The supplier's page: no session, the token in the link is the key.
   portalOrder: (token: string) => request<PortalOrder>(`/b2b/portal/${token}`),
   portalAnswer: (token: string, answer: SupplierAnswer) => request<{ ok: true }>(`/b2b/portal/${token}/answer`, post(answer)),
+  updateOrderDate: (orgId: string, id: string, expectedDate: string) =>
+    request<unknown>(`/orgs/${orgId}/purchasing/orders/${id}`, patch({ expectedDate })),
 };
 
 export interface ExPartner { id: string; name: string; kind: "supplier" | "customer"; enabled: boolean; mode: string; exchangeId: string; fingerprint: string; baseUrl: string; permissions: ExchangePermissions }
