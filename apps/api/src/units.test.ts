@@ -184,6 +184,27 @@ describe("stock units (rolls and pallets)", () => {
     expect((await get("/units?status=consumed")).units).toHaveLength(1);
   });
 
+  it("lets other flows tag unit ledger lines with a type, a work order and one shared group", async () => {
+    const { ObjectId } = await import("mongodb");
+    const { adjustUnit, moveUnit } = await import("./units.js");
+    const { units } = await (await receive()).json();
+    const unitId = new ObjectId(units[0].id);
+    const orgId = new ObjectId(owner.org.id);
+    const actor = { userId: new ObjectId(), userName: "Production" };
+    const workOrderId = new ObjectId();
+    const group = new ObjectId();
+
+    const moved = await moveUnit(store, orgId, actor, unitId, new ObjectId(shed.id), "load to corrugator", { workOrderId, transferId: group });
+    const used = await adjustUnit(store, orgId, actor, unitId, -100, "run 1", { workOrderId, transferId: group, type: "adjust" });
+    expect(moved.ok && used.ok).toBe(true);
+
+    const lines = await store.movements.find({ workOrderId }).toArray();
+    expect(lines).toHaveLength(3); // out, in, and the usage
+    expect(new Set(lines.map((l) => l.transferId?.toHexString()))).toEqual(new Set([group.toHexString()]));
+    expect(lines.every((l) => l.unitCode === units[0].code)).toBe(true);
+    expect((await item()).stock).toEqual([{ locationId: shed.id, quantity: 700 }]);
+  });
+
   it("won't reverse a unit's ledger entry, and won't switch tracking while stock exists", async () => {
     const { movementIds } = await (await receive()).json();
     const res = await call(`${base}/movements/${movementIds[0]}/reverse`, { body: {}, cookie: owner.cookie });

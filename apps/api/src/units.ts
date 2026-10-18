@@ -1,4 +1,4 @@
-import type { StockUnit } from "@invintel/shared";
+import type { MovementType, StockUnit } from "@invintel/shared";
 import { ObjectId } from "mongodb";
 import { itemEntity, recordAudit } from "./audit.js";
 import { isDuplicateKey, type StockUnitDoc, type Store } from "./db.js";
@@ -44,6 +44,16 @@ export async function presentUnits(store: Store, orgId: ObjectId, docs: StockUni
   }));
 }
 
+/**
+ * Lets other flows (production, counts) reuse these operations: tag the ledger lines with their own
+ * type and work order, and give several lines one `transferId` so they're reversed together.
+ */
+export interface UnitOpOptions {
+  type?: MovementType;
+  workOrderId?: ObjectId;
+  transferId?: ObjectId;
+}
+
 export type UnitsResult = { ok: true; units: StockUnitDoc[]; movementIds: ObjectId[] } | Failure;
 
 const asAuditActor = (a: Actor) => ({ id: a.userId, name: a.userName });
@@ -54,6 +64,7 @@ export async function receiveUnits(
   orgId: ObjectId,
   actor: Actor,
   input: { itemId: ObjectId; locationId: ObjectId; quantity: number; count: number; lot: string; codes?: string[]; reference: string },
+  opts: UnitOpOptions = {},
 ): Promise<UnitsResult> {
   const item = await store.items.findOne({ _id: input.itemId, orgId }, { projection: { name: 1, sku: 1, tracking: 1 } });
   if (!item) return { ok: false, status: 404, error: "Item not found" };
@@ -95,7 +106,9 @@ export async function receiveUnits(
     movementIds.push(
       await logMovement(store, {
         orgId,
-        type: "receive",
+        type: opts.type ?? "receive",
+        ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}),
+        ...(opts.transferId ? { transferId: opts.transferId } : {}),
         itemId: input.itemId,
         locationId: input.locationId,
         unitId: u._id,
@@ -126,6 +139,7 @@ export async function moveUnit(
   unitId: ObjectId,
   toLocationId: ObjectId,
   reason: string,
+  opts: UnitOpOptions = {},
 ): Promise<UnitsResult> {
   const unit = await store.units.findOne({ _id: unitId, orgId });
   if (!unit) return { ok: false, status: 404, error: "Unit not found" };
@@ -150,10 +164,11 @@ export async function moveUnit(
   await changeStock(store, orgId, unit.itemId, unit.locationId, -claimed.quantity);
   await changeStock(store, orgId, unit.itemId, toLocationId, claimed.quantity);
 
-  const transferId = new ObjectId();
+  const transferId = opts.transferId ?? new ObjectId();
+  const extra = { type: opts.type ?? ("transfer" as MovementType), ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}) };
   const note = reason || `Moved ${unit.code} ${from?.name ?? "?"} → ${to.name}`;
-  const out = await logMovement(store, { orgId, type: "transfer", itemId: unit.itemId, locationId: unit.locationId, unitId, unitCode: unit.code, delta: -claimed.quantity, reason: note, transferId, actor });
-  const into = await logMovement(store, { orgId, type: "transfer", itemId: unit.itemId, locationId: toLocationId, unitId, unitCode: unit.code, delta: claimed.quantity, reason: note, transferId, actor });
+  const out = await logMovement(store, { orgId, ...extra, itemId: unit.itemId, locationId: unit.locationId, unitId, unitCode: unit.code, delta: -claimed.quantity, reason: note, transferId, actor });
+  const into = await logMovement(store, { orgId, ...extra, itemId: unit.itemId, locationId: toLocationId, unitId, unitCode: unit.code, delta: claimed.quantity, reason: note, transferId, actor });
   await recordAudit(store, {
     orgId,
     actor: asAuditActor(actor),
@@ -168,7 +183,7 @@ export async function moveUnit(
 
 /**
  * Change what's left on a unit: use some of it (negative) or correct it upwards. At zero the unit
- * is marked consumed. `type` lets other flows (counts, production) tag the ledger entry.
+ * is marked consumed. `opts` lets other flows (counts, production) tag the ledger entry.
  */
 export async function adjustUnit(
   store: Store,
@@ -177,7 +192,7 @@ export async function adjustUnit(
   unitId: ObjectId,
   delta: number,
   reason: string,
-  type: "adjust" | "receive" = "adjust",
+  opts: UnitOpOptions = {},
 ): Promise<UnitsResult> {
   const unit = await store.units.findOne({ _id: unitId, orgId });
   if (!unit) return { ok: false, status: 404, error: "Unit not found" };
@@ -200,7 +215,19 @@ export async function adjustUnit(
     result = (await store.units.findOneAndUpdate({ _id: unitId }, { $set: { status: "consumed" } }, { returnDocument: "after" })) ?? after;
   }
   await changeStock(store, orgId, unit.itemId, unit.locationId, delta);
-  const id = await logMovement(store, { orgId, type, itemId: unit.itemId, locationId: unit.locationId, unitId, unitCode: unit.code, delta, reason, actor });
+  const id = await logMovement(store, {
+    orgId,
+    type: opts.type ?? "adjust",
+    ...(opts.workOrderId ? { workOrderId: opts.workOrderId } : {}),
+    ...(opts.transferId ? { transferId: opts.transferId } : {}),
+    itemId: unit.itemId,
+    locationId: unit.locationId,
+    unitId,
+    unitCode: unit.code,
+    delta,
+    reason,
+    actor,
+  });
   const location = await store.locations.findOne({ _id: unit.locationId });
   await recordAudit(store, {
     orgId,

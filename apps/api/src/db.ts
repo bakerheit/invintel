@@ -90,6 +90,8 @@ export interface StockUnitDoc {
 export interface MovementDoc {
   _id: ObjectId;
   orgId: ObjectId;
+  /** The work order that caused this movement, if any. */
+  workOrderId?: ObjectId;
   /** Set when the movement is about one specific roll or pallet. */
   unitId?: ObjectId;
   unitCode?: string;
