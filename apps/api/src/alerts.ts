@@ -1,13 +1,13 @@
 import { zValidator } from "@hono/zod-validator";
 import {
-  DEFAULT_ALERT_SETTINGS, alertKeySchema, alertSettingsSchema, alertSnoozeSchema, type Alert, type AlertsResponse, type AlertSettings, type DigestPreview,
+  DEFAULT_ALERT_SETTINGS, formatQty, stockStatusOf, stockWhy, alertKeySchema, alertSettingsSchema, alertSnoozeSchema, type Alert, type AlertsResponse, type AlertSettings, type DigestPreview,
 } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { auditActor, recordAudit } from "./audit.js";
 import { countScheduleReport } from "./reports.js";
 import type { OrgDoc, Store } from "./db.js";
-import { loadItems } from "./item-queries.js";
+import { loadItems, positionOf } from "./item-queries.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { isOpen, toOrders } from "./purchasing.js";
 
@@ -35,19 +35,24 @@ export async function computeAlerts(store: Store, org: OrgDoc, now = new Date())
   ]);
   const perDay = new Map(used.map((u) => [u._id.toHexString(), u.qty / 30]));
   for (const i of items) {
-    const qty = i.stock.reduce((s, x) => s + x.quantity, 0);
+    // Judged on what is free to promise, not on what is physically there: stock that is promised or on quality hold is not stock you have.
+    const pos = positionOf(i);
+    const qty = pos.onHand;
     const subject = { type: "item" as const, id: i._id.toHexString(), label: `${i.name} (${i.sku})` };
     const link = `${base}/inventory/${subject.id}`;
-    if (qty <= 0) {
-      out.push({ key: `out_of_stock:${subject.id}`, type: "out_of_stock", severity: "critical", title: `${i.name} is out of stock`, detail: i.reorderLevel > 0 ? `Reorder level is ${i.reorderLevel}.` : "None on hand.", subject, link });
-    } else if (i.reorderLevel > 0 && qty <= i.reorderLevel) {
-      out.push({ key: `low_stock:${subject.id}`, type: "low_stock", severity: "warning", title: `${i.name} is low`, detail: `${qty} on hand, reorder at ${i.reorderLevel}.`, subject, link });
+    const why = stockWhy(pos, (n) => formatQty(n, i, { unit: false }));
+    const status = stockStatusOf(pos);
+    if (status === "out") {
+      out.push({ key: `out_of_stock:${subject.id}`, type: "out_of_stock", severity: "critical", title: `${i.name} is out of stock`, detail: pos.reserved > 0 ? `${why}. ${formatQty(pos.reserved, i, { unit: false })} promised and none to ship.` : i.reorderLevel > 0 ? `Reorder level is ${formatQty(i.reorderLevel, i, { unit: false })}.` : "None on hand.", subject, link });
+    } else if (status === "low") {
+      const short = pos.available < 0;
+      out.push({ key: `low_stock:${subject.id}`, type: "low_stock", severity: short ? "critical" : "warning", title: short ? `${i.name} is over-promised` : `${i.name} is low`, detail: `${why}.`, subject, link });
     }
     const rate = perDay.get(subject.id) ?? 0;
-    if (qty > 0 && rate > 0) {
-      const days = qty / rate;
+    if (pos.available > 0 && rate > 0) {
+      const days = pos.available / rate;
       if (days < settings.daysOfSupply) {
-        out.push({ key: `days_of_supply:${subject.id}`, type: "days_of_supply", severity: "warning", title: `${i.name} runs out in about ${Math.max(1, Math.round(days))} ${Math.round(days) <= 1 ? "day" : "days"}`, detail: `${qty} on hand, using about ${Math.round(rate * 10) / 10} a day over the last 30 days.`, subject, link });
+        out.push({ key: `days_of_supply:${subject.id}`, type: "days_of_supply", severity: "warning", title: `${i.name} runs out in about ${Math.max(1, Math.round(days))} ${Math.round(days) <= 1 ? "day" : "days"}`, detail: `${why}, using about ${Math.round(rate * 10) / 10} a day over the last 30 days.`, subject, link });
       }
     }
   }

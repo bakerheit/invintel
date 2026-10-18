@@ -514,7 +514,11 @@ export interface AttentionItem {
   name: string;
   /** How this item's whole-number quantities read. */
   uom: Uom;
+  /** On hand. */
   quantity: number;
+  /** Promised on sales orders, and what is free to promise (on hand - quality hold - reserved). Low is judged on `available`. */
+  reserved: number;
+  available: number;
   reorderLevel: number;
   status: AttentionStatus;
 }

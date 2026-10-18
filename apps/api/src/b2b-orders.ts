@@ -1,4 +1,4 @@
-import { canonicalOrderSchema, supplierAnswerSchema, type CanonicalOrder, type OrderExchange, type PortalOrder } from "@invintel/shared";
+import { canonicalOrderSchema, canonicalShipNoticeSchema, supplierAnswerSchema, type CanonicalOrder, type CanonicalShipNotice, type OrderExchange, type PortalOrder } from "@invintel/shared";
 import { zValidator } from "@hono/zod-validator";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Hono } from "hono";
@@ -45,22 +45,56 @@ export function orderEmailText(o: CanonicalOrder): string {
   ].join("\n");
 }
 
-/** Sends the canonical order as an email with the PDF attached. Partner settings: `to` (required), `cc`, `replyTo`. */
+/** The ship notice as an email (INV-16): what went, when, how, and the tracking, in plain text. */
+export function shipNoticeEmailText(n: CanonicalShipNotice, shipper: string): string {
+  return [
+    "Hello,",
+    "",
+    `${shipper || "We"} shipped part or all of your order ${n.poNumber} (shipment ${n.shipmentNo}) on ${n.shipDate}.`,
+    "",
+    ...n.lines.map((l) => `  ${l.lineNo}. ${l.sku ? `${l.sku}: ` : ""}${l.quantity} ${l.unit}`),
+    "",
+    ...(n.carrier ? [`Carrier: ${n.carrier}`] : []),
+    ...(n.trackingNumber ? [`Tracking number: ${n.trackingNumber}`] : []),
+    "",
+    "Thank you,",
+    shipper || "",
+  ].join("\n");
+}
+
+/** Sends the canonical order as an email with the PDF attached, and ship notices as plain emails. Partner settings: `to` (required), `cc`, `replyTo`. */
 export const emailBridge: Bridge = {
   id: "email",
-  carries: ["order", "order_change"],
+  carries: ["order", "order_change", "despatch_advice"],
   async send(message, partner) {
     const to = (partner.bridgeConfig.to ?? "").split(/[,;]\s*/).map((s) => s.trim()).filter(Boolean);
     if (!to.length || !to.every(isEmail)) return { ok: false, error: "This partner has no valid email address (setting \"to\")", retryable: false };
     const cc = (partner.bridgeConfig.cc ?? "").split(/[,;]\s*/).map((s) => s.trim()).filter(Boolean);
     if (!cc.every(isEmail)) return { ok: false, error: "The cc setting has an invalid email address", retryable: false };
+    const replyTo = partner.bridgeConfig.replyTo && isEmail(partner.bridgeConfig.replyTo) ? partner.bridgeConfig.replyTo : undefined;
+    if (message.docType === "despatch_advice") {
+      let notice: CanonicalShipNotice;
+      let shipper = "";
+      try {
+        const raw = JSON.parse(message.body) as { shipper?: unknown };
+        notice = canonicalShipNoticeSchema.parse(raw);
+        shipper = typeof raw.shipper === "string" ? raw.shipper : "";
+      } catch {
+        return { ok: false, error: "The document isn't a valid ship notice", retryable: false };
+      }
+      const sent = await getMailTransport().send({
+        from: mailFrom(), to, ...(cc.length ? { cc } : {}), ...(replyTo ? { replyTo } : {}),
+        subject: `Shipment ${notice.shipmentNo} for your order ${notice.poNumber}${shipper ? ` from ${shipper}` : ""}${partner.mode === "test" ? " (TEST)" : ""}`.replace(/[\r\n]+/g, " "),
+        text: shipNoticeEmailText(notice, shipper),
+      });
+      return sent.ok ? { ok: true, state: "sent", providerMessageId: sent.messageId } : { ok: false, error: sent.error, retryable: sent.retryable };
+    }
     let order: CanonicalOrder;
     try {
       order = canonicalOrderSchema.parse(JSON.parse(message.body));
     } catch {
       return { ok: false, error: "The document isn't a valid order", retryable: false };
     }
-    const replyTo = partner.bridgeConfig.replyTo && isEmail(partner.bridgeConfig.replyTo) ? partner.bridgeConfig.replyTo : undefined;
     const res = await getMailTransport().send({
       from: mailFrom(),
       to,

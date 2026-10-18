@@ -3,6 +3,7 @@ import {
 } from "@invintel/shared";
 import { ObjectId } from "mongodb";
 import { recordAudit } from "./audit.js";
+import { getBridge } from "./b2b-core.js";
 import { nextNumber } from "./counters.js";
 import type { ItemDoc, SalesOrderDoc, Store } from "./db.js";
 import { changeStock, logMovement, ON_HOLD_AREA, type Actor } from "./stock-service.js";
@@ -84,6 +85,14 @@ export async function availabilityOf(store: Store, orgId: ObjectId, itemIds: Obj
 
 // ---------- presenting ----------
 
+/** How a customer is told about a shipment: by what their trading partner can carry (see sales-notices.ts). */
+function noticeVia(d: Pick<SalesOrderDoc, "messageId">, bridge?: string): SalesOrder["noticeVia"] {
+  if (!bridge) return null;
+  if (bridge === "invintel") return d.messageId ? "the Exchange" : null;
+  if (!getBridge(bridge)?.carries.includes("despatch_advice")) return null;
+  return bridge === "x12" ? "an X12 856" : bridge === "email" ? "an email" : "a message";
+}
+
 export function statusOf(d: Pick<SalesOrderDoc, "state" | "lines">, shipped: (itemId: ObjectId) => number): SoStatus {
   if (d.state !== "confirmed") return d.state;
   const total = d.lines.reduce((s, l) => s + shipped(l.itemId), 0);
@@ -100,11 +109,12 @@ export async function toSalesOrders(store: Store, docs: SalesOrderDoc[]): Promis
     store.items.find({ _id: { $in: itemIds } }, { projection: { sku: 1, name: 1, unit: 1, decimals: 1, tracking: 1 } }).toArray(),
     shippedByOrder(store, docs.map((d) => d._id)),
     availabilityOf(store, orgId, itemIds),
-    store.tradingPartners.find({ _id: { $in: docs.flatMap((d) => (d.customerPartnerId ? [d.customerPartnerId] : [])) } }, { projection: { name: 1 } }).toArray(),
+    store.tradingPartners.find({ _id: { $in: docs.flatMap((d) => (d.customerPartnerId ? [d.customerPartnerId] : [])) } }, { projection: { name: 1, bridge: 1 } }).toArray(),
     moveIds.length ? store.movements.find({ _id: { $in: moveIds } }, { projection: { reversedBy: 1 } }).toArray() : Promise.resolve([]),
   ]);
   const item = new Map(items.map((i) => [i._id.toHexString(), i]));
   const partnerName = new Map(partners.map((p) => [p._id.toHexString(), p.name]));
+  const partnerBridge = new Map(partners.map((p) => [p._id.toHexString(), p.bridge]));
   const reversed = new Set(moves.filter((m) => m.reversedBy).map((m) => m._id.toHexString()));
   return docs.map((d) => {
     const sh = (itemId: ObjectId) => shipped.get(`${d._id.toHexString()}:${itemId.toHexString()}`) ?? 0;
@@ -118,13 +128,13 @@ export async function toSalesOrders(store: Store, docs: SalesOrderDoc[]): Promis
       };
     });
     const shipments: SoShipment[] = d.shipments.map((s) => ({
-      number: s.number, at: s.at.toISOString(), by: s.by.name, carrier: s.carrier, trackingNumber: s.trackingNumber, notice: s.notice,
+      number: s.number, at: s.at.toISOString(), shippedDate: s.shippedDate ?? s.at.toISOString().slice(0, 10), by: s.by.name, carrier: s.carrier, trackingNumber: s.trackingNumber, notice: s.notice,
       lines: s.lines.map((l) => ({ itemId: l.itemId.toHexString(), itemName: item.get(l.itemId.toHexString())?.name ?? "(deleted item)", quantity: l.quantity, uom: uomOf(item.get(l.itemId.toHexString())) })),
       reversed: s.movementIds.length > 0 && s.movementIds.every((m) => reversed.has(m.toHexString())),
     }));
     return {
       id: d._id.toHexString(), number: d.number, status, customer: { partnerId: d.customerPartnerId?.toHexString() ?? null, name: d.customerPartnerId ? (partnerName.get(d.customerPartnerId.toHexString()) ?? d.customerName) : d.customerName },
-      customerRef: d.customerRef, source: d.source, messageId: d.messageId?.toHexString() ?? null, requestedDate: d.requestedDate, note: d.note, lines,
+      customerRef: d.customerRef, noticeVia: noticeVia(d, partnerBridge.get(d.customerPartnerId?.toHexString() ?? "")), source: d.source, messageId: d.messageId?.toHexString() ?? null, requestedDate: d.requestedDate, note: d.note, lines,
       totalCents: d.lines.reduce((s, l) => s + lineValueCents(l.quantity, l.unitPriceCents, uomOf(item.get(l.itemId.toHexString())).decimals), 0),
       short: holding && lines.some((l) => l.reserved > 0 && l.available < 0), shipments,
       confirmedAt: d.confirmedAt?.toISOString() ?? null, createdAt: d.createdAt.toISOString(), updatedAt: d.updatedAt.toISOString(),
@@ -232,6 +242,32 @@ export async function closeOrder(store: Store, orgId: ObjectId, actor: { id: Obj
   if (!res) return { ok: false, status: 409, error: "Someone is shipping this order, or just changed it. Reload and try again." };
   await recordAudit(store, { orgId, actor, action: "sales_order.closed", entity: soEntity(res), summary: `Closed ${res.number} short and released what was left` });
   return { ok: true, order: res };
+}
+
+/**
+ * "Edit" a confirmed order, which is cancel-and-rewrite in one step (INV-16): a copy is written as a new draft, then the old order is
+ * cancelled (its stock is released). Only while nothing has shipped. The copy is not reserved until it is confirmed again, and a
+ * rule that asks for approval applies to it again.
+ */
+export async function rewriteOrder(store: Store, orgId: ObjectId, actor: { id: ObjectId | null; name: string }, orderId: ObjectId): Promise<Result<{ order: SalesOrderDoc; replaced: SalesOrderDoc }>> {
+  const old = await store.salesOrders.findOne({ _id: orderId, orgId });
+  if (!old) return { ok: false, status: 404, error: "Order not found" };
+  if (old.state === "draft") return { ok: false, status: 409, error: "It's a draft: edit it directly" };
+  if (old.state !== "confirmed") return { ok: false, status: 409, error: `A ${old.state} order can't be rewritten. Write a new one.` };
+  if ((await shippedByOrder(store, [old._id])).size > 0) return { ok: false, status: 409, error: "Some of it has shipped. Close it and write a new order for the rest." };
+  const made = await createDraft(store, orgId, actor, {
+    customerPartnerId: old.customerPartnerId?.toHexString() ?? null, customerName: old.customerName, customerRef: old.customerRef, requestedDate: old.requestedDate, note: old.note,
+    lines: old.lines.map((l) => ({ itemId: l.itemId.toHexString(), quantity: l.quantity, unitPriceCents: l.unitPriceCents })),
+  });
+  if (!made.ok) return made;
+  const gone = await cancelOrder(store, orgId, actor, old._id, `rewritten as ${made.order.number}`);
+  if (!gone.ok) {
+    // Someone shipped or changed it in that moment: the copy is withdrawn so there aren't two.
+    await store.salesOrders.updateOne({ _id: made.order._id }, { $set: { state: "cancelled", updatedAt: new Date() } });
+    return gone;
+  }
+  await recordAudit(store, { orgId, actor, action: "sales_order.updated", entity: soEntity(made.order), summary: `Rewrote ${old.number} as ${made.order.number}: edit it, then confirm it to reserve the stock again` });
+  return { ok: true, order: made.order, replaced: gone.order };
 }
 
 // ---------- picking and shipping ----------
@@ -350,7 +386,7 @@ export async function shipOrder(
   const now = new Date();
   const updated = await store.salesOrders.findOneAndUpdate(
     { _id: doc._id },
-    { $push: { shipments: { number, at: now, by: actorRef(actor), carrier: input.carrier ?? "", trackingNumber: input.trackingNumber ?? "", movementIds, lines, notice: null } }, $unset: { shippingUntil: "" }, $set: { updatedAt: now } },
+    { $push: { shipments: { number, at: now, shippedDate: input.shippedDate ?? now.toISOString().slice(0, 10), by: actorRef(actor), carrier: input.carrier ?? "", trackingNumber: input.trackingNumber ?? "", movementIds, lines, notice: null } }, $unset: { shippingUntil: "" }, $set: { updatedAt: now } },
     { returnDocument: "after" },
   );
   await recordAudit(store, {

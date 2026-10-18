@@ -1,6 +1,6 @@
 import { formatQty, qtyErrorMessage, type PickLine, type SalesOrder, type SoShipInput, type SoStatus } from "@invintel/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, PackageCheck, Plus, Receipt, Trash2, Truck } from "lucide-react";
+import { AlertTriangle, Check, PackageCheck, Pencil, Plus, Receipt, Trash2, Truck } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { dollarsToCents, formatCents } from "@/lib/format";
+import { centsToDollars, dollarsToCents, formatCents } from "@/lib/format";
 import { qtyText, readQtyEntry } from "@/lib/qty";
 import { invalidateOrg, isAdmin, orgKey, useCurrentOrg } from "@/lib/org";
 import { cn } from "@/lib/utils";
@@ -39,17 +39,18 @@ const FREE_TEXT = "__free__";
 interface Draft { itemId: string; quantity: string; price: string }
 const blank: Draft = { itemId: "", quantity: "", price: "" };
 
-function NewOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+/** A new order, or (with `order`) the edit of a draft: the same form either way. */
+function OrderFormDialog({ open, onOpenChange, order }: { open: boolean; onOpenChange: (o: boolean) => void; order?: SalesOrder }) {
   const { id: orgId } = useCurrentOrg();
   const qc = useQueryClient();
   const items = useQuery({ queryKey: orgKey(orgId, "items"), queryFn: () => api.listItems(orgId), enabled: open });
   const partners = useQuery({ queryKey: orgKey(orgId, "b2b", "partners"), queryFn: () => api.b2bPartners(orgId), enabled: open });
   const customers = (partners.data ?? []).filter((p) => p.kind === "customer");
-  const [customer, setCustomer] = useState(FREE_TEXT);
-  const [name, setName] = useState("");
-  const [ref, setRef] = useState("");
-  const [date, setDate] = useState("");
-  const [lines, setLines] = useState<Draft[]>([{ ...blank }]);
+  const [customer, setCustomer] = useState(order?.customer.partnerId ?? FREE_TEXT);
+  const [name, setName] = useState(order && !order.customer.partnerId ? order.customer.name : "");
+  const [ref, setRef] = useState(order?.customerRef ?? "");
+  const [date, setDate] = useState(order?.requestedDate ?? "");
+  const [lines, setLines] = useState<Draft[]>(order ? order.lines.map((l) => ({ itemId: l.itemId, quantity: qtyText(l.quantity, l.uom), price: centsToDollars(l.unitPriceCents) })) : [{ ...blank }]);
   const [error, setError] = useState<string | null>(null);
   const item = (id: string) => items.data?.find((x) => x.id === id);
   const read = (l: Draft) => {
@@ -58,11 +59,19 @@ function NewOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   };
   const set = (i: number, patch: Partial<Draft>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const create = useMutation({
-    mutationFn: () => api.createSalesOrder(orgId, {
-      customerPartnerId: customer === FREE_TEXT ? null : customer, customerName: customer === FREE_TEXT ? name : "", customerRef: ref, requestedDate: date || null,
-      lines: lines.map((l) => ({ itemId: l.itemId, quantity: read(l).stored, unitPriceCents: dollarsToCents(l.price) })),
-    }),
-    onSuccess: async (o) => { await invalidateOrg(qc, orgId); toast.success(`Created ${o.number} as a draft. Confirm it to reserve the stock.`); onOpenChange(false); setLines([{ ...blank }]); setName(""); setRef(""); setDate(""); },
+    mutationFn: () => {
+      const input = {
+        customerPartnerId: customer === FREE_TEXT ? null : customer, customerName: customer === FREE_TEXT ? name : "", customerRef: ref, requestedDate: date || null,
+        lines: lines.map((l) => ({ itemId: l.itemId, quantity: read(l).stored, unitPriceCents: dollarsToCents(l.price) })),
+      };
+      return order ? api.updateSalesOrder(orgId, order.id, input) : api.createSalesOrder(orgId, input);
+    },
+    onSuccess: async (o) => {
+      await invalidateOrg(qc, orgId);
+      toast.success(order ? `Saved ${o.number}. Confirm it to reserve the stock.` : `Created ${o.number} as a draft. Confirm it to reserve the stock.`);
+      onOpenChange(false);
+      if (!order) { setLines([{ ...blank }]); setName(""); setRef(""); setDate(""); }
+    },
     onError: (e: Error) => setError(e.message),
   });
   const ready = (customer !== FREE_TEXT || name.trim()) && lines.every((l) => l.itemId && read(l).ok && read(l).stored > 0 && l.price.trim() !== "");
@@ -70,7 +79,7 @@ function NewOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
-        <DialogHeader><DialogTitle>New sales order</DialogTitle><DialogDescription>Saved as a draft. Stock is reserved when you confirm it.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{order ? `Edit ${order.number}` : "New sales order"}</DialogTitle><DialogDescription>{order ? "A draft: nothing is reserved until you confirm it." : "Saved as a draft. Stock is reserved when you confirm it."}</DialogDescription></DialogHeader>
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid min-w-0 gap-1.5">
@@ -108,7 +117,7 @@ function NewOrderDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
           </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         </div>
-        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={!ready || create.isPending} onClick={() => { setError(null); create.mutate(); }}>Save draft</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={!ready || create.isPending} onClick={() => { setError(null); create.mutate(); }}>{order ? "Save changes" : "Save draft"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -194,7 +203,7 @@ function ShipDialog({ order, onClose, onShipped }: { order: SalesOrder; onClose:
           <div className="grid gap-1.5"><Label htmlFor="sh-carrier">Carrier</Label><Input id="sh-carrier" value={carrier} maxLength={80} onChange={(e) => setCarrier(e.target.value)} /></div>
           <div className="grid gap-1.5"><Label htmlFor="sh-track">Tracking number</Label><Input id="sh-track" value={tracking} maxLength={120} onChange={(e) => setTracking(e.target.value)} /></div>
         </div>
-        {order.source === "exchange" && <p className="text-xs text-muted-foreground">This order came in over the Exchange, so {order.customer.name} gets a ship notice for exactly what you send now.</p>}
+        {order.noticeVia && <p className="text-xs text-muted-foreground">{order.customer.name} is told by {order.noticeVia}, for exactly what you send now.</p>}
         <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={!valid || ship.isPending} onClick={() => ship.mutate()}><Truck /> Ship</Button></DialogFooter>
       </DialogContent>
     </Dialog>
@@ -203,7 +212,7 @@ function ShipDialog({ order, onClose, onShipped }: { order: SalesOrder; onClose:
 
 // ---------- one order ----------
 
-function OrderDetail({ order, onClose, onShip }: { order: SalesOrder; onClose: () => void; onShip: () => void }) {
+function OrderDetail({ order, onClose, onShip, onEdit, onRewritten }: { order: SalesOrder; onClose: () => void; onShip: () => void; onEdit: () => void; onRewritten: (copyId: string) => void }) {
   const { id: orgId, role } = useCurrentOrg();
   const qc = useQueryClient();
   const confirm = useConfirm();
@@ -224,6 +233,11 @@ function OrderDetail({ order, onClose, onShip }: { order: SalesOrder; onClose: (
     onSuccess: async (o) => { await done(`${o.number} is ${o.status}`); onClose(); },
     onError: (e: Error) => toast.error(e.message),
   });
+  const rewrite = useMutation({
+    mutationFn: () => api.rewriteSalesOrder(orgId, order.id),
+    onSuccess: async (copy) => { await done(`${order.number} cancelled and its stock released. ${copy.number} is a draft copy: change it, then confirm it.`); onRewritten(copy.id); },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const resend = useMutation({
     mutationFn: (n: string) => api.resendShipNotice(orgId, order.id, n),
     onSuccess: async () => { await done("Ship notice sent"); },
@@ -234,6 +248,14 @@ function OrderDetail({ order, onClose, onShip }: { order: SalesOrder; onClose: (
     if (await confirm(a === "cancel"
       ? { title: `Cancel ${order.number}?`, description: order.status === "draft" ? "Nothing is reserved yet." : "The stock reserved for it is released.", confirmLabel: "Cancel order", destructive: true }
       : { title: `Close ${order.number} short?`, description: "What has not shipped is released and won't be expected any more. What shipped stays shipped.", confirmLabel: "Close short" })) act.mutate(a);
+  };
+  const canRewrite = admin && order.status === "confirmed" && order.shipments.every((s) => s.reversed);
+  const askRewrite = async () => {
+    if (await confirm({
+      title: `Change ${order.number}?`,
+      description: `${order.number} is cancelled and its stock released, and a draft copy is made for you to change. The copy reserves nothing until you confirm it again${order.source === "exchange" ? ", and the customer was already told yes to the original: tell them about the change" : ""}.`,
+      confirmLabel: "Cancel and make a copy",
+    })) rewrite.mutate();
   };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -293,8 +315,10 @@ function OrderDetail({ order, onClose, onShip }: { order: SalesOrder; onClose: (
           <div className="flex gap-2">
             {admin && (order.status === "draft" || (order.status === "confirmed" && order.shipments.every((s) => s.reversed))) && <Button variant="ghost" className="text-destructive" onClick={() => void ask("cancel")}>Cancel order</Button>}
             {admin && order.status === "partial" && <Button variant="ghost" onClick={() => void ask("close")}>Close short</Button>}
+            {canRewrite && <Button variant="outline" onClick={() => void askRewrite()} disabled={rewrite.isPending}><Pencil /> Change lines</Button>}
           </div>
           <div className="flex gap-2">
+            {admin && order.status === "draft" && <Button variant="outline" onClick={onEdit}><Pencil /> Edit</Button>}
             {admin && order.status === "draft" && <Button onClick={() => { setShortError(null); doConfirm.mutate(false); }} disabled={doConfirm.isPending}><Check /> Confirm and reserve</Button>}
             {holding && <Button onClick={onShip}><PackageCheck /> Ship</Button>}
           </div>
@@ -311,6 +335,7 @@ export default function SalesPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [shipping, setShipping] = useState(false);
+  const [editing, setEditing] = useState(false);
   const qc = useQueryClient();
   const list = [...(orders.data ?? [])].sort((a, b) => RANK[a.status] - RANK[b.status] || b.number.localeCompare(a.number));
   const current = list.find((o) => o.id === selected);
@@ -342,9 +367,10 @@ export default function SalesPage() {
           )}
         </CardContent>
       </Card>
-      {current && !shipping && <OrderDetail key={current.id + current.updatedAt + current.shipments.length} order={current} onClose={() => setSelected(null)} onShip={() => setShipping(true)} />}
+      {current && !shipping && !editing && <OrderDetail key={current.id + current.updatedAt + current.shipments.length} order={current} onClose={() => setSelected(null)} onShip={() => setShipping(true)} onEdit={() => setEditing(true)} onRewritten={(id) => { setSelected(id); setEditing(true); }} />}
+      {current && editing && <OrderFormDialog key={current.id + current.updatedAt} open order={current} onOpenChange={(o) => !o && setEditing(false)} />}
       {current && shipping && <ShipDialog order={current} onClose={() => setShipping(false)} onShipped={async () => { setShipping(false); await invalidateOrg(qc, orgId); }} />}
-      <NewOrderDialog open={creating} onOpenChange={setCreating} />
+      <OrderFormDialog open={creating} onOpenChange={setCreating} />
     </>
   );
 }

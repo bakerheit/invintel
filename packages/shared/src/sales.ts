@@ -87,6 +87,8 @@ export interface SalesOrderLine {
 export interface SoShipment {
   number: string;
   at: string;
+  /** The date it left, as given when it was shipped. */
+  shippedDate: string;
   by: string;
   carrier: string;
   trackingNumber: string;
@@ -103,6 +105,8 @@ export interface SalesOrder {
   status: SoStatus;
   customer: { partnerId: string | null; name: string };
   customerRef: string;
+  /** How the customer is told when a shipment goes (INV-16): by the Exchange, an X12 856, an email, or another document bridge. Null: they aren't. */
+  noticeVia: "the Exchange" | "an X12 856" | "an email" | "a message" | null;
   /** "exchange" for an order that arrived from a customer over the Exchange. */
   source: "manual" | "exchange";
   /** The incoming message it was made from, for an exchange order. */
@@ -150,4 +154,54 @@ export interface SoShortage {
   uom: Uom;
   needed: number;
   available: number;
+}
+
+// ---------- low stock is judged on what is available (INV-16) ----------
+
+export type StockStatus = "ok" | "low" | "out";
+
+export interface StockPosition {
+  /** Physically in stock, everywhere (including what is on quality hold). */
+  onHand: number;
+  /** Promised to customers on confirmed sales orders. */
+  reserved: number;
+  /** On quality hold: not for sale. */
+  onHold: number;
+  /** onHand - onHold - reserved. Negative: promised more than there is. */
+  available: number;
+  reorderLevel: number;
+}
+
+/** Reads the position off an item as the API sends it (reserved/available are absent on older responses: then nothing is promised). */
+export function positionOfItem(i: { quantity: number; reserved?: number; available?: number; reorderLevel: number }): StockPosition {
+  const reserved = i.reserved ?? 0;
+  const available = i.available ?? i.quantity - reserved;
+  return { onHand: i.quantity, reserved, onHold: Math.max(0, i.quantity - reserved - available), available, reorderLevel: i.reorderLevel };
+}
+
+/**
+ * Out: nothing physically in stock. Low: what is free to promise is at or under the reorder level (a level of 0 means "don't track low stock",
+ * but being promised more than there is always counts). Reorder levels judge available, not on hand: stock that is already spoken for
+ * or held back is not stock you have.
+ */
+export function stockStatusOf(p: StockPosition): StockStatus {
+  if (p.onHand <= 0) return "out";
+  if (p.available < 0) return "low";
+  return p.reorderLevel > 0 && p.available <= p.reorderLevel ? "low" : "ok";
+}
+
+/** What to order: enough to get back to twice the reorder level (or to cover what is promised, with no level set), less what is already coming. */
+export function suggestedOrderQty(p: StockPosition, onOrder: number): number {
+  if (p.reorderLevel > 0) return p.available > p.reorderLevel ? 0 : Math.max(0, p.reorderLevel * 2 - p.available - onOrder);
+  return p.available < 0 ? Math.max(0, -p.available - onOrder) : 0;
+}
+
+/** "12 on hand, 8 promised, 4 free, reorder at 10": the reason a status is what it is. `fmt` formats a stored quantity in the item's unit. */
+export function stockWhy(p: StockPosition, fmt: (n: number) => string): string {
+  const parts = [`${fmt(p.onHand)} on hand`];
+  if (p.reserved > 0) parts.push(`${fmt(p.reserved)} promised`);
+  if (p.onHold > 0) parts.push(`${fmt(p.onHold)} on quality hold`);
+  if (p.reserved > 0 || p.onHold > 0) parts.push(p.available < 0 ? `${fmt(-p.available)} over-promised` : `${fmt(p.available)} free`);
+  if (p.reorderLevel > 0) parts.push(`reorder at ${fmt(p.reorderLevel)}`);
+  return parts.join(", ");
 }

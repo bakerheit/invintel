@@ -1,4 +1,4 @@
-import { formatQty, lineValueCents } from "@invintel/shared";
+import { formatQty, lineValueCents, positionOfItem, stockWhy } from "@invintel/shared";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowLeftRight, History, Package, Pencil, Printer, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Link, useParams } from "react-router";
@@ -81,6 +81,11 @@ export default function ItemDetailPage() {
           </>
         }
       />
+
+      <p className={cn("text-sm", stockStatus(item) === "ok" ? "text-muted-foreground" : "font-medium text-warning")}>
+        {stockWhy(positionOfItem(item), (n) => formatQty(n, item, { unit: false }))}
+        {stockStatus(item) === "low" && (item.available ?? item.quantity) < 0 ? ": promised more than there is" : stockStatus(item) === "low" ? ": what is free is at or under the reorder level" : ""}.
+      </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[

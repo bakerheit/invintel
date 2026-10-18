@@ -1,7 +1,7 @@
-import { LOCATION_TYPES, lineValueCents, uomOf, type AttentionItem, type LocationType, type Overview } from "@invintel/shared";
+import { LOCATION_TYPES, lineValueCents, stockStatusOf, uomOf, type AttentionItem, type LocationType, type Overview } from "@invintel/shared";
 import { Hono } from "hono";
 import type { Store } from "./db.js";
-import { loadItems } from "./item-queries.js";
+import { loadItems, positionOf } from "./item-queries.js";
 import type { OrgEnv } from "./org-access.js";
 
 const ATTENTION_LIMIT = 10;
@@ -38,7 +38,9 @@ export function createOverviewRoutes(store: Store) {
         t.units += shown(s.quantity);
         t.valueCents += lineValueCents(s.quantity, item.unitCostCents, item.decimals ?? 0);
       }
-      const status = quantity <= 0 ? "out" : item.reorderLevel > 0 && quantity <= item.reorderLevel ? "low" : null;
+      const pos = positionOf(item);
+      const state = stockStatusOf(pos);
+      const status = state === "ok" ? null : state;
       if (status) {
         attention.push({
           id: item._id.toHexString(),
@@ -46,10 +48,12 @@ export function createOverviewRoutes(store: Store) {
           name: item.name,
           uom: uomOf(item),
           quantity,
+          reserved: pos.reserved,
+          available: pos.available,
           reorderLevel: item.reorderLevel,
           status,
-          // Sort key: how far down the reorder level it is. Out of stock is 0.
-          ratio: item.reorderLevel > 0 ? quantity / item.reorderLevel : quantity,
+          // Sort key: how far down the reorder level the free stock is. Out of stock sorts first; over-promised next.
+          ratio: status === "out" ? -Infinity : item.reorderLevel > 0 ? pos.available / item.reorderLevel : pos.available,
         });
       }
     }

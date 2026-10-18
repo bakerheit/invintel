@@ -167,9 +167,9 @@ const ediPo = await call<{ id: string }>(`${base}/purchasing/orders`, {
 });
 await call(`${base}/purchasing/orders/${ediPo.id}/place`, {});
 
-// Sales: Bluebird Packaging is a customer. One order is confirmed (its stock is reserved: look at RSC-1296 in Inventory, "promised"
+// Sales: Bluebird Packaging is a customer (an email test partner: when a shipment goes, it gets a ship notice by email into the outbox folder). One order is confirmed (its stock is reserved: look at RSC-1296 in Inventory, "promised"
 // and "free"), one is part shipped from Finished goods, and one is a draft waiting to be confirmed (Sales).
-const customer = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Bluebird Packaging", kind: "customer", bridge: "loopback", mode: "test" });
+const customer = await call<{ id: string }>(`${base}/b2b/partners`, { name: "Bluebird Packaging", kind: "customer", bridge: "email", bridgeConfig: { to: "purchasing@bluebird.example" }, mode: "test" });
 const soBase = `${base}/sales/orders`;
 const dateIn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const so1 = await call<{ id: string }>(soBase, { customerPartnerId: customer.id, customerRef: "BP-5521", requestedDate: dateIn(6), note: "Deliver to dock 3", lines: [{ itemId: rsc, quantity: 30, unitPriceCents: 2600 }] });

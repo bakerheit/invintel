@@ -1,4 +1,4 @@
-import { uomOf, type Item } from "@invintel/shared";
+import { uomOf, type Item, type StockPosition } from "@invintel/shared";
 import type { ObjectId } from "mongodb";
 import type { ItemDoc, StockDoc, Store } from "./db.js";
 import { onHoldByItem, reservedByItem } from "./sales-core.js";
@@ -48,6 +48,14 @@ const loadItemsRaw = (store: Store, orgId: ObjectId, itemId?: ObjectId) =>
       { collation: byName },
     )
     .toArray();
+
+/** On hand, reserved, on hold and available for an item as loadItems returns it. */
+export const positionOf = (i: ItemWithStock): StockPosition => {
+  const onHand = i.stock.reduce((s, x) => s + x.quantity, 0);
+  const reserved = i.reserved ?? 0;
+  const onHold = i.onHold ?? 0;
+  return { onHand, reserved, onHold, available: onHand - onHold - reserved, reorderLevel: i.reorderLevel };
+};
 
 export const loadItem = async (store: Store, orgId: ObjectId, itemId: ObjectId) =>
   (await loadItems(store, orgId, itemId))[0];

@@ -1,15 +1,15 @@
 import { zValidator } from "@hono/zod-validator";
-import { objectIdSchema, salesOrderInputSchema, salesOrderUpdateSchema, soConfirmInputSchema, soShipInputSchema, storedToNumber, uomOf, type SalesOrder, type SoShipResult } from "@invintel/shared";
+import { objectIdSchema, salesOrderInputSchema, salesOrderUpdateSchema, soConfirmInputSchema, soShipInputSchema, type SalesOrder, type SoShipResult } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.js";
 import { createApproval, isSoleApprover, ruleFor, toApproval } from "./approvals-core.js";
 import type { SalesOrderDoc, Store } from "./db.js";
-import { loadIncomingOrder, sendShipNotice } from "./exchange.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
-import { cancelOrder, checkOrderInput, closeOrder, confirmOrderDirect, createDraft, pickList, shipOrder, soEntity, toSalesOrders } from "./sales-core.js";
+import { sendShipmentNotice } from "./sales-notices.js";
+import { cancelOrder, checkOrderInput, closeOrder, confirmOrderDirect, createDraft, pickList, rewriteOrder, shipOrder, soEntity, toSalesOrders } from "./sales-core.js";
 
 const idParam = z.object({ id: objectIdSchema });
 const shipParam = z.object({ id: objectIdSchema, number: z.string().max(40) });
@@ -99,6 +99,12 @@ export function createSalesRoutes(store: Store) {
     return c.json(await present(res.order));
   });
 
+  /** "Edit" a confirmed order: a draft copy is written and the confirmed one is cancelled (its stock released), only while nothing has shipped. */
+  r.post("/orders/:id/rewrite", requireRole("admin"), zValidator("param", idParam), async (c) => {
+    const res = await rewriteOrder(store, c.get("org")._id, actorFor(c), oid(c.req.valid("param").id));
+    return res.ok ? c.json(await present(res.order), 201) : c.json({ error: res.error }, res.status);
+  });
+
   r.post("/orders/:id/cancel", requireRole("admin"), zValidator("param", idParam), async (c) => {
     const res = await cancelOrder(store, c.get("org")._id, actorFor(c), oid(c.req.valid("param").id));
     return res.ok ? c.json(await present(res.order)) : c.json({ error: res.error }, res.status);
@@ -123,7 +129,7 @@ export function createSalesRoutes(store: Store) {
     const input = c.req.valid("json");
     const res = await shipOrder(store, orgId, actorOf(c.get("user")), oid(c.req.valid("param").id), input);
     if (!res.ok) return c.json({ error: res.error, ...(res.partial ? { partial: true } : {}) }, res.status);
-    const notice = await noticeFor(res.order, res.shipmentNumber, input.shippedDate, input.carrier, input.trackingNumber, res.lines, actorOf(c.get("user")));
+    const notice = await tellCustomer(res.order, res.shipmentNumber, actorOf(c.get("user")));
     const body: SoShipResult = { order: await present(notice.order), shipmentNumber: res.shipmentNumber, movementIds: res.movementIds.map(String), notice: notice.state, ...(notice.error ? { noticeError: notice.error } : {}) };
     return c.json(body, 201);
   });
@@ -134,34 +140,19 @@ export function createSalesRoutes(store: Store) {
     const doc = await store.salesOrders.findOne({ _id: oid(c.req.valid("param").id), orgId });
     const s = doc?.shipments.find((x) => x.number === c.req.valid("param").number);
     if (!doc || !s) return c.json({ error: "Shipment not found" }, 404);
-    if (!doc.messageId) return c.json({ error: "This order didn't come from the Exchange, so there is no one to tell" }, 409);
-    const notice = await noticeFor(doc, s.number, s.at.toISOString().slice(0, 10), s.carrier, s.trackingNumber, s.lines, actorOf(c.get("user")));
+    const notice = await tellCustomer(doc, s.number, actorOf(c.get("user")));
+    if (notice.state === null) return c.json({ error: "There is no one to tell: this customer isn't a trading partner that can receive a ship notice" }, 409);
     return notice.state === "sent" ? c.json(await present(notice.order)) : c.json({ error: notice.error ?? "Could not send the notice" }, 409);
   });
 
-  /** The ship notice for one shipment of an order that came in over the Exchange. The shipment stands even if the notice can't be sent. */
-  async function noticeFor(doc: SalesOrderDoc, number: string, shippedDate: string | undefined, carrier: string | undefined, tracking: string | undefined, lines: { itemId: ObjectId; quantity: number }[], actor: { userId: ObjectId; userName: string }) {
-    if (!doc.messageId) return { order: (await store.salesOrders.findOne({ _id: doc._id }))!, state: null as "sent" | "failed" | null, error: undefined as string | undefined };
-    const orgId = doc.orgId;
-    let state: "sent" | "failed" = "failed";
-    let error: string | undefined;
-    try {
-      const got = await loadIncomingOrder(store, orgId, doc.messageId.toHexString());
-      const items = await store.items.find({ _id: { $in: lines.map((l) => l.itemId) } }, { projection: { sku: 1, unit: 1, decimals: 1 } }).toArray();
-      if (!got) error = "The customer's order message is gone";
-      else {
-        const res = await sendShipNotice(store, orgId, actor, got, {
-          shipmentNumber: number, shippedDate, carrier, tracking, key: `ship-${doc.messageId.toHexString()}-${number}`,
-          lines: lines.map((l) => { const i = items.find((x) => x._id.equals(l.itemId)); return { sku: i?.sku ?? "", quantity: storedToNumber(l.quantity, uomOf(i).decimals) }; }),
-        });
-        if (res.ok && res.message.state !== "failed") state = "sent";
-        else error = res.ok ? (res.message.attempts.filter((a) => !a.ok).pop()?.error ?? "The notice could not be delivered") : res.error;
-      }
-    } catch (e) {
-      error = e instanceof Error ? e.message : "The notice could not be sent";
-    }
-    const order = (await store.salesOrders.findOneAndUpdate({ _id: doc._id, "shipments.number": number }, { $set: { "shipments.$.notice": state } }, { returnDocument: "after" })) ?? doc;
-    return { order, state, error };
+  /** Tells the customer about one shipment (over whatever way we trade with them) and records whether it went. The shipment stands either way. */
+  async function tellCustomer(doc: SalesOrderDoc, number: string, actor: { userId: ObjectId; userName: string }) {
+    const fresh = (await store.salesOrders.findOne({ _id: doc._id })) ?? doc;
+    const s = fresh.shipments.find((x) => x.number === number);
+    if (!s) return { order: fresh, state: null as "sent" | "failed" | null, error: undefined as string | undefined };
+    const res = await sendShipmentNotice(store, doc.orgId, actor, fresh, { number, shippedDate: s.shippedDate ?? s.at.toISOString().slice(0, 10), carrier: s.carrier, trackingNumber: s.trackingNumber, lines: s.lines });
+    const order = (await store.salesOrders.findOneAndUpdate({ _id: doc._id, "shipments.number": number }, { $set: { "shipments.$.notice": res.state } }, { returnDocument: "after" })) ?? fresh;
+    return { order, state: res.state, error: res.error };
   }
 
   return r;

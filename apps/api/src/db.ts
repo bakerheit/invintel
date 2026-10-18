@@ -180,7 +180,7 @@ export interface SalesOrderDoc {
   /** Set while a confirmation is being checked against stock, so nothing is shipped, cancelled or closed in that moment. Expires on its own. */
   confirmingUntil?: Date;
   /** One entry per shipment, for history. Quantities that count come from the ledger. */
-  shipments: { number: string; at: Date; by: { id: ObjectId | null; name: string }; carrier: string; trackingNumber: string; movementIds: ObjectId[]; lines: { itemId: ObjectId; quantity: number }[]; notice: "sent" | "failed" | null }[];
+  shipments: { number: string; at: Date; shippedDate?: string; by: { id: ObjectId | null; name: string }; carrier: string; trackingNumber: string; movementIds: ObjectId[]; lines: { itemId: ObjectId; quantity: number }[]; notice: "sent" | "failed" | null }[];
   confirmedAt?: Date;
   createdBy: { id: ObjectId | null; name: string };
   createdAt: Date;

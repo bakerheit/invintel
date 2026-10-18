@@ -113,7 +113,11 @@ export interface ReorderSuggestion {
   name: string;
   /** How this item's whole-number quantities read. */
   uom: Uom;
+  /** On hand. */
   quantity: number;
+  /** Promised to customers, and free to promise (on hand - quality hold - reserved; negative: over-promised). Suggestions judge `available`. */
+  reserved: number;
+  available: number;
   reorderLevel: number;
   /** Already on open purchase orders and not yet received. */
   onOrder: number;

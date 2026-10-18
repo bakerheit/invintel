@@ -158,7 +158,7 @@ export default function OverviewPage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-3">
                       <span className="tabular-nums text-muted-foreground">
-                        {formatQty(a.quantity, a.uom)}
+                        {a.reserved > 0 || a.available !== a.quantity ? <>{formatQty(a.available, a.uom)} free of {formatQty(a.quantity, a.uom, { unit: false })}</> : formatQty(a.quantity, a.uom)}
                         {a.reorderLevel > 0 && <> / {formatQty(a.reorderLevel, a.uom, { unit: false })}</>}
                       </span>
                       <Badge variant={a.status === "out" ? "destructive" : "secondary"}>{a.status === "out" ? "Out" : "Low"}</Badge>
