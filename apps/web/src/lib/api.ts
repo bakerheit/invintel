@@ -4,10 +4,13 @@ import type {
   ConsumeInput,
   LoadInput,
   OutputInput,
+  ProductionLookup,
   ProductionPosted,
   VarianceSummaryRow,
   WorkCenter,
   WorkCenterInput,
+  WorkCenterUpdate,
+  ProductionSettings,
   WorkOrder,
   WorkOrderAction,
   WorkOrderInput,
@@ -212,6 +215,15 @@ export const api = {
     request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/consume`, post(input)),
   reportOutput: (orgId: string, id: string, input: Partial<OutputInput> & Pick<OutputInput, "good" | "toLocationId">) =>
     request<ProductionPosted>(`/orgs/${orgId}/production/work-orders/${id}/output`, post(input)),
+  updateWorkCenter: (orgId: string, id: string, input: WorkCenterUpdate) =>
+    request<WorkCenter>(`/orgs/${orgId}/production/work-centers/${id}`, patch(input)),
+  productionSettings: (orgId: string) => request<ProductionSettings>(`/orgs/${orgId}/production/settings`),
+  saveProductionSettings: (orgId: string, input: ProductionSettings) =>
+    request<ProductionSettings>(`/orgs/${orgId}/production/settings`, { method: "PUT", body: JSON.stringify(input) }),
+  approveWorkOrder: (orgId: string, id: string, note: string) =>
+    request<WorkOrder>(`/orgs/${orgId}/production/work-orders/${id}/approve`, post({ note })),
+  productionLookup: (orgId: string, code: string) =>
+    request<ProductionLookup>(`/orgs/${orgId}/production/lookup?code=${encodeURIComponent(code)}`),
   workOrderVariance: (orgId: string, id: string) =>
     request<WorkOrderVariance>(`/orgs/${orgId}/production/work-orders/${id}/variance`),
   varianceSummary: (orgId: string) => request<VarianceSummaryRow[]>(`/orgs/${orgId}/production/variance`),

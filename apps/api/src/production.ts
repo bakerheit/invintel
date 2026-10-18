@@ -1,6 +1,8 @@
 import { zValidator } from "@hono/zod-validator";
 import {
+  approveInputSchema,
   bomInputSchema,
+  productionSettingsSchema,
   consumeInputSchema,
   loadInputSchema,
   objectIdSchema,
@@ -12,6 +14,7 @@ import {
   workOrderStatusSchema,
   type Bom,
   type MovementType,
+  type ProductionLookup,
   type VarianceLine,
   type VarianceSummaryRow,
   type WorkCenter,
@@ -34,12 +37,14 @@ import { auditActor, recordAudit } from "./audit.js";
 import { nextNumber } from "./counters.js";
 import { actorOf } from "./items.js";
 import { indexLocations, loadLocations } from "./locations.js";
+import { consumeUnit, isUnitTracked, loadUnit, outputUnits, type UnitProd } from "./production-units.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { changeStock, logMovement, quantityAt, type Actor } from "./stock-service.js";
 
 const idParam = z.object({ id: objectIdSchema });
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const oid = (s: string) => new ObjectId(s);
+const ci = { locale: "en", strength: 2 } as const;
 
 type Fail = { ok: false; status: 404 | 409 | 422; error: string };
 const fail = (status: Fail["status"], error: string): Fail => ({ ok: false, status, error });
@@ -155,9 +160,19 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
   const centers = await store.workCenters.find({ _id: { $in: docs.map((d) => d.workCenterId) } }).toArray();
   const centerById = new Map(centers.map((c) => [c._id.toHexString(), c]));
   const names = await loadItemNames(store, [...new Set(docs.flatMap((d) => [d.outputItemId, ...d.requirements.map((r) => r.itemId)]).map(String))].map(oid));
+  const threshold = docs.length ? ((await store.orgs.findOne({ _id: docs[0]!.orgId }, { projection: { varianceThresholdPct: 1 } }))?.varianceThresholdPct ?? null) : null;
+  const unitItems = new Set(
+    (await store.items.find({ _id: { $in: [...names.keys()].map(oid) }, tracking: "unit" }, { projection: { _id: 1 } }).toArray()).map((i) => i._id.toHexString()),
+  );
   return Promise.all(
     docs.map(async (d) => {
       const center = centerById.get(d.workCenterId.toHexString());
+      let approval: "not_needed" | "needed" | "approved" = "not_needed";
+      if (d.approval) approval = "approved";
+      else if (d.status === "done" && threshold !== null) {
+        const worst = (await varianceOf(store, d)).worstVariancePct;
+        if (worst !== null && worst > threshold) approval = "needed";
+      }
       const a = center ? await actuals(store, d, center.locationId) : { good: 0 };
       return {
         id: d._id.toHexString(),
@@ -178,8 +193,12 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
           itemSku: names.get(r.itemId.toHexString())?.sku ?? "",
           itemName: names.get(r.itemId.toHexString())?.name ?? "Deleted item",
           expected: r.expected,
+          tracking: unitItems.has(r.itemId.toHexString()) ? ("unit" as const) : ("quantity" as const),
         })),
         produced: a.good,
+        approval,
+        approvedBy: d.approval?.userName ?? null,
+        approvedAt: d.approval?.at.toISOString() ?? null,
         createdAt: d.createdAt.toISOString(),
         updatedAt: d.updatedAt.toISOString(),
       };
@@ -301,6 +320,9 @@ export function createProductionRoutes(store: Store) {
       const bad = await productionLocation(orgId, locationId);
       if (bad) return c.json({ error: bad.error }, bad.status as 404 | 422);
     }
+    if (rest.active === false && (await store.workOrders.countDocuments({ orgId, workCenterId: oid(c.req.valid("param").id), status: { $in: ["released", "running"] } }))) {
+      return c.json({ error: "It has released or running work orders. Finish or cancel them first." }, 409);
+    }
     try {
       const doc = await store.workCenters.findOneAndUpdate(
         { _id: oid(c.req.valid("param").id), orgId },
@@ -378,6 +400,28 @@ export function createProductionRoutes(store: Store) {
       snapshot: { version: doc.version, outputQuantity: doc.outputQuantity, yieldPct: doc.yieldPct, inputs: saved.inputs.map((i) => ({ item: i.itemName, quantity: i.quantity, scrapPct: i.scrapPct })) },
     });
     return c.json(saved, 201);
+  });
+
+  // ----- scan lookup -----
+
+  /** Resolve a scanned code: "WO-0001" (or "wo1"), or a work center's code or name. Open orders only for a work center. */
+  r.get("/lookup", zValidator("query", z.object({ code: z.string().trim().max(100).default("") })), async (c) => {
+    const orgId = c.get("org")._id;
+    const { code } = c.req.valid("query");
+    const none: ProductionLookup = { kind: "none" };
+    if (!code) return c.json(none);
+    const wo = /^wo-?(\d+)$/i.exec(code);
+    if (wo) {
+      const doc = await store.workOrders.findOne({ orgId, number: `WO-${wo[1]!.padStart(4, "0")}` });
+      if (doc) return c.json<ProductionLookup>({ kind: "work_order", workOrder: (await toWorkOrder(store, [doc]))[0]! });
+    }
+    const center =
+      (await store.workCenters.findOne({ orgId, code }, { collation: ci })) ?? (await store.workCenters.findOne({ orgId, name: code }, { collation: ci }));
+    if (center) {
+      const open = await store.workOrders.find({ orgId, workCenterId: center._id, status: { $in: ["released", "running"] } }).sort({ _id: 1 }).toArray();
+      return c.json<ProductionLookup>({ kind: "work_center", workCenter: (await toCenters(orgId, [center]))[0]!, workOrders: await toWorkOrder(store, open) });
+    }
+    return c.json(none);
   });
 
   // ----- work orders -----
@@ -472,6 +516,60 @@ export function createProductionRoutes(store: Store) {
     return c.json((await toWorkOrder(store, [updated]))[0]);
   });
 
+  // ----- variance approval -----
+
+  r.get("/settings", async (c) => {
+    const org = await store.orgs.findOne({ _id: c.get("org")._id }, { projection: { varianceThresholdPct: 1 } });
+    return c.json({ varianceThresholdPct: org?.varianceThresholdPct ?? null });
+  });
+
+  r.put("/settings", requireRole("admin"), zValidator("json", productionSettingsSchema), async (c) => {
+    const orgId = c.get("org")._id;
+    const { varianceThresholdPct } = c.req.valid("json");
+    const before = (await store.orgs.findOne({ _id: orgId }, { projection: { varianceThresholdPct: 1 } }))?.varianceThresholdPct ?? null;
+    await store.orgs.updateOne({ _id: orgId }, { $set: { varianceThresholdPct } });
+    if (before !== varianceThresholdPct) {
+      await recordAudit(store, {
+        orgId,
+        actor: auditActor(c.get("user")),
+        action: "production.settings_changed",
+        entity: { type: "organization", id: orgId.toHexString(), label: c.get("org").name },
+        summary: varianceThresholdPct === null ? "Turned off variance approval" : `Variance approval over ${varianceThresholdPct}%`,
+        changes: [{ field: "varianceThresholdPct", from: before, to: varianceThresholdPct }],
+      });
+    }
+    return c.json({ varianceThresholdPct });
+  });
+
+  /** An admin signs off a done work order whose variance is over the threshold. */
+  r.post("/work-orders/:id/approve", requireRole("admin"), zValidator("param", idParam), zValidator("json", approveInputSchema), async (c) => {
+    const orgId = c.get("org")._id;
+    const wo = await loadOrder(orgId, c.req.valid("param").id);
+    if (!wo) return c.json({ error: "Work order not found" }, 404);
+    const [view] = await toWorkOrder(store, [wo]);
+    if (wo.status !== "done") return c.json({ error: `${wo.number} isn't done yet` }, 409);
+    if (view!.approval === "approved") return c.json({ error: `${wo.number} is already approved` }, 409);
+    if (view!.approval !== "needed") return c.json({ error: `${wo.number} doesn't need approval` }, 409);
+    const user = c.get("user");
+    const note = c.req.valid("json").note;
+    const res = await store.workOrders.findOneAndUpdate(
+      { _id: wo._id, approval: { $exists: false } },
+      { $set: { approval: { userId: oid(user.id), userName: user.name, at: new Date(), note }, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!res) return c.json({ error: `${wo.number} is already approved` }, 409);
+    const v = await varianceOf(store, res);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(user),
+      action: "work_order.approved",
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: `Approved variance on ${wo.number} (worst ${v.worstVariancePct}%)${note ? `: ${note}` : ""}`,
+      snapshot: { worstVariancePct: v.worstVariancePct, yieldPct: v.yieldPct, note },
+    });
+    return c.json((await toWorkOrder(store, [res]))[0]);
+  });
+
   // ----- floor actions -----
 
   /** Shared by Load, Report usage and Report output: the order must be open and its machine known. */
@@ -495,6 +593,21 @@ export function createProductionRoutes(store: Store) {
 
   const nameOf = async (id: ObjectId) => (await store.items.findOne({ _id: id }, { projection: { name: 1 } }))?.name ?? "item";
 
+  /** Unit-tracked path: the floor scanned a roll or pallet. Records the audit event and answers like the quantity path. */
+  const unitReply = async (c: { get: (k: "user") => { id: string; name: string }; json: (b: unknown, s?: 201 | 404 | 409 | 422) => Response }, orgId: ObjectId, wo: WorkOrderDoc, action: "production.loaded" | "production.consumed" | "production.output", r: UnitProd) => {
+    if (!r.ok) return c.json({ error: r.error }, r.status);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action,
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: r.summary,
+      snapshot: r.snapshot,
+      refs: { movementIds: r.movementIds.map((id) => id.toHexString()) },
+    });
+    return c.json(await afterPost(wo, r.movementIds), 201);
+  };
+
   const requiresItem = (wo: WorkOrderDoc, itemId: string) => wo.requirements.some((q) => q.itemId.toHexString() === itemId.toLowerCase());
 
   /** Load material onto the machine: stock moves from where it is to the work center's staging location. */
@@ -505,15 +618,20 @@ export function createProductionRoutes(store: Store) {
     const { wo, center } = opened;
     const input = c.req.valid("json");
     if (!requiresItem(wo, input.itemId)) return c.json({ error: "That material isn't on this work order's BOM" }, 422);
-    if (oid(input.fromLocationId).equals(center.locationId)) return c.json({ error: "That material is already at the machine" }, 422);
-    const from = await store.locations.findOne({ _id: oid(input.fromLocationId), orgId });
+    if (input.unitId || (await isUnitTracked(store, orgId, oid(input.itemId)))) {
+      return unitReply(c, orgId, wo, "production.loaded", await loadUnit(store, orgId, actorOf(c.get("user")), wo, center, oid(input.itemId), input));
+    }
+    const fromId = input.fromLocationId!;
+    const qty = input.quantity!;
+    if (oid(fromId).equals(center.locationId)) return c.json({ error: "That material is already at the machine" }, 422);
+    const from = await store.locations.findOne({ _id: oid(fromId), orgId });
     if (!from) return c.json({ error: "Location not found" }, 404);
     const itemId = oid(input.itemId);
     const itemName = await nameOf(itemId);
     const note = `Loaded to ${center.name} for ${wo.number}`;
     const res = await postLines(store, orgId, actorOf(c.get("user")), wo, [
-      { type: "load", itemId, locationId: from._id, delta: -input.quantity, reason: note },
-      { type: "load", itemId, locationId: center.locationId, delta: input.quantity, reason: note },
+      { type: "load", itemId, locationId: from._id, delta: -qty, reason: note },
+      { type: "load", itemId, locationId: center.locationId, delta: qty, reason: note },
     ]);
     if (!res.ok) return c.json({ error: res.error }, res.status);
     await recordAudit(store, {
@@ -521,8 +639,8 @@ export function createProductionRoutes(store: Store) {
       actor: auditActor(c.get("user")),
       action: "production.loaded",
       entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
-      summary: `Loaded ${input.quantity} ${itemName} to ${center.name} for ${wo.number}`,
-      snapshot: { item: itemName, quantity: input.quantity, from: from.name },
+      summary: `Loaded ${qty} ${itemName} to ${center.name} for ${wo.number}`,
+      snapshot: { item: itemName, quantity: qty, from: from.name },
       refs: { movementIds: res.movementIds.map((id) => id.toHexString()) },
     });
     return c.json(await afterPost(wo, res.movementIds), 201);
@@ -537,6 +655,9 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     if (!requiresItem(wo, input.itemId)) return c.json({ error: "That material isn't on this work order's BOM" }, 422);
     const itemId = oid(input.itemId);
+    if (input.unitId || (await isUnitTracked(store, orgId, itemId))) {
+      return unitReply(c, orgId, wo, "production.consumed", await consumeUnit(store, orgId, actorOf(c.get("user")), wo, center, itemId, input));
+    }
     const itemName = await nameOf(itemId);
     const lines: Line[] = [
       { type: "consume", itemId, locationId: center.locationId, delta: -input.used, reason: input.reason || `Used on ${wo.number}` },
@@ -575,6 +696,9 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     const dest = await store.locations.findOne({ _id: oid(input.toLocationId), orgId });
     if (!dest) return c.json({ error: "Location not found" }, 404);
+    if (await isUnitTracked(store, orgId, wo.outputItemId)) {
+      return unitReply(c, orgId, wo, "production.output", await outputUnits(store, orgId, actorOf(c.get("user")), wo, dest._id, input));
+    }
     const why = input.reason;
     const lines: Line[] = [
       { type: "produce", itemId: wo.outputItemId, locationId: dest._id, delta: input.good, reason: why || `Output of ${wo.number}` },

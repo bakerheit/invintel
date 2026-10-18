@@ -104,6 +104,8 @@ export interface WorkOrderRequirement {
   itemName: string;
   /** Needed for the planned quantity, including expected scrap and yield. */
   expected: number;
+  /** Unit-tracked materials are loaded and reported by scanning the unit's label. */
+  tracking: "quantity" | "unit";
 }
 
 export interface WorkOrder {
@@ -123,6 +125,10 @@ export interface WorkOrder {
   requirements: WorkOrderRequirement[];
   /** Good output reported so far. */
   produced: number;
+  /** "needed" = done, over the org's variance threshold and not yet signed off. */
+  approval: "not_needed" | "needed" | "approved";
+  approvedBy: string | null;
+  approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -130,11 +136,16 @@ export interface WorkOrder {
 // ---------- floor actions ----------
 
 /** Load material from stock onto the machine's staging location. */
-export const loadInputSchema = z.object({
-  itemId: objectIdSchema,
-  fromLocationId: objectIdSchema,
-  quantity: qty,
-});
+export const loadInputSchema = z
+  .object({
+    itemId: objectIdSchema,
+    /** Quantity-tracked material: where it comes from and how much. */
+    fromLocationId: objectIdSchema.optional(),
+    quantity: qty.optional(),
+    /** Unit-tracked material (a roll or pallet): the whole unit moves to the machine. */
+    unitId: objectIdSchema.optional(),
+  })
+  .refine((l) => l.unitId || (l.fromLocationId && l.quantity), { message: "Say where it comes from and how many, or scan the unit", path: ["quantity"] });
 export type LoadInput = z.infer<typeof loadInputSchema>;
 
 /**
@@ -144,6 +155,8 @@ export type LoadInput = z.infer<typeof loadInputSchema>;
 export const consumeInputSchema = z
   .object({
     itemId: objectIdSchema,
+    /** Unit-tracked material: which roll or pallet this is about. */
+    unitId: objectIdSchema.optional(),
     used: z.number().int().min(0),
     scrap: z.number().int().min(0).default(0),
     remnant: z.number().int().min(0).default(0),
@@ -160,6 +173,9 @@ export const outputInputSchema = z
     good: z.number().int().min(0),
     scrap: z.number().int().min(0).default(0),
     toLocationId: objectIdSchema,
+    /** Output items tracked by unit: how many go on each new pallet or roll, and the lot. */
+    unitSize: qty.optional(),
+    lot: z.string().trim().max(100).default(""),
     reason: z.string().trim().max(200).default(""),
   })
   .refine((o) => o.good + o.scrap > 0, { message: "Report good or scrapped quantity", path: ["good"] });
@@ -214,3 +230,20 @@ export interface VarianceSummaryRow {
   yieldPct: number | null;
   worstVariancePct: number | null;
 }
+
+// ---------- scan lookup ----------
+
+/** What a scanned production code means: a work order number (WO-0001) or a work center's code or name. */
+export type ProductionLookup =
+  | { kind: "work_order"; workOrder: WorkOrder }
+  | { kind: "work_center"; workCenter: WorkCenter; workOrders: WorkOrder[] }
+  | { kind: "none" };
+
+// ---------- variance approval ----------
+
+/** Org-level: a done work order whose worst variance is over this percentage needs an admin's sign-off. Null turns it off. */
+export const productionSettingsSchema = z.object({ varianceThresholdPct: z.number().min(0).max(1000).nullable() });
+export type ProductionSettings = z.infer<typeof productionSettingsSchema>;
+
+export const approveInputSchema = z.object({ note: z.string().trim().max(300).default("") });
+export type ApproveInput = z.input<typeof approveInputSchema>;

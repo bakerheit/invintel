@@ -4,6 +4,7 @@ import { Minus, Plus, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { ResultPanel } from "@/components/floor/result-panel";
+import { ScanInput } from "@/components/floor/scan-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -51,6 +52,8 @@ export default function ProductionFloorPage() {
   const [done, setDone] = useState<{ title: string; detail: string; movementId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [machineId, setMachineId] = useState<string | null>(null); // a scanned work center narrows the list
 
   const order = orders.data?.find((o) => o.id === orderId) ?? null;
   const variance = useQuery({
@@ -112,12 +115,50 @@ export default function ProductionFloorPage() {
     }
   };
 
+  const onScan = async (code: string) => {
+    setBusy(true);
+    setScanError(null);
+    try {
+      const r = await api.productionLookup(orgId, code);
+      if (r.kind === "none") {
+        feedback("error");
+        setScanError(`Nothing matches "${code}". Scan a work order or a machine.`);
+      } else if (r.kind === "work_order") {
+        if (r.workOrder.status !== "released" && r.workOrder.status !== "running") {
+          feedback("error");
+          setScanError(`${r.workOrder.number} is ${r.workOrder.status}, not open for work.`);
+        } else {
+          await orders.refetch();
+          setOrderId(r.workOrder.id);
+        }
+      } else if (r.workOrders.length === 1) {
+        await orders.refetch();
+        setOrderId(r.workOrders[0]!.id);
+      } else if (r.workOrders.length === 0) {
+        feedback("error");
+        setScanError(`Nothing is released for ${r.workCenter.name}.`);
+      } else {
+        setMachineId(r.workCenter.id);
+      }
+    } catch (e) {
+      feedback("error");
+      setScanError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // ----- step 1: which work order -----
   if (!order) {
+    const shown = (orders.data ?? []).filter((o) => !machineId || o.workCenterId === machineId);
     return (
       <>
         <h1 className="text-3xl font-semibold tracking-tight">Production</h1>
-        <p className="text-base text-muted-foreground">Which work order are you running?</p>
+        <ScanInput label="Scan the work order or the machine" placeholder="WO-0001 or machine code" onScan={onScan} disabled={busy} error={scanError} />
+        <p className="text-base text-muted-foreground">
+          {machineId ? "Open work orders on this machine:" : "Or pick the work order you're running:"}
+          {machineId && <button type="button" className="ml-2 underline" onClick={() => setMachineId(null)}>show all</button>}
+        </p>
         {orders.isLoading && <p className="text-muted-foreground">Loading…</p>}
         {orders.data?.length === 0 && (
           <p className="rounded-xl bg-warning-soft p-4 text-base font-medium text-warning">
@@ -125,7 +166,7 @@ export default function ProductionFloorPage() {
           </p>
         )}
         <div className="grid gap-3">
-          {orders.data?.map((o) => (
+          {shown.map((o) => (
             <button
               key={o.id}
               type="button"

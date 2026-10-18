@@ -18,6 +18,8 @@ export interface SessionDoc {
 
 export interface OrgDoc {
   _id: ObjectId;
+  /** Production: variance over this percentage on a done work order needs sign-off. Absent or null means off. */
+  varianceThresholdPct?: number | null;
   name: string;
   joinCode: string;
   createdBy: ObjectId;
@@ -108,8 +110,6 @@ export interface MovementDoc {
   reversalOf?: ObjectId;
   /** On an original: the reversal that undid it. */
   reversedBy?: ObjectId;
-  /** Production lines (load, consume, produce, scrap, remnant transfers) carry the work order they belong to. */
-  workOrderId?: ObjectId;
   /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
   purchaseOrderId?: ObjectId;
   createdAt: Date;
@@ -176,6 +176,7 @@ export interface WorkOrderDoc {
   note: string;
   /** Snapshot taken when the order was made, so a later BOM version can't change an open order. */
   requirements: { itemId: ObjectId; expected: number }[];
+  approval?: { userId: ObjectId; userName: string; at: Date; note: string };
   createdAt: Date;
   updatedAt: Date;
 }

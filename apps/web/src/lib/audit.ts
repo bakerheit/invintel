@@ -34,6 +34,8 @@ export const ACTION_META: Record<AuditAction, { label: string; className: string
   "work_order.released": { label: "Work order released", className: "bg-accent text-accent-foreground" },
   "work_order.completed": { label: "Work order done", className: "bg-success-soft text-success" },
   "work_order.cancelled": { label: "Work order cancelled", className: "bg-warning-soft text-warning" },
+  "work_order.approved": { label: "Variance approved", className: "bg-success-soft text-success" },
+  "production.settings_changed": { label: "Production settings", className: "bg-accent text-accent-foreground" },
   "production.loaded": { label: "Material loaded", className: "bg-accent text-accent-foreground" },
   "production.consumed": { label: "Usage reported", className: "bg-secondary text-secondary-foreground" },
   "production.output": { label: "Output reported", className: "bg-success-soft text-success" },
