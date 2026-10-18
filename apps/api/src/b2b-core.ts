@@ -42,6 +42,11 @@ export interface Bridge {
 
 const bridges = new Map<string, Bridge>();
 export const registerBridge = (b: Bridge) => { bridges.set(b.id, b); };
+
+/** Something that wants to act on a stored inbound document (invoice capture turns an invoice into a captured invoice). Failures are logged and never undo the stored message. */
+export type InboundHandler = (ctx: { store: Store; orgId: ObjectId; partner: TradingPartnerDoc; message: B2BMessageDoc }) => Promise<void>;
+const inboundHandlers = new Map<string, InboundHandler[]>();
+export const onInbound = (docType: B2BDocType, h: InboundHandler) => { inboundHandlers.set(docType, [...(inboundHandlers.get(docType) ?? []), h]); };
 export const getBridge = (id: string) => bridges.get(id);
 export const bridgeIds = () => [...bridges.keys()];
 
@@ -205,6 +210,13 @@ export async function storeInbound(store: Store, orgId: ObjectId, partner: Tradi
     return { ok: true, message: (await store.b2bMessages.findOne({ orgId, partnerId, direction: "in", idempotencyKey: doc.idempotencyKey }))!, duplicate: true };
   }
   await audit(store, orgId, { id: null, name: doc.fromName ?? partner.name }, "b2b.message_received", msg, partner, `${partner.name}: ${msg.docType} received${partner.mode === "test" ? " (test partner)" : ""}`);
+  for (const h of inboundHandlers.get(msg.docType) ?? []) {
+    try {
+      await h({ store, orgId, partner, message: msg });
+    } catch (e) {
+      console.error(`inbound handler for ${msg.docType} failed`, e);
+    }
+  }
   return { ok: true, message: msg, duplicate: false };
 }
 

@@ -9,6 +9,7 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { auditActor, diffFields, recordAudit, summarizeChanges } from "./audit.js";
 import { bridgeIds, getBridge, presentMessages, receiveMessage, recordAck, retryMessage, sendMessage } from "./b2b-core.js";
+import { createCaptureRoutes, createFileRoutes } from "./b2b-capture-routes.js";
 import { orderExchange, previewPurchaseOrder, sendPurchaseOrder } from "./b2b-orders.js";
 import { duplicateField, isDuplicateKey, type Store, type TradingPartnerDoc } from "./db.js";
 import { actorOf } from "./items.js";
@@ -102,6 +103,9 @@ export function createB2BRoutes(store: Store) {
     // The raw document of a sent order holds the supplier's private link, so only admins read bodies.
     return c.json<B2BMessageDetail>({ ...(await presentMessages(store, orgId, [doc]))[0]!, body: c.get("role") === "member" ? "" : doc.raw.body });
   });
+
+  r.route("/invoices", createCaptureRoutes(store));
+  r.route("/files", createFileRoutes(store));
 
   // ----- purchase orders -----
 

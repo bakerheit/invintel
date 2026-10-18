@@ -401,6 +401,43 @@ export interface PortalLinkDoc {
   revokedAt?: Date;
 }
 
+export interface CapturedInvoiceDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  status: "captured" | "converted" | "discarded";
+  partnerId: ObjectId;
+  messageId: ObjectId;
+  source: "email" | "upload" | "json" | "ubl";
+  from: string;
+  subject: string;
+  invoiceNumber: string;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  poNumber: string;
+  totalCents: number | null;
+  taxCents: number;
+  currency: string;
+  lines: { description: string; quantity: string; unitPriceCents: number; lineTotalCents: number }[];
+  confidence: Record<"invoiceNumber" | "invoiceDate" | "dueDate" | "poNumber" | "totalCents", "read" | "guess" | "entered" | "missing">;
+  fileIds: ObjectId[];
+  note: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** An attachment kept with a captured invoice. Served only as a download, never rendered. */
+export interface B2BFileDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  messageId: ObjectId;
+  filename: string;
+  contentType: string;
+  data: import("mongodb").Binary;
+  bytes: number;
+  hash: string;
+  createdAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
@@ -429,6 +466,8 @@ export interface Store {
   tradingPartners: Collection<TradingPartnerDoc>;
   b2bMessages: Collection<B2BMessageDoc>;
   portalLinks: Collection<PortalLinkDoc>;
+  capturedInvoices: Collection<CapturedInvoiceDoc>;
+  b2bFiles: Collection<B2BFileDoc>;
   drills: Collection<DrillDoc>;
   close: () => Promise<void>;
 }
@@ -471,6 +510,8 @@ export async function connect(
     tradingPartners: db.collection("trading_partners"),
     b2bMessages: db.collection("b2b_messages"),
     portalLinks: db.collection("b2b_portal_links"),
+    capturedInvoices: db.collection("captured_invoices"),
+    b2bFiles: db.collection("b2b_files"),
     drills: db.collection("recall_drills"),
     close: () => client.close(),
   };
@@ -529,6 +570,9 @@ export async function connect(
     store.b2bMessages.createIndex({ orgId: 1, "correlation.poId": 1 }, { sparse: true }),
     store.portalLinks.createIndex({ tokenHash: 1 }, { unique: true }),
     store.portalLinks.createIndex({ orgId: 1, poId: 1 }),
+    store.capturedInvoices.createIndex({ orgId: 1, status: 1, createdAt: -1 }),
+    store.capturedInvoices.createIndex({ orgId: 1, partnerId: 1, invoiceNumber: 1 }),
+    store.b2bFiles.createIndex({ orgId: 1, messageId: 1 }),
     store.drills.createIndex({ orgId: 1, at: -1 }),
     // Trace lookups: lines of one work order, of one unit, and receipts by lot.
     store.movements.createIndex({ unitId: 1, createdAt: 1 }, { sparse: true }),
