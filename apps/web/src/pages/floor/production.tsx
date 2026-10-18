@@ -1,4 +1,4 @@
-import type { WorkOrderVariance } from "@invintel/shared";
+import type { StockUnit, WorkOrderVariance } from "@invintel/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Minus, Plus, Undo2 } from "lucide-react";
 import { useState } from "react";
@@ -49,7 +49,7 @@ export default function ProductionFloorPage() {
   const orders = useQuery({ queryKey: orgKey(orgId, "production", "open"), queryFn: () => api.workOrders(orgId, "released,running") });
   const [orderId, setOrderId] = useState<string | null>(null);
   const [action, setAction] = useState<Action | null>(null);
-  const [done, setDone] = useState<{ title: string; detail: string; movementId: string } | null>(null);
+  const [done, setDone] = useState<{ title: string; detail: string; movementId: string; undoable: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -68,6 +68,11 @@ export default function ProductionFloorPage() {
   const [scrap, setScrap] = useState(0);
   const [remnant, setRemnant] = useState(0);
   const [toId, setToId] = useState("");
+  // Unit-tracked material (rolls, pallets): the floor scans the label instead of typing a quantity.
+  const [unit, setUnit] = useState<StockUnit | null>(null);
+  const [unitError, setUnitError] = useState<string | null>(null);
+  const [keepLoaded, setKeepLoaded] = useState(false);
+  const [unitSize, setUnitSize] = useState(0);
   const [picking, setPicking] = useState<"from" | "to" | null>(null);
   const [pickTitle, setPickTitle] = useState("Pick a place"); // stays put while the dialog animates closed
   const pathOf = (id: string) => locations.find((l) => l.id === id)?.path ?? "";
@@ -82,6 +87,10 @@ export default function ProductionFloorPage() {
     setToId("");
     setError(null);
     setDone(null);
+    setUnit(null);
+    setUnitError(null);
+    setKeepLoaded(false);
+    setUnitSize(0);
   };
 
   const run = async (title: string, detail: string, fn: () => Promise<{ movementIds: string[] }>) => {
@@ -90,7 +99,9 @@ export default function ProductionFloorPage() {
     try {
       const r = await fn();
       feedback("ok");
-      setDone({ title, detail, movementId: r.movementIds[0]! });
+      // Activity can't reverse roll or pallet movements yet, so don't offer Undo for them.
+      const unitDoc = (!!unit && (action === "load" || action === "usage")) || (action === "output" && order?.outputTracking === "unit");
+      setDone({ title, detail, movementId: r.movementIds[0]!, undoable: !unitDoc });
       void invalidateOrg(qc, orgId);
     } catch (e) {
       feedback("error");
@@ -189,6 +200,50 @@ export default function ProductionFloorPage() {
   const v: WorkOrderVariance | undefined = variance.data;
   const line = (id: string) => v?.lines.find((l) => l.itemId === id);
   const atMachine = line(itemId)?.atMachine ?? 0;
+  const tracked = !!itemId && order.requirements.find((r) => r.itemId === itemId)?.tracking === "unit";
+  const onUnitScan = async (code: string) => {
+    setBusy(true);
+    setUnitError(null);
+    try {
+      const r = await api.lookup(orgId, code);
+      if (r.kind !== "unit") {
+        feedback("error");
+        setUnitError(r.kind === "none" ? `Nothing matches "${code}".` : "That isn't a roll or pallet label. Scan the label on the material.");
+      } else if (r.unit.itemId !== itemId) {
+        feedback("error");
+        setUnitError(`${r.unit.code} is ${r.unit.itemName}, not the material you picked.`);
+      } else if (r.unit.status !== "available") {
+        feedback("error");
+        setUnitError(`${r.unit.code} is ${r.unit.status === "consumed" ? "used up" : r.unit.status}.`);
+      } else if (action === "load" && r.unit.locationId === order.workCenterLocationId) {
+        feedback("error");
+        setUnitError(`${r.unit.code} is already at the machine.`);
+      } else if (action === "usage" && r.unit.locationId !== order.workCenterLocationId) {
+        feedback("error");
+        setUnitError(`${r.unit.code} is at ${r.unit.locationPath}, not at the machine. Load it first.`);
+      } else {
+        feedback("ok");
+        setUnit(r.unit);
+        setQty(0);
+        setScrap(0);
+      }
+    } catch (e) {
+      feedback("error");
+      setUnitError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const unitCard = unit && (
+    <div className="rounded-xl border bg-card p-4">
+      <p className="text-xl font-semibold">{unit.code}</p>
+      <p className="text-base">{unit.itemName}{unit.lot ? ` · lot ${unit.lot}` : ""}</p>
+      <p className="text-sm text-muted-foreground">{unit.quantity.toLocaleString()} left · at {unit.locationPath}</p>
+      <Button type="button" variant="ghost" className="mt-2 h-11" onClick={() => setUnit(null)}>Scan a different one</Button>
+    </div>
+  );
+  const unitLeft = unit ? unit.quantity - qty - scrap : 0;
+
   const materialPicker = (
     <div className="space-y-2">
       <p className="text-base font-medium">Which material?</p>
@@ -198,7 +253,7 @@ export default function ProductionFloorPage() {
             key={r.itemId}
             type="button"
             aria-pressed={itemId === r.itemId}
-            onClick={() => setItemId(r.itemId)}
+            onClick={() => { setItemId(r.itemId); setUnit(null); setUnitError(null); setQty(0); setScrap(0); setRemnant(0); }}
             className={cn(
               "flex min-h-16 items-center justify-between gap-3 rounded-xl border px-4 text-left",
               itemId === r.itemId ? "border-primary bg-accent/60 ring-2 ring-primary" : "hover:bg-muted",
@@ -235,9 +290,11 @@ export default function ProductionFloorPage() {
       {done ? (
         <ResultPanel title={done.title} detail={done.detail}>
           <Button className="h-16 w-full text-xl" onClick={reset}>Next</Button>
-          <Button variant="outline" className="h-14 w-full text-base" onClick={() => void undo()} disabled={busy}>
-            <Undo2 /> Undo this
-          </Button>
+          {done.undoable && (
+            <Button variant="outline" className="h-14 w-full text-base" onClick={() => void undo()} disabled={busy}>
+              <Undo2 /> Undo this
+            </Button>
+          )}
           {errorBox}
         </ResultPanel>
       ) : !action ? (
@@ -256,6 +313,16 @@ export default function ProductionFloorPage() {
           {action === "load" && (
             <>
               {materialPicker}
+              {tracked ? (
+                <>
+                  {unit ? unitCard : <ScanInput label="Scan the roll or pallet label" onScan={onUnitScan} disabled={busy} error={unitError} />}
+                  <Button className="h-16 w-full text-xl" disabled={busy || !unit} onClick={() =>
+                    void run(`Loaded ${unit!.code}`, `${unit!.quantity.toLocaleString()} left → ${order.workCenterName}`, () =>
+                      api.loadMaterial(orgId, order.id, { itemId, unitId: unit!.id }))}>
+                    Load it
+                  </Button>
+                </>
+              ) : (<>
               {placeButton("from", fromId, "Taking it from")}
               <Count label="How many?" value={qty} onChange={setQty} />
               <Button className="h-16 w-full text-xl" disabled={busy || !itemId || !fromId || qty < 1} onClick={() =>
@@ -263,13 +330,39 @@ export default function ProductionFloorPage() {
                   api.loadMaterial(orgId, order.id, { itemId, fromLocationId: fromId, quantity: qty }))}>
                 Load it
               </Button>
+              </>)}
             </>
           )}
 
           {action === "usage" && (
             <>
               {materialPicker}
-              {itemId && (
+              {tracked && (
+                <>
+                  {unit ? unitCard : <ScanInput label="Scan the roll or pallet at the machine" onScan={onUnitScan} disabled={busy} error={unitError} />}
+                  {unit && (
+                    <>
+                      <Count label="Used" value={qty} onChange={setQty} max={unit.quantity - scrap} />
+                      <Count label="Scrap" value={scrap} onChange={setScrap} max={unit.quantity - qty} />
+                      <p className="text-lg font-medium">{unitLeft.toLocaleString()} left on {unit.code}</p>
+                      {unitLeft > 0 && (
+                        <>
+                          <Button type="button" variant={keepLoaded ? "default" : "outline"} className="h-14 w-full text-base" aria-pressed={keepLoaded} onClick={() => setKeepLoaded((k) => !k)}>
+                            Leave it loaded on the machine
+                          </Button>
+                          {!keepLoaded && placeButton("to", toId, "Take the rest back to")}
+                        </>
+                      )}
+                    </>
+                  )}
+                  <Button className="h-16 w-full text-xl" disabled={busy || !unit || qty + scrap < 1 || (unitLeft > 0 && !keepLoaded && !toId)} onClick={() =>
+                    void run("Usage reported", `${unit!.code}: used ${qty}, scrap ${scrap}, ${unitLeft} left${unitLeft > 0 && !keepLoaded ? ` → ${pathOf(toId)}` : ""}`, () =>
+                      api.reportUsage(orgId, order.id, { itemId, unitId: unit!.id, used: qty, scrap, remnant: unitLeft > 0 && !keepLoaded ? unitLeft : 0, ...(unitLeft > 0 && !keepLoaded ? { remnantLocationId: toId } : {}) }))}>
+                    Save usage
+                  </Button>
+                </>
+              )}
+              {!tracked && itemId && (
                 <>
                   <p className="text-sm text-muted-foreground">{atMachine.toLocaleString()} at the machine right now</p>
                   <Count label="Used" value={qty} onChange={setQty} />
@@ -278,22 +371,26 @@ export default function ProductionFloorPage() {
                   {remnant > 0 && placeButton("to", toId, "Leftover goes to")}
                 </>
               )}
-              <Button className="h-16 w-full text-xl" disabled={busy || !itemId || qty + scrap + remnant < 1 || (remnant > 0 && !toId)} onClick={() =>
+              {!tracked && <Button className="h-16 w-full text-xl" disabled={busy || !itemId || qty + scrap + remnant < 1 || (remnant > 0 && !toId)} onClick={() =>
                 void run("Usage reported", `Used ${qty}, scrap ${scrap}, leftover ${remnant}`, () =>
                   api.reportUsage(orgId, order.id, { itemId, used: qty, scrap, remnant, ...(remnant > 0 ? { remnantLocationId: toId } : {}) }))}>
                 Save usage
-              </Button>
+              </Button>}
             </>
           )}
 
           {action === "output" && (
             <>
               <Count label={`Good ${order.outputItemName}`} value={qty} onChange={setQty} />
-              <Count label="Scrapped" value={scrap} onChange={setScrap} />
+              {order.outputTracking === "unit" ? (
+                <Count label="How many on each pallet or roll?" value={unitSize} onChange={setUnitSize} />
+              ) : (
+                <Count label="Scrapped" value={scrap} onChange={setScrap} />
+              )}
               {placeButton("to", toId, "Good ones go to")}
-              <Button className="h-16 w-full text-xl" disabled={busy || qty + scrap < 1 || !toId} onClick={() =>
-                void run(`Output reported`, `${qty} good, ${scrap} scrap → ${pathOf(toId)}`, () =>
-                  api.reportOutput(orgId, order.id, { good: qty, scrap, toLocationId: toId }))}>
+              <Button className="h-16 w-full text-xl" disabled={busy || qty + scrap < 1 || !toId || (order.outputTracking === "unit" && unitSize < 1)} onClick={() =>
+                void run(`Output reported`, `${qty} good${order.outputTracking === "unit" ? ` on pallets of ${unitSize}` : `, ${scrap} scrap`} → ${pathOf(toId)}`, () =>
+                  api.reportOutput(orgId, order.id, { good: qty, scrap, toLocationId: toId, ...(order.outputTracking === "unit" ? { unitSize } : {}) }))}>
                 Save output
               </Button>
             </>
