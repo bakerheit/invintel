@@ -6,6 +6,7 @@ import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AddItemLink } from "@/components/floor/add-item-link";
 import { ItemSummary } from "@/components/floor/item-summary";
+import { InspectToggle } from "@/components/floor/inspect-toggle";
 import { UnitReceive } from "@/components/floor/unit-receive";
 import { LocationPicker } from "@/components/floor/location-picker";
 import { QtyStepper } from "@/components/floor/qty-stepper";
@@ -31,6 +32,8 @@ export default function ReceivePage() {
   const [item, setItem] = useState<Item | null>(null);
   const [qty, setQty] = useState(1);
   const [reference, setReference] = useState("");
+  const [supplierLot, setSupplierLot] = useState("");
+  const [inspect, setInspect] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState<string | null>(null);
@@ -48,6 +51,8 @@ export default function ReceivePage() {
     setItem(null);
     setQty(1);
     setReference("");
+    setSupplierLot("");
+    setInspect(false);
     setError(null);
     setDone(null);
   };
@@ -88,7 +93,7 @@ export default function ReceivePage() {
     setBusy(true);
     setError(null);
     try {
-      const doc = await api.receive(orgId, { itemId: item.id, locationId: to.id, quantity: qty, reference: reference.trim() });
+      const doc = await api.receive(orgId, { itemId: item.id, locationId: to.id, quantity: qty, reference: reference.trim(), supplierLot: supplierLot.trim(), inspect });
       feedback("ok");
       setDone({ doc, to, qty });
       setStep("done");
@@ -152,6 +157,11 @@ export default function ReceivePage() {
             <label htmlFor="floor-ref" className="text-base font-medium">PO or delivery note (optional)</label>
             <Input id="floor-ref" className="h-14 text-lg" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} />
           </div>
+          <div className="space-y-2">
+            <label htmlFor="floor-lot" className="text-base font-medium">Supplier lot (optional)</label>
+            <Input id="floor-lot" className="h-14 text-lg" value={supplierLot} onChange={(e) => setSupplierLot(e.target.value)} maxLength={64} />
+          </div>
+          <InspectToggle value={inspect} onChange={setInspect} />
           <Button className="h-16 w-full text-xl" onClick={() => { setError(null); setStep("destination"); }}>
             Next: where to?
           </Button>
@@ -184,12 +194,14 @@ export default function ReceivePage() {
       )}
 
       {step === "done" && done && item && (
-        <ResultPanel title={`Received ${done.qty.toLocaleString()} × ${item.name}`} detail={`Into ${done.to.path}`}>
+        <ResultPanel title={`Received ${done.qty.toLocaleString()} × ${item.name}`} detail={done.doc.ncrs?.length ? `On quality hold as ${done.doc.ncrs[0]!.number}. Decide it under Quality.` : `Into ${done.to.path}`}>
           {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-base font-medium text-destructive">{error}</p>}
           <Button className="h-16 w-full text-xl" onClick={reset}>Receive another</Button>
-          <Button variant="outline" className="h-14 w-full text-base" onClick={() => void undo()} disabled={busy}>
-            <Undo2 /> Undo this receipt
-          </Button>
+          {!done.doc.ncrs?.length && (
+            <Button variant="outline" className="h-14 w-full text-base" onClick={() => void undo()} disabled={busy}>
+              <Undo2 /> Undo this receipt
+            </Button>
+          )}
         </ResultPanel>
       )}
     </>

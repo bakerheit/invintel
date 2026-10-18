@@ -1,4 +1,10 @@
 import type {
+  DisposeInput,
+  HoldInput,
+  Ncr,
+  NcrSummary,
+  Reasons,
+  ReasonsUpdate,
   Alert,
   AlertSettings,
   AlertsResponse,
@@ -278,4 +284,12 @@ export const api = {
   workOrderVariance: (orgId: string, id: string) =>
     request<WorkOrderVariance>(`/orgs/${orgId}/production/work-orders/${id}/variance`),
   varianceSummary: (orgId: string) => request<VarianceSummaryRow[]>(`/orgs/${orgId}/production/variance`),
+
+  // Quality hold and NCR, and the shared reason lists.
+  ncrs: (orgId: string, status: "open" | "closed" | "all" = "all") => request<Ncr[]>(`/orgs/${orgId}/quality/ncrs?status=${status}`),
+  ncrSummary: (orgId: string) => request<NcrSummary>(`/orgs/${orgId}/quality/summary`),
+  putOnHold: (orgId: string, input: HoldInput) => request<Ncr>(`/orgs/${orgId}/quality/holds`, post(input)),
+  disposeNcr: (orgId: string, id: string, input: DisposeInput) => request<Ncr>(`/orgs/${orgId}/quality/ncrs/${id}/dispose`, post(input)),
+  reasons: (orgId: string) => request<Reasons>(`/orgs/${orgId}/reasons`),
+  saveReasons: (orgId: string, input: ReasonsUpdate) => request<Reasons>(`/orgs/${orgId}/reasons`, { method: "PUT", body: JSON.stringify(input) }),
 };

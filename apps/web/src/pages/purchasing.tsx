@@ -124,6 +124,8 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
   const { data: locations = [] } = useLocations(orgId);
   const receivingFirst = [...locations].sort((a, b) => Number(b.type === "receiving") - Number(a.type === "receiving"));
   const [locationId, setLocationId] = useState("");
+  const [inspect, setInspect] = useState(false);
+  const [lots, setLots] = useState<Record<string, string>>({});
   const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries(order.lines.map((l) => [l.itemId, String(Math.max(0, l.quantity - l.received))])));
   const where = locationId || receivingFirst[0]?.id || "";
   const done = async (msg: string) => { await invalidateOrg(qc, orgId); toast.success(msg); };
@@ -136,9 +138,9 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
     onError: (e: Error) => toast.error(e.message),
   });
   const receive = useMutation({
-    mutationFn: () => api.receiveOrder(orgId, order.id, { locationId: where, lines: order.lines.map((l) => ({ itemId: l.itemId, quantity: Number(qty[l.itemId] || 0) })).filter((l) => l.quantity > 0) }),
+    mutationFn: () => api.receiveOrder(orgId, order.id, { locationId: where, inspect, lines: order.lines.map((l) => ({ itemId: l.itemId, quantity: Number(qty[l.itemId] || 0), supplierLot: (lots[l.itemId] ?? "").trim() })).filter((l) => l.quantity > 0) }),
     onSuccess: async (r) => {
-      await done(r.overReceived.length ? `Received. ${r.overReceived.map((o) => `${o.itemName} is ${o.over} over`).join(", ")}` : `Received against ${r.order.number}`);
+      await done(r.ncrs?.length ? `Received against ${r.order.number} and put on quality hold (${r.ncrs.map((n) => n.number).join(", ")})` : r.overReceived.length ? `Received. ${r.overReceived.map((o) => `${o.itemName} is ${o.over} over`).join(", ")}` : `Received against ${r.order.number}`);
       onClose();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -161,7 +163,7 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
         </DialogHeader>
         <div className="overflow-hidden rounded-lg border">
           <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left text-xs text-muted-foreground"><tr><th className="p-2">Item</th><th className="p-2 text-right">Ordered</th><th className="p-2 text-right">Received</th><th className="p-2 text-right">Cost</th>{open && <th className="w-24 p-2 text-right">Receive now</th>}</tr></thead>
+            <thead className="bg-muted/50 text-left text-xs text-muted-foreground"><tr><th className="p-2">Item</th><th className="p-2 text-right">Ordered</th><th className="p-2 text-right">Received</th><th className="p-2 text-right">Cost</th>{open && <th className="w-24 p-2 text-right">Receive now</th>}{open && <th className="w-28 p-2">Supplier lot</th>}</tr></thead>
             <tbody className="divide-y">
               {order.lines.map((l) => (
                 <tr key={l.itemId}>
@@ -170,10 +172,11 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
                   <td className={cn("p-2 text-right tabular-nums", l.received > l.quantity && "text-warning", l.received >= l.quantity && "font-medium")}>{l.received.toLocaleString()}</td>
                   <td className="p-2 text-right tabular-nums">{formatCents(l.unitCostCents)}</td>
                   {open && <td className="p-2"><Input aria-label={`Receive ${l.itemName}`} className="h-8 text-right" type="number" min={0} value={qty[l.itemId] ?? ""} onChange={(e) => setQty((q) => ({ ...q, [l.itemId]: e.target.value }))} /></td>}
+                  {open && <td className="p-2"><Input aria-label={`Supplier lot for ${l.itemName}`} className="h-8" maxLength={64} value={lots[l.itemId] ?? ""} onChange={(e) => setLots((x) => ({ ...x, [l.itemId]: e.target.value }))} /></td>}
                 </tr>
               ))}
             </tbody>
-            <tfoot><tr className="border-t bg-muted/30 font-medium"><td className="p-2">Total</td><td className="p-2 text-right tabular-nums">{order.orderedUnits.toLocaleString()}</td><td className="p-2 text-right tabular-nums">{order.receivedUnits.toLocaleString()}</td><td className="p-2 text-right tabular-nums">{formatCents(order.totalCents)}</td>{open && <td />}</tr></tfoot>
+            <tfoot><tr className="border-t bg-muted/30 font-medium"><td className="p-2">Total</td><td className="p-2 text-right tabular-nums">{order.orderedUnits.toLocaleString()}</td><td className="p-2 text-right tabular-nums">{order.receivedUnits.toLocaleString()}</td><td className="p-2 text-right tabular-nums">{formatCents(order.totalCents)}</td>{open && <td />}{open && <td />}</tr></tfoot>
           </table>
         </div>
         {open && (
@@ -183,6 +186,10 @@ function OrderDetail({ order, onClose }: { order: PurchaseOrder; onClose: () => 
               <SelectTrigger aria-label="Receive into" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>{receivingFirst.map((l) => <SelectItem key={l.id} value={l.id}>{l.path}</SelectItem>)}</SelectContent>
             </Select>
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={inspect} onChange={(e) => setInspect(e.target.checked)} />
+              Inspect before release: put what I receive on quality hold
+            </label>
           </div>
         )}
         <DialogFooter className="sm:justify-between">

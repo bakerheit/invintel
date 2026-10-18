@@ -205,6 +205,14 @@ Things to know:
 - `pnpm test` run the API tests (Vitest, needs `docker compose up -d`; uses a throwaway database)
 - `pnpm build` typecheck the API and build the web app
 
+### Quality hold and NCR
+
+Anyone can **put stock on hold** so it can't be used: on the desk (**Quality**) or on the floor (**Floor mode > Quality hold**: scan a roll or pallet label, or an item, pick where and how many, tap a reason). Plain stock moves into an automatic **Quality hold** place; a labelled roll or pallet stays where it is and is marked on hold. Every hold is an **NCR** (NCR-0001, ...). Held stock can't be moved, adjusted, counted, loaded onto a machine or reversed from Activity: only an admin **decides** it, partly or all at once: **use as is / rework** (back to a place you pick, by default where it came from), **scrap** (with a reason from the scrap list) or **return to supplier**. Each decision is a ledger line tagged with the NCR and written to the audit log.
+
+**Inspect before release:** the floor Receive screen, the purchase-order receive dialog and the unit receive screen each have an "Inspect before release" switch; what arrives is received and goes straight on hold as "Awaiting inspection", tied to the order and the supplier lot. The same screens take an optional **supplier lot**, which is kept on the receipt's ledger line (and shown in Activity) for traceability. Admins edit the hold and scrap **reason lists** under Quality > Reason lists.
+
+API under `/api/orgs/:orgId`: `POST /quality/holds`, `GET /quality/ncrs?status=open|closed|all`, `GET /quality/ncrs/:id`, `POST /quality/ncrs/:id/dispose` (admin), `GET /quality/summary`, `GET|PUT /reasons` (PUT is admin).
+
 ## API
 
 Auth (no session needed except `/me`):

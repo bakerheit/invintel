@@ -1,6 +1,6 @@
 import type { OrgModules, OrgSummary } from "@invintel/shared";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, Bell, Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
+import { BarChart3, Bell, Check, ChevronsUpDown, ClipboardCheck, Factory, History, LayoutDashboard, LogOut, ShieldAlert, ShieldCheck, MapPin, Monitor, Moon, Package, Plus, Printer, ScanLine, Settings, ShoppingCart, Sun } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Wordmark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -51,6 +51,7 @@ export const navItems = (orgId: string): NavItem[] => [
   { to: `/o/${orgId}/counts`, end: false, label: "Counts", icon: ClipboardCheck, adminOnly: false },
   { to: `/o/${orgId}/purchasing`, end: false, label: "Purchasing", icon: ShoppingCart, adminOnly: false, module: "purchasing" },
   { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false, module: "production" },
+  { to: `/o/${orgId}/quality`, end: false, label: "Quality", icon: ShieldAlert, adminOnly: false },
   { to: `/o/${orgId}/alerts`, end: false, label: "Alerts", icon: Bell, adminOnly: false },
   { to: `/o/${orgId}/approvals`, end: false, label: "Approvals", icon: ShieldCheck, adminOnly: false },
   { to: `/o/${orgId}/reports`, end: false, label: "Reports", icon: BarChart3, adminOnly: false },
