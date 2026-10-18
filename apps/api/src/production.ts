@@ -31,6 +31,7 @@ import {
   type WorkOrderDoc,
 } from "./db.js";
 import { auditActor, recordAudit } from "./audit.js";
+import { nextNumber } from "./counters.js";
 import { actorOf } from "./items.js";
 import { indexLocations, loadLocations } from "./locations.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
@@ -411,12 +412,11 @@ export function createProductionRoutes(store: Store) {
     if (!center.active) return c.json({ error: "That work center is switched off" }, 422);
 
     const started = startedFor(bom, input.quantity);
-    const counter = await store.counters.findOneAndUpdate({ _id: `${orgId.toHexString()}:wo` }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" });
     const now = new Date();
     const doc: WorkOrderDoc = {
       _id: new ObjectId(),
       orgId,
-      number: `WO-${String(counter!.seq).padStart(4, "0")}`,
+      number: await nextNumber(store, orgId, "wo", "WO-"),
       status: "planned",
       bomId: bom._id,
       bomVersion: bom.version,

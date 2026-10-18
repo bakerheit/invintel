@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
+import { nextNumber } from "./counters.js";
 import { connect, type Store } from "./db.js";
+import { ObjectId } from "mongodb";
 
 // Needs a running MongoDB (docker compose up -d). Each run uses its own throwaway database.
 const uri = process.env.MONGODB_URI ?? "mongodb://localhost:27017";
@@ -283,5 +285,17 @@ describe("variance", () => {
     const v = await (await w.get(`/production/work-orders/${order.id}/variance`)).json();
     expect(v).toMatchObject({ good: 0, yieldPct: null, basisQuantity: 100, worstVariancePct: null });
     expect(v.lines[0]).toMatchObject({ expected: 220, consumed: 0, variance: -220 });
+  });
+});
+
+describe("number sequences", () => {
+  it("count up per organization and kind, never repeating, even when asked at the same time", async () => {
+    const a = new ObjectId();
+    const b = new ObjectId();
+    const nums = await Promise.all(Array.from({ length: 20 }, () => nextNumber(store, a, "po", "PO-")));
+    expect(new Set(nums).size).toBe(20);
+    expect([...nums].sort()[0]).toBe("PO-0001");
+    expect(await nextNumber(store, a, "wo", "WO-")).toBe("WO-0001"); // another kind
+    expect(await nextNumber(store, b, "po", "PO-")).toBe("PO-0001"); // another org
   });
 });

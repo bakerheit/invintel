@@ -90,6 +90,23 @@ await move(med, rackA, corr, 2, "Load for order 2301");
 await move(rsc, fg, ship, 25, "Order 8812");
 await call(`${base}/items/${inkB}/adjust`, { locationId: chem, delta: -1, reason: "Spilled during a pail change" });
 
+// Production: a work center at Corrugator 1, a BOM for RSC-1296 and a released work order the floor can start.
+const prod = `${base}/production`;
+const wc = await call<{ id: string }>(`${prod}/work-centers`, { name: "Corrugator 1", code: "WC-CORR1", locationId: corr });
+await call(`${prod}/boms`, {
+  outputItemId: rsc,
+  outputQuantity: 50, // the inputs below make 50 bundles
+  yieldPct: 97,
+  note: "Demo recipe, not a real spec",
+  inputs: [
+    { itemId: kraft, quantity: 2, scrapPct: 5 },
+    { itemId: med, quantity: 1, scrapPct: 3 },
+    { itemId: starch, quantity: 1, scrapPct: 0 },
+  ],
+});
+const wo = await call<{ id: string }>(`${prod}/work-orders`, { outputItemId: rsc, quantity: 100, workCenterId: wc.id, dueDate: null, note: "Demo order" });
+await call(`${prod}/work-orders/${wo.id}/action`, { action: "release" });
+
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();
 process.exit(0);
