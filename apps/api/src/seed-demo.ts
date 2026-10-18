@@ -136,6 +136,14 @@ await call(`${prod}/work-orders/${wo2.id}/load`, { itemId: lblRoll, unitId: roll
 await call(`${prod}/work-orders/${wo2.id}/consume`, { itemId: lblRoll, unitId: rollsIn.units[0]!.id, used: 780, scrap: 20 });
 await call(`${prod}/work-orders/${wo2.id}/output`, { good: 100, unitSize: 50, lot: "RUN-2291", toLocationId: fg });
 await call(`${prod}/work-orders/${wo2.id}/action`, { action: "complete" });
+// Scrap: a finished run of RSC-1296 with scrap on material and output, each with a reason (Reports > Scrap and yield trends).
+const wo3 = await call<{ id: string }>(`${prod}/work-orders`, { outputItemId: rsc, quantity: 50, workCenterId: wc.id });
+await call(`${prod}/work-orders/${wo3.id}/action`, { action: "release" });
+await call(`${prod}/work-orders/${wo3.id}/load`, { itemId: kraft, fromLocationId: rackA, quantity: 4 });
+await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, scrap: 1, scrapReason: "Trim" });
+await call(`${prod}/work-orders/${wo3.id}/consume`, { itemId: kraft, used: 1, scrap: 1, scrapReason: "Setup" });
+await call(`${prod}/work-orders/${wo3.id}/output`, { good: 44, scrap: 6, scrapReason: "Damaged", toLocationId: fg });
+await call(`${prod}/work-orders/${wo3.id}/action`, { action: "complete" });
 
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();

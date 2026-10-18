@@ -2,6 +2,7 @@ import type {
   RecallDrill,
   TraceQuery,
   TraceResult,
+  ScrapReport,
   DisposeInput,
   HoldInput,
   Ncr,
@@ -303,4 +304,9 @@ export const api = {
   traceCsvUrl: (orgId: string, q: TraceQuery) => `/api/orgs/${orgId}/traceability/trace.csv?${traceParams(q)}`,
   runDrill: (orgId: string, q: TraceQuery) => request<{ drill: RecallDrill; result: TraceResult }>(`/orgs/${orgId}/traceability/drills`, post(q)),
   drills: (orgId: string) => request<RecallDrill[]>(`/orgs/${orgId}/traceability/drills`),
+  // Scrap and yield trends (production reports).
+  scrapReport: (orgId: string, days: number, workCenterId?: string) =>
+    request<ScrapReport>(`/orgs/${orgId}/production/scrap?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`),
+  scrapCsvUrl: (orgId: string, days: number, workCenterId?: string) =>
+    `/api/orgs/${orgId}/production/scrap/lines.csv?days=${days}${workCenterId ? `&workCenterId=${workCenterId}` : ""}`,
 };
