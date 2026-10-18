@@ -2,6 +2,7 @@ import { formatQty, uomOf } from "@invintel/shared";
 import { Hono } from "hono";
 import { csvText } from "./csv.js";
 import type { Store } from "./db.js";
+import { createArchiveRoutes } from "./archive.js";
 import { createImportRoutes } from "./item-import.js";
 import { loadItems } from "./item-queries.js";
 import { indexLocations, loadLocations } from "./locations.js";
@@ -41,6 +42,8 @@ export function createDataRoutes(store: Store) {
 
   // Import v2 (column mapping, update mode, undo) lives in item-import.ts.
   r.route("/", createImportRoutes(store));
+  // Full archive: download everything, restore into an empty organization (archive.ts).
+  r.route("/", createArchiveRoutes(store));
 
   return r;
 }
