@@ -34,6 +34,7 @@ import { auditActor, recordAudit } from "./audit.js";
 import { nextNumber } from "./counters.js";
 import { actorOf } from "./items.js";
 import { indexLocations, loadLocations } from "./locations.js";
+import { consumeUnit, isUnitTracked, loadUnit, outputUnits, type UnitProd } from "./production-units.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { changeStock, logMovement, quantityAt, type Actor } from "./stock-service.js";
 
@@ -155,6 +156,9 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
   const centers = await store.workCenters.find({ _id: { $in: docs.map((d) => d.workCenterId) } }).toArray();
   const centerById = new Map(centers.map((c) => [c._id.toHexString(), c]));
   const names = await loadItemNames(store, [...new Set(docs.flatMap((d) => [d.outputItemId, ...d.requirements.map((r) => r.itemId)]).map(String))].map(oid));
+  const unitItems = new Set(
+    (await store.items.find({ _id: { $in: [...names.keys()].map(oid) }, tracking: "unit" }, { projection: { _id: 1 } }).toArray()).map((i) => i._id.toHexString()),
+  );
   return Promise.all(
     docs.map(async (d) => {
       const center = centerById.get(d.workCenterId.toHexString());
@@ -178,6 +182,7 @@ async function toWorkOrder(store: Store, docs: WorkOrderDoc[]): Promise<WorkOrde
           itemSku: names.get(r.itemId.toHexString())?.sku ?? "",
           itemName: names.get(r.itemId.toHexString())?.name ?? "Deleted item",
           expected: r.expected,
+          tracking: unitItems.has(r.itemId.toHexString()) ? ("unit" as const) : ("quantity" as const),
         })),
         produced: a.good,
         createdAt: d.createdAt.toISOString(),
@@ -495,6 +500,21 @@ export function createProductionRoutes(store: Store) {
 
   const nameOf = async (id: ObjectId) => (await store.items.findOne({ _id: id }, { projection: { name: 1 } }))?.name ?? "item";
 
+  /** Unit-tracked path: the floor scanned a roll or pallet. Records the audit event and answers like the quantity path. */
+  const unitReply = async (c: { get: (k: "user") => { id: string; name: string }; json: (b: unknown, s?: 201 | 404 | 409 | 422) => Response }, orgId: ObjectId, wo: WorkOrderDoc, action: "production.loaded" | "production.consumed" | "production.output", r: UnitProd) => {
+    if (!r.ok) return c.json({ error: r.error }, r.status);
+    await recordAudit(store, {
+      orgId,
+      actor: auditActor(c.get("user")),
+      action,
+      entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
+      summary: r.summary,
+      snapshot: r.snapshot,
+      refs: { movementIds: r.movementIds.map((id) => id.toHexString()) },
+    });
+    return c.json(await afterPost(wo, r.movementIds), 201);
+  };
+
   const requiresItem = (wo: WorkOrderDoc, itemId: string) => wo.requirements.some((q) => q.itemId.toHexString() === itemId.toLowerCase());
 
   /** Load material onto the machine: stock moves from where it is to the work center's staging location. */
@@ -505,15 +525,20 @@ export function createProductionRoutes(store: Store) {
     const { wo, center } = opened;
     const input = c.req.valid("json");
     if (!requiresItem(wo, input.itemId)) return c.json({ error: "That material isn't on this work order's BOM" }, 422);
-    if (oid(input.fromLocationId).equals(center.locationId)) return c.json({ error: "That material is already at the machine" }, 422);
-    const from = await store.locations.findOne({ _id: oid(input.fromLocationId), orgId });
+    if (input.unitId || (await isUnitTracked(store, orgId, oid(input.itemId)))) {
+      return unitReply(c, orgId, wo, "production.loaded", await loadUnit(store, orgId, actorOf(c.get("user")), wo, center, oid(input.itemId), input));
+    }
+    const fromId = input.fromLocationId!;
+    const qty = input.quantity!;
+    if (oid(fromId).equals(center.locationId)) return c.json({ error: "That material is already at the machine" }, 422);
+    const from = await store.locations.findOne({ _id: oid(fromId), orgId });
     if (!from) return c.json({ error: "Location not found" }, 404);
     const itemId = oid(input.itemId);
     const itemName = await nameOf(itemId);
     const note = `Loaded to ${center.name} for ${wo.number}`;
     const res = await postLines(store, orgId, actorOf(c.get("user")), wo, [
-      { type: "load", itemId, locationId: from._id, delta: -input.quantity, reason: note },
-      { type: "load", itemId, locationId: center.locationId, delta: input.quantity, reason: note },
+      { type: "load", itemId, locationId: from._id, delta: -qty, reason: note },
+      { type: "load", itemId, locationId: center.locationId, delta: qty, reason: note },
     ]);
     if (!res.ok) return c.json({ error: res.error }, res.status);
     await recordAudit(store, {
@@ -521,8 +546,8 @@ export function createProductionRoutes(store: Store) {
       actor: auditActor(c.get("user")),
       action: "production.loaded",
       entity: { type: "work_order", id: wo._id.toHexString(), label: wo.number },
-      summary: `Loaded ${input.quantity} ${itemName} to ${center.name} for ${wo.number}`,
-      snapshot: { item: itemName, quantity: input.quantity, from: from.name },
+      summary: `Loaded ${qty} ${itemName} to ${center.name} for ${wo.number}`,
+      snapshot: { item: itemName, quantity: qty, from: from.name },
       refs: { movementIds: res.movementIds.map((id) => id.toHexString()) },
     });
     return c.json(await afterPost(wo, res.movementIds), 201);
@@ -537,6 +562,9 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     if (!requiresItem(wo, input.itemId)) return c.json({ error: "That material isn't on this work order's BOM" }, 422);
     const itemId = oid(input.itemId);
+    if (input.unitId || (await isUnitTracked(store, orgId, itemId))) {
+      return unitReply(c, orgId, wo, "production.consumed", await consumeUnit(store, orgId, actorOf(c.get("user")), wo, center, itemId, input));
+    }
     const itemName = await nameOf(itemId);
     const lines: Line[] = [
       { type: "consume", itemId, locationId: center.locationId, delta: -input.used, reason: input.reason || `Used on ${wo.number}` },
@@ -575,6 +603,9 @@ export function createProductionRoutes(store: Store) {
     const input = c.req.valid("json");
     const dest = await store.locations.findOne({ _id: oid(input.toLocationId), orgId });
     if (!dest) return c.json({ error: "Location not found" }, 404);
+    if (await isUnitTracked(store, orgId, wo.outputItemId)) {
+      return unitReply(c, orgId, wo, "production.output", await outputUnits(store, orgId, actorOf(c.get("user")), wo, dest._id, input));
+    }
     const why = input.reason;
     const lines: Line[] = [
       { type: "produce", itemId: wo.outputItemId, locationId: dest._id, delta: input.good, reason: why || `Output of ${wo.number}` },
