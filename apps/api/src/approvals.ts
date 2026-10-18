@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { approvalDecisionSchema, approvalRulesInputSchema, objectIdSchema } from "@invintel/shared";
+import { APPROVAL_KIND_LABELS, approvalDecisionSchema, approvalRulesInputSchema, objectIdSchema } from "@invintel/shared";
 import { Hono } from "hono";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { isSoleApprover, rulesOf, toApproval } from "./approvals-core.js";
 import type { ApprovalDoc, Store } from "./db.js";
 import { actorOf } from "./items.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
+import { approveInvoiceDirect, applyPaymentDetails } from "./invoices.js";
 import { loadIncomingOrder, sendOrderResponse } from "./exchange.js";
 import { placeOrderDirect } from "./purchasing.js";
 import { confirmOrderDirect } from "./sales-core.js";
@@ -30,7 +31,7 @@ export function createApprovalRoutes(store: Store) {
     const org = c.get("org");
     const rules = c.req.valid("json").rules;
     await store.orgs.updateOne({ _id: org._id }, { $set: { approvalRules: rules } });
-    const text = rules.length ? rules.map((x) => `${x.kind === "adjustment" ? "adjustments" : x.kind === "sales_order" ? "sales orders" : "purchase orders"} from $${(x.thresholdCents / 100).toFixed(2)} (${x.appliesTo === "members" ? "members" : "everyone"})`).join(", ") : "none";
+    const text = rules.length ? rules.map((x) => `${APPROVAL_KIND_LABELS[x.kind]} from $${(x.thresholdCents / 100).toFixed(2)} (${x.appliesTo === "members" ? "members" : "everyone"})`).join(", ") : "none";
     await recordAudit(store, {
       orgId: org._id, actor: auditActor(c.get("user")), action: "approval.rules_changed", entity: { type: "organization", id: org._id.toHexString(), label: org.name },
       summary: `Changed approval rules: ${text}`, changes: [{ field: "approvalRules", from: rulesOf(org), to: rules }],
@@ -87,6 +88,12 @@ export function createApprovalRoutes(store: Store) {
     if (doc.kind === "adjustment") {
       const p = doc.payload;
       const res = await postAdjustment(store, org._id, asker, { itemId: p.itemId!, locationId: p.locationId!, delta: p.delta!, reason: `${p.reason ?? ""} (approved by ${me.name}, ${doc.number})`.trim(), type: "adjust" });
+      if (!res.ok) failure = res.error;
+    } else if (doc.kind === "invoice") {
+      const res = await approveInvoiceDirect(store, org, doc.payload.invoiceId!, me, doc.payload.overrideReason ?? "", `(approved ${doc.number}, asked by ${doc.requestedBy.name})`);
+      if (!res.ok) failure = res.error;
+    } else if (doc.kind === "supplier_payment_details") {
+      const res = await applyPaymentDetails(store, org._id, doc.payload.supplierId!, doc.payload.paymentDetails!, me, `(approved ${doc.number}, asked by ${doc.requestedBy.name})`);
       if (!res.ok) failure = res.error;
     } else if (doc.kind === "sales_order") {
       const p = doc.payload;

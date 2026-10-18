@@ -1,5 +1,6 @@
 import {
   ARCHIVE_COLLECTIONS,
+  invoiceSettingsSchema,
   ARCHIVE_FORMAT,
   ARCHIVE_VERSION,
   type ArchiveCollection,
@@ -24,6 +25,9 @@ const SOURCES: Record<ArchiveCollection, (s: Store) => Collection<Document>> = {
   movements: (s) => s.movements as unknown as Collection<Document>,
   suppliers: (s) => s.suppliers as unknown as Collection<Document>,
   purchaseOrders: (s) => s.purchaseOrders as unknown as Collection<Document>,
+  shipments: (s) => s.shipments as unknown as Collection<Document>,
+  invoices: (s) => s.invoices as unknown as Collection<Document>,
+  payments: (s) => s.payments as unknown as Collection<Document>,
   salesOrders: (s) => s.salesOrders as unknown as Collection<Document>,
   workCenters: (s) => s.workCenters as unknown as Collection<Document>,
   boms: (s) => s.boms as unknown as Collection<Document>,
@@ -48,6 +52,7 @@ const SETTINGS: Record<string, z.ZodType> = {
   downtimeReasons: z.array(z.string().max(100)).max(100),
   scheduledHoursPerDay: z.number().min(0).max(24),
   alertSettings: z.object({ daysOfSupply: z.number().min(0).max(10000), machineDownMinutes: z.number().min(0).max(100000) }).strict(),
+  invoiceSettings: invoiceSettingsSchema,
   approvalRules: z
     .array(z.object({ kind: z.enum(["adjustment", "purchase_order", "sales_order"]), thresholdCents: z.number().int().min(0).max(1_000_000_000), appliesTo: z.enum(["members", "everyone"]) }).strict())
     .max(10),
@@ -61,6 +66,9 @@ const COUNTERS: { kind: string; collection: ArchiveCollection; field: string }[]
   { kind: "count", collection: "counts", field: "number" },
   { kind: "ncr", collection: "ncrs", field: "number" },
   { kind: "import", collection: "importBatches", field: "number" },
+  { kind: "invoice", collection: "invoices", field: "number" },
+  { kind: "payment", collection: "payments", field: "number" },
+  { kind: "shipment", collection: "shipments", field: "number" },
   { kind: "unit", collection: "units", field: "code" },
 ];
 
@@ -73,6 +81,9 @@ const REQUIRED: Partial<Record<ArchiveCollection, Record<string, "string" | "num
   movements: { itemId: "id", locationId: "id", delta: "number", createdAt: "date" },
   suppliers: { name: "string", createdAt: "date" },
   purchaseOrders: { number: "string", supplierId: "id", lines: "array", createdAt: "date", updatedAt: "date" },
+  shipments: { number: "string", supplierId: "id", lines: "array", createdAt: "date" },
+  invoices: { number: "string", supplierId: "id", lines: "array", createdAt: "date", updatedAt: "date" },
+  payments: { number: "string", supplierId: "id", allocations: "array", createdAt: "date" },
   salesOrders: { number: "string", state: "string", lines: "array", createdAt: "date", updatedAt: "date" },
   workCenters: { name: "string", locationId: "id", createdAt: "date" },
   boms: { outputItemId: "id", inputs: "array", createdAt: "date" },
@@ -215,6 +226,11 @@ function prepare(raw: unknown, orgId: ObjectId): Prepared {
       seen.add(oid.toLowerCase());
       const doc = fromPlain(raw, mapId) as Document;
       delete doc.orgId; // never taken from the file
+      if (name === "invoices") {
+        // A match snapshot names items by plain text ids and a request for approval isn't archived, so neither can be carried over.
+        delete doc.match;
+        delete doc.approvalId;
+      }
       for (const [field, t] of Object.entries(REQUIRED[name] ?? {})) {
         if (!typeOk(doc[field], t)) throw new ArchiveError(`${ARCHIVE_COLLECTIONS[name]}: record ${i + 1} is missing "${field}" or has the wrong kind of value there.`);
       }

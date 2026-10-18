@@ -35,7 +35,9 @@ export interface OrgDoc {
   downtimeReasons?: string[];
   scheduledHoursPerDay?: number;
   alertSettings?: { daysOfSupply: number; machineDownMinutes: number };
-  approvalRules?: { kind: "adjustment" | "purchase_order" | "sales_order"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
+  /** Invoice matching rules and the currency the books are kept in. Defaults apply when absent. */
+  invoiceSettings?: { currency: string; priceTolerancePct: number; qtyTolerancePct: number; totalToleranceCents: number };
+  approvalRules?: { kind: "adjustment" | "purchase_order" | "sales_order" | "invoice" | "supplier_payment_details"; thresholdCents: number; appliesTo: "members" | "everyone" }[];
   createdAt: Date;
 }
 
@@ -154,6 +156,8 @@ export interface MovementDoc {
   reversedBy?: ObjectId;
   /** Receipts made against a purchase order carry it, so arrivals can be read back from the ledger. */
   purchaseOrderId?: ObjectId;
+  /** Receipts made against a shipment (an advance ship notice) carry it too. */
+  shipmentId?: ObjectId;
   /** Shipments made against a sales order carry it, so what has gone out can be read back from the ledger. */
   salesOrderId?: ObjectId;
   createdAt: Date;
@@ -263,6 +267,8 @@ export interface SupplierDoc {
   email: string;
   phone: string;
   notes: string;
+  /** Where this supplier is paid: the last four digits and a description, never a full account number. */
+  paymentDetails?: { method: "bank_transfer" | "check" | "card" | "cash" | "other"; accountName: string; bankName: string; accountLast4: string; instructions: string };
   createdAt: Date;
 }
 
@@ -299,7 +305,7 @@ export interface ApprovalDoc {
   _id: ObjectId;
   orgId: ObjectId;
   number: string;
-  kind: "adjustment" | "purchase_order" | "sales_order";
+  kind: "adjustment" | "purchase_order" | "sales_order" | "invoice" | "supplier_payment_details";
   status: "pending" | "approved" | "rejected" | "cancelled" | "failed";
   summary: string;
   valueCents: number;
@@ -310,8 +316,9 @@ export interface ApprovalDoc {
     respond?: { messageId: ObjectId; status: "accepted" | "changed"; promisedDate: string | null; note: string };
     /** Carry the confirmation out even if stock is short (a back-order), because the approver was told. */
     allowShortage?: boolean;
+    invoiceId?: ObjectId; supplierId?: ObjectId; paymentDetails?: NonNullable<SupplierDoc["paymentDetails"]>; overrideReason?: string;
   };
-  subject: { type: "item" | "purchase_order" | "sales_order"; id: string; label: string };
+  subject: { type: "item" | "purchase_order" | "sales_order" | "invoice" | "supplier"; id: string; label: string };
   requestedBy: { id: ObjectId; name: string };
   requestedAt: Date;
   decidedBy?: { id: ObjectId; name: string };
@@ -332,6 +339,148 @@ export interface DowntimeDoc {
   open?: true;
   startedBy: { id: ObjectId; name: string };
   endedBy?: { id: ObjectId; name: string };
+}
+
+/** A key for other software. Only a hash of it is kept: the key itself is shown once, when it is made. */
+export interface ApiKeyDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  name: string;
+  scope: "read" | "write";
+  /** The first characters of the secret part, used to find the key and to tell keys apart on screen. */
+  prefix: string;
+  /** SHA-256 of the whole key. The key is 256 random bits, so a fast hash is enough. */
+  hash: string;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  lastUsedAt?: Date;
+  expiresAt?: Date;
+  revokedAt?: Date;
+}
+
+/** Where to send events. The secret signs each delivery so the receiver can tell it is really from here. */
+export interface WebhookDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  url: string;
+  /** Event names, or ["*"] for every event a webhook can have. */
+  events: string[];
+  description: string;
+  secret: string;
+  enabled: boolean;
+  /** Deliveries that gave up in a row. Reset by a success. Too many switches the webhook off. */
+  failures: number;
+  disabledReason?: string;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface WebhookDeliveryDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  webhookId: ObjectId;
+  /** The audit event this tells about (or a fresh id for a test). The same across retries and across webhooks. */
+  eventId: string;
+  type: string;
+  /** The exact bytes that are sent and signed. */
+  body: string;
+  status: "pending" | "delivered" | "retrying" | "failed";
+  attempts: number;
+  nextAttemptAt: Date | null;
+  /** Held by a worker until then, so two workers don't send the same delivery. */
+  leaseUntil?: Date;
+  responseStatus?: number;
+  error?: string;
+  createdAt: Date;
+  deliveredAt?: Date;
+}
+
+export interface InvoiceLineDoc {
+  itemId: ObjectId | null;
+  description: string;
+  quantity: number;
+  unitPriceCents: number;
+  taxCents: number;
+}
+
+/** A bill from a supplier. Totals are worked out from the lines, never taken from the client. */
+export interface InvoiceDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** INVC-0001, ours. */
+  number: string;
+  status: "draft" | "review" | "approved" | "paid" | "void";
+  supplierId: ObjectId;
+  purchaseOrderId: ObjectId | null;
+  /** The supplier's own number. Unique per supplier among invoices that aren't void. */
+  invoiceNumber: string;
+  /** invoiceNumber, trimmed and upper-cased, for the duplicate check. */
+  invoiceKey: string;
+  issueDate: string;
+  dueDate: string | null;
+  currency: string;
+  lines: InvoiceLineDoc[];
+  subtotalCents: number;
+  taxCents: number;
+  freightCents: number;
+  totalCents: number;
+  statedTotalCents: number | null;
+  note: string;
+  /** Paid so far, kept in step by payments (atomically), never recomputed from a guess. */
+  paidCents: number;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+  approvedBy?: { id: ObjectId; name: string };
+  approvedAt?: Date;
+  overrideReason?: string;
+  voidReason?: string;
+  /** A waiting approval request for it (INV-7), if the organization's rules ask for one. */
+  approvalId?: ObjectId;
+  /** What the last match found. Kept so lists don't re-run it for every row, and so an approved invoice remembers what it was approved against. */
+  match?: import("@invintel/shared").MatchResult;
+}
+
+export interface ShipmentDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** SHP-0001, ours. */
+  number: string;
+  status: "expected" | "cancelled";
+  supplierId: ObjectId;
+  purchaseOrderId: ObjectId | null;
+  reference: string;
+  /** reference, trimmed and upper-cased, unique per supplier. */
+  referenceKey: string;
+  shipDate: string | null;
+  expectedDate: string | null;
+  carrier: string;
+  tracking: string;
+  lines: { itemId: ObjectId; quantity: number; supplierLot: string }[];
+  note: string;
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+}
+
+export interface PaymentDoc {
+  _id: ObjectId;
+  orgId: ObjectId;
+  /** PAY-0001, ours. */
+  number: string;
+  supplierId: ObjectId;
+  method: "bank_transfer" | "check" | "card" | "cash" | "other";
+  paidOn: string;
+  reference: string;
+  note: string;
+  currency: string;
+  amountCents: number;
+  allocations: { invoiceId: ObjectId; amountCents: number }[];
+  createdBy: { id: ObjectId; name: string };
+  createdAt: Date;
+  voidedAt?: Date;
+  voidedBy?: { id: ObjectId; name: string };
+  voidReason?: string;
 }
 
 export interface AlertStateDoc {
@@ -528,6 +677,12 @@ export interface Store {
   downtime: Collection<DowntimeDoc>;
   alertStates: Collection<AlertStateDoc>;
   importBatches: Collection<ImportBatchDoc>;
+  apiKeys: Collection<ApiKeyDoc>;
+  invoices: Collection<InvoiceDoc>;
+  shipments: Collection<ShipmentDoc>;
+  payments: Collection<PaymentDoc>;
+  webhooks: Collection<WebhookDoc>;
+  webhookDeliveries: Collection<WebhookDeliveryDoc>;
   counters: Collection<{ _id: string; seq: number }>;
   ncrs: Collection<NcrDoc>;
   tradingPartners: Collection<TradingPartnerDoc>;
@@ -575,6 +730,12 @@ export async function connect(
     downtime: db.collection("downtime"),
     alertStates: db.collection("alert_states"),
     importBatches: db.collection("import_batches"),
+    apiKeys: db.collection("api_keys"),
+    invoices: db.collection("invoices"),
+    shipments: db.collection("shipments"),
+    payments: db.collection("payments"),
+    webhooks: db.collection("webhooks"),
+    webhookDeliveries: db.collection("webhook_deliveries"),
     counters: db.collection("counters"),
     ncrs: db.collection("ncrs"),
     tradingPartners: db.collection("trading_partners"),
@@ -664,6 +825,24 @@ export async function connect(
     store.counts.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.importBatches.createIndex({ orgId: 1, at: -1 }),
+    store.invoices.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.invoices.createIndex({ orgId: 1, supplierId: 1, invoiceKey: 1 }),
+    store.invoices.createIndex({ orgId: 1, purchaseOrderId: 1 }, { sparse: true }),
+    store.invoices.createIndex({ orgId: 1, status: 1, dueDate: 1 }),
+    store.shipments.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.shipments.createIndex({ orgId: 1, supplierId: 1, referenceKey: 1 }, { unique: true }),
+    store.shipments.createIndex({ orgId: 1, purchaseOrderId: 1 }, { sparse: true }),
+    store.payments.createIndex({ orgId: 1, number: 1 }, { unique: true }),
+    store.payments.createIndex({ orgId: 1, supplierId: 1, paidOn: -1 }),
+    store.payments.createIndex({ "allocations.invoiceId": 1 }),
+    store.movements.createIndex({ shipmentId: 1 }, { sparse: true }),
+    store.apiKeys.createIndex({ prefix: 1 }),
+    store.apiKeys.createIndex({ orgId: 1, createdAt: -1 }),
+    store.webhooks.createIndex({ orgId: 1, enabled: 1 }),
+    store.webhookDeliveries.createIndex({ webhookId: 1, createdAt: -1 }),
+    store.webhookDeliveries.createIndex({ status: 1, nextAttemptAt: 1 }),
+    // Old finished deliveries clear themselves after 30 days.
+    store.webhookDeliveries.createIndex({ createdAt: 1 }, { expireAfterSeconds: 30 * 86400 }),
     store.approvals.createIndex({ orgId: 1, number: 1 }, { unique: true }),
     store.alertStates.createIndex({ orgId: 1, key: 1 }, { unique: true }),
     store.downtime.createIndex({ orgId: 1, workCenterId: 1, startedAt: -1 }),

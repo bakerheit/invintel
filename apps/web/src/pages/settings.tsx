@@ -14,6 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArchiveCard } from "@/components/archive-card";
+import { ApiKeysCard, WebhooksCard } from "@/components/integrations";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useAuth } from "@/stores/auth";
@@ -96,6 +97,8 @@ function ApprovalRulesForm({ orgId }: { orgId: string }) {
   const kinds = [
     ["adjustment", "Stock adjustments", "A change to stock worth at least this much waits for another admin."],
     ["purchase_order", "Purchase orders", "Placing an order worth at least this much waits for another admin."],
+    ["invoice", "Supplier invoices", "Approving an invoice worth at least this much waits for another admin."],
+    ["supplier_payment_details", "Changes to how a supplier is paid", "Any change to a supplier's payment details waits for another admin. This is the classic invoice-fraud route."],
     ["sales_order", "Sales orders", "Confirming an order worth at least this much (and accepting a customer's order from the Exchange) waits for another admin before stock is reserved."],
   ] as const;
   const state = draft ?? Object.fromEntries(kinds.map(([k]) => {
@@ -103,7 +106,7 @@ function ApprovalRulesForm({ orgId }: { orgId: string }) {
     return [k, { on: !!r, dollars: r ? String(r.thresholdCents / 100) : "100", appliesTo: r?.appliesTo ?? (k === "adjustment" ? "members" : "everyone") }];
   }));
   const save = useMutation({
-    mutationFn: () => api.saveApprovalRules(orgId, kinds.flatMap(([k]) => (state[k]!.on ? [{ kind: k, thresholdCents: Math.round(Number(state[k]!.dollars || 0) * 100), appliesTo: state[k]!.appliesTo }] : []))),
+    mutationFn: () => api.saveApprovalRules(orgId, kinds.flatMap(([k]) => (state[k]!.on ? [{ kind: k, thresholdCents: k === "supplier_payment_details" ? 0 : Math.round(Number(state[k]!.dollars || 0) * 100), appliesTo: state[k]!.appliesTo }] : []))),
     onSuccess: async () => { await qc.invalidateQueries({ queryKey: orgKey(orgId, "approval-rules") }); setDraft(null); toast.success("Approval rules saved"); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -118,9 +121,13 @@ function ApprovalRulesForm({ orgId }: { orgId: string }) {
           </label>
           {state[k]!.on && (
             <div className="flex flex-wrap items-center gap-2 pl-7 text-sm">
-              <span>From $</span>
-              <Input aria-label={`${label} threshold in dollars`} className="h-8 w-28" type="number" min={0} step="0.01" value={state[k]!.dollars} onChange={(e) => set(k, { dollars: e.target.value })} />
-              <span>for</span>
+              {k !== "supplier_payment_details" && (
+                <>
+                  <span>From $</span>
+                  <Input aria-label={`${label} threshold in dollars`} className="h-8 w-28" type="number" min={0} step="0.01" value={state[k]!.dollars} onChange={(e) => set(k, { dollars: e.target.value })} />
+                </>
+              )}
+              <span>{k === "supplier_payment_details" ? "Applies to" : "for"}</span>
               <select aria-label={`${label} applies to`} className="h-8 rounded-md border bg-background px-2" value={state[k]!.appliesTo} onChange={(e) => set(k, { appliesTo: e.target.value as "members" | "everyone" })}>
                 <option value="members">members only</option>
                 <option value="everyone">everyone, admins too</option>
@@ -301,6 +308,18 @@ export default function SettingsPage() {
         {admin && (
           <Section title="Your data" description="Download everything this organization has as one file, or bring a file back. Nothing is held hostage.">
             <ArchiveCard orgId={org.id} isOwner={org.role === "owner"} />
+          </Section>
+        )}
+
+        {admin && (
+          <Section title="API keys" description="Let other software read your inventory or post receipts, adjustments and moves. A key works for this organization only and can never delete, import or manage people.">
+            <ApiKeysCard orgId={org.id} />
+          </Section>
+        )}
+
+        {admin && (
+          <Section title="Webhooks" description="Have Invintel tell another system when something happens: an item is created, stock changes, a purchase order arrives. Each message is signed so the receiver can check it.">
+            <WebhooksCard orgId={org.id} />
           </Section>
         )}
 

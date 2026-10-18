@@ -13,6 +13,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
+import type { KeyAuth } from "./api-keys.js";
 import { isDuplicateKey, type OrgDoc, type Store, type UserDoc } from "./db.js";
 import {
   createOrganization,
@@ -30,9 +31,11 @@ const MAX_FAILURES = 10;
 export interface AuthOptions {
   allowRegistration: boolean;
   cookieSecure: boolean;
+  /** Requests a single API key may make per minute. Default 600. */
+  apiKeyRatePerMinute?: number;
 }
 
-export type AuthEnv = { Variables: { user: User } };
+export type AuthEnv = { Variables: { user: User; apiKey?: KeyAuth } };
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 

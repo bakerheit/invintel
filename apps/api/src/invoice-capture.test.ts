@@ -244,6 +244,20 @@ describe("working on a captured invoice", () => {
     expect((await w.post(`/b2b/invoices/${c.id}/converted`, { invoiceId: "0".repeat(24) }, "member")).status).toBe(403);
     expect((await w.post(`/b2b/invoices/${c.id}/converted`, { invoiceId: "0".repeat(24) })).body.status).toBe("converted");
   });
+
+  it("what it shapes is what supplier-invoice entry takes: entered, three-way matched, and the capture closes", async () => {
+    const w = await world();
+    await w.inbound({ from: "b@acme.example", subject: "inv", text: "", messageId: "ubl2", attachments: [{ filename: "i.xml", contentType: "application/xml", contentBase64: w.b64(UBL) }] });
+    const c = (await w.get("/b2b/invoices")).body[0];
+    const input = (await w.get(`/b2b/invoices/${c.id}/invoice-input`)).body;
+    const made = await w.post("/invoices", input);
+    expect(made.status).toBe(201);
+    expect(made.body).toMatchObject({ number: "INVC-0001", supplierId: w.supplier, purchaseOrderId: w.po.id, invoiceNumber: "INV-2026-0042", subtotalCents: 470000, totalCents: 470000, statedTotalCents: 470000, status: "draft" });
+    // The order here is still a draft and nothing has arrived, so the match says both: a capture never becomes a payable by itself.
+    expect(made.body.match.flags.map((f: { code: string }) => f.code).sort()).toEqual(["not_received", "po_not_open"]);
+    expect((await w.post(`/b2b/invoices/${c.id}/converted`, { invoiceId: made.body.id })).body.status).toBe("converted");
+    expect((await w.get("/b2b/invoices")).body).toHaveLength(0);
+  });
 });
 
 describe("uploading an invoice at the desk", () => {

@@ -34,7 +34,7 @@ const oid = (s: string) => new ObjectId(s);
 const ci = { locale: "en", strength: 2 } as const;
 
 /** What has arrived on each order and item: live receipts that point at the order and haven't been reversed. */
-async function receivedByOrder(store: Store, orderIds: ObjectId[]) {
+export async function receivedByOrder(store: Store, orderIds: ObjectId[]) {
   const rows = await store.movements
     .aggregate<{ _id: { po: ObjectId; item: ObjectId }; qty: number }>([
       { $match: { purchaseOrderId: { $in: orderIds }, type: "receive", reversedBy: { $exists: false } } },
@@ -100,6 +100,70 @@ export async function placeOrderDirect(store: Store, orgId: ObjectId, orderId: O
   if (!res) return { ok: false, error: "The order isn't a draft any more" };
   await recordAudit(store, { orgId, actor: auditActor(user), action: "purchase_order.ordered", entity: poEntity(res), summary: `Placed ${res.number} (${via})` });
   return { ok: true };
+}
+
+/**
+ * Receives stock against an order the dock has in front of it. Used by the order's own receive button and by
+ * receiving a shipment (an advance ship notice), which tags its receipts with the shipment as well.
+ */
+export async function receiveAgainstOrder(
+  store: Store,
+  orgId: ObjectId,
+  user: { id: string; name: string },
+  doc: PurchaseOrderDoc,
+  input: z.output<typeof poReceiveInputSchema>,
+  extra: { shipmentId?: ObjectId } = {},
+): Promise<{ status: number; body: unknown }> {
+    const onOrder = new Set(doc.lines.map((l) => l.itemId.toHexString()));
+    const seen = new Set<string>();
+    for (const l of input.lines) {
+      if (!onOrder.has(l.itemId)) return { status: 400 as number, body: { error: "One of those items isn't on this order" } };
+      if (seen.has(l.itemId)) return { status: 400 as number, body: { error: "List each item once" } };
+      seen.add(l.itemId);
+    }
+    // Check everything first: lines are posted one by one, so a failure halfway would leave a part-received
+    // order that a retry then receives twice.
+    if (!(await store.locations.findOne({ _id: oid(input.locationId), orgId }, { projection: { _id: 1 } }))) return { status: 404 as number, body: { error: "Location not found" } };
+    if ((await store.items.countDocuments({ orgId, _id: { $in: input.lines.map((l) => oid(l.itemId)) } })) !== input.lines.length) {
+      return { status: 404 as number, body: { error: "One of those items has been deleted. Nothing was received." } };
+    }
+    const [before] = await toOrders(store, [doc]);
+    // Take the lease only if the order is still open, so a cancel that just won can't be followed by stock landing on it.
+    const lease = await store.purchaseOrders.findOneAndUpdate({ _id: doc._id, state: "ordered" }, { $set: { receivingUntil: new Date(Date.now() + 30_000) } });
+    if (!lease) return { status: 409 as number, body: { error: "This order was just changed. Reload it." } };
+    const actor = actorOf(user);
+    const movementIds: ObjectId[] = [];
+    for (const l of input.lines) {
+      const res = await postAdjustment(store, orgId, actor, { itemId: oid(l.itemId), locationId: oid(input.locationId), delta: l.quantity, reason: `Received: ${doc.number}`, type: "receive", supplierLot: l.supplierLot });
+      if (!res.ok) {
+        // Lines before this one are already posted (and counted against the order); the caller is told.
+        return { status: res.status as number, body: { error: res.error, partial: movementIds.length > 0 } };
+      }
+      await store.movements.updateMany({ _id: { $in: res.movementIds } }, { $set: { purchaseOrderId: doc._id, ...(extra.shipmentId ? { shipmentId: extra.shipmentId } : {}) } });
+      movementIds.push(...res.movementIds);
+    }
+    // Inspect before release: each line goes straight on quality hold, tied to this order and its supplier lot.
+    const ncrs: { id: string; number: string }[] = [];
+    if (input.inspect) {
+      for (const l of input.lines) {
+        const hold = await openHold(store, orgId, actor, { reason: INSPECT_REASON, note: doc.number, source: "receiving", itemId: l.itemId, locationId: input.locationId, quantity: l.quantity, supplierLot: l.supplierLot, purchaseOrderId: doc._id });
+        if (hold.ok) { ncrs.push({ id: hold.ncr._id.toHexString(), number: hold.ncr.number }); movementIds.push(...hold.movementIds); }
+        else {
+          await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" } });
+          return { status: hold.status as number, body: { error: `Received, but a line could not be put on hold: ${hold.error}`, partial: true } };
+        }
+      }
+    }
+    await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" }, $set: { updatedAt: new Date() } });
+    const [order] = await toOrders(store, [doc]);
+    const overReceived = order!.lines.filter((l) => l.received > l.quantity).map((l) => ({ itemId: l.itemId, itemName: l.itemName, over: l.received - l.quantity }));
+    await recordAudit(store, {
+      orgId, actor: auditActor(user), action: "purchase_order.received", entity: poEntity(doc),
+      summary: `Received ${input.lines.reduce((s, l) => s + l.quantity, 0).toLocaleString("en-US")} units against ${doc.number}${overReceived.length ? " (over-received)" : ""}`,
+      refs: { movementIds: movementIds.map(String), status: order!.status, from: before!.status },
+    });
+    const result: PoReceiveResult = { order: order!, movementIds: movementIds.map(String), overReceived, ...(ncrs.length ? { ncrs } : {}) };
+    return { status: 201, body: result };
 }
 
 export function createPurchasingRoutes(store: Store) {
@@ -327,57 +391,8 @@ export function createPurchasingRoutes(store: Store) {
     const doc = await store.purchaseOrders.findOne({ _id: oid(c.req.valid("param").id), orgId });
     if (!doc) return c.json({ error: "Order not found" }, 404);
     if (doc.state !== "ordered") return c.json({ error: doc.state === "draft" ? "Place the order before receiving against it" : `A ${doc.state} order can't be received` }, 409);
-    const input = c.req.valid("json");
-    const onOrder = new Set(doc.lines.map((l) => l.itemId.toHexString()));
-    const seen = new Set<string>();
-    for (const l of input.lines) {
-      if (!onOrder.has(l.itemId)) return c.json({ error: "One of those items isn't on this order" }, 400);
-      if (seen.has(l.itemId)) return c.json({ error: "List each item once" }, 400);
-      seen.add(l.itemId);
-    }
-    // Check everything first: lines are posted one by one, so a failure halfway would leave a part-received
-    // order that a retry then receives twice.
-    if (!(await store.locations.findOne({ _id: oid(input.locationId), orgId }, { projection: { _id: 1 } }))) return c.json({ error: "Location not found" }, 404);
-    if ((await store.items.countDocuments({ orgId, _id: { $in: input.lines.map((l) => oid(l.itemId)) } })) !== input.lines.length) {
-      return c.json({ error: "One of those items has been deleted. Nothing was received." }, 404);
-    }
-    const [before] = await toOrders(store, [doc]);
-    // Take the lease only if the order is still open, so a cancel that just won can't be followed by stock landing on it.
-    const lease = await store.purchaseOrders.findOneAndUpdate({ _id: doc._id, state: "ordered" }, { $set: { receivingUntil: new Date(Date.now() + 30_000) } });
-    if (!lease) return c.json({ error: "This order was just changed. Reload it." }, 409);
-    const actor = actorOf(c.get("user"));
-    const movementIds: ObjectId[] = [];
-    for (const l of input.lines) {
-      const res = await postAdjustment(store, orgId, actor, { itemId: oid(l.itemId), locationId: oid(input.locationId), delta: l.quantity, reason: `Received: ${doc.number}`, type: "receive", supplierLot: l.supplierLot });
-      if (!res.ok) {
-        // Lines before this one are already posted (and counted against the order); the caller is told.
-        return c.json({ error: res.error, partial: movementIds.length > 0 }, res.status);
-      }
-      await store.movements.updateMany({ _id: { $in: res.movementIds } }, { $set: { purchaseOrderId: doc._id } });
-      movementIds.push(...res.movementIds);
-    }
-    // Inspect before release: each line goes straight on quality hold, tied to this order and its supplier lot.
-    const ncrs: { id: string; number: string }[] = [];
-    if (input.inspect) {
-      for (const l of input.lines) {
-        const hold = await openHold(store, orgId, actor, { reason: INSPECT_REASON, note: doc.number, source: "receiving", itemId: l.itemId, locationId: input.locationId, quantity: l.quantity, supplierLot: l.supplierLot, purchaseOrderId: doc._id });
-        if (hold.ok) { ncrs.push({ id: hold.ncr._id.toHexString(), number: hold.ncr.number }); movementIds.push(...hold.movementIds); }
-        else {
-          await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" } });
-          return c.json({ error: `Received, but a line could not be put on hold: ${hold.error}`, partial: true }, hold.status);
-        }
-      }
-    }
-    await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" }, $set: { updatedAt: new Date() } });
-    const [order] = await toOrders(store, [doc]);
-    const overReceived = order!.lines.filter((l) => l.received > l.quantity).map((l) => ({ itemId: l.itemId, itemName: l.itemName, over: l.received - l.quantity }));
-    await recordAudit(store, {
-      orgId, actor: auditActor(c.get("user")), action: "purchase_order.received", entity: poEntity(doc),
-      summary: `Received ${input.lines.reduce((s, l) => s + l.quantity, 0).toLocaleString("en-US")} units against ${doc.number}${overReceived.length ? " (over-received)" : ""}`,
-      refs: { movementIds: movementIds.map(String), status: order!.status, from: before!.status },
-    });
-    const result: PoReceiveResult = { order: order!, movementIds: movementIds.map(String), overReceived, ...(ncrs.length ? { ncrs } : {}) };
-    return c.json(result, 201);
+    const res = await receiveAgainstOrder(store, orgId, c.get("user"), doc, c.req.valid("json"));
+    return c.json(res.body as never, res.status as never);
   });
 
   return r;

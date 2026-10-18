@@ -1,8 +1,9 @@
 import type { OrgRole, User } from "@invintel/shared";
 import { createMiddleware } from "hono/factory";
+import type { KeyAuth } from "./api-keys.js";
 import type { OrgDoc } from "./db.js";
 
-export type OrgEnv = { Variables: { user: User; org: OrgDoc; role: OrgRole } };
+export type OrgEnv = { Variables: { user: User; org: OrgDoc; role: OrgRole; apiKey?: KeyAuth } };
 
 export const ROLE_RANK: Record<OrgRole, number> = { member: 1, admin: 2, owner: 3 };
 

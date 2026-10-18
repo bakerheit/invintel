@@ -341,7 +341,7 @@ export function gtinVariants(code: string): string[] {
 
 // ---------- audit log ----------
 
-export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "sales_order", "trading_partner", "b2b_message", "captured_invoice", "count", "approval", "alert"] as const;
+export const AUDIT_ENTITY_TYPES = ["item", "location", "organization", "member", "ncr", "work_center", "bom", "work_order", "supplier", "purchase_order", "sales_order", "trading_partner", "b2b_message", "captured_invoice", "count", "approval", "alert", "invoice", "payment", "shipment"] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 
 export const AUDIT_ACTIONS = [
@@ -428,6 +428,25 @@ export const AUDIT_ACTIONS = [
   "import.undone",
   "archive.exported",
   "archive.restored",
+  "api_key.created",
+  "api_key.revoked",
+  "webhook.created",
+  "webhook.updated",
+  "webhook.deleted",
+  "webhook.secret_rotated",
+  "webhook.disabled",
+  "invoice.created",
+  "invoice.updated",
+  "invoice.submitted",
+  "invoice.approved",
+  "invoice.voided",
+  "payment.recorded",
+  "payment.voided",
+  "shipment.created",
+  "shipment.received",
+  "shipment.cancelled",
+  "invoice.settings_changed",
+  "supplier.payment_details_changed",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -736,6 +755,8 @@ export * from "./downtime.js";
 export * from "./alerts.js";
 export * from "./units.js";
 export * from "./archive.js";
+export * from "./integrations.js";
+export * from "./invoices.js";
 export * from "./exchange.js";
 export * from "./sales.js";
 export * from "./templates.js";

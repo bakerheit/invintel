@@ -32,6 +32,11 @@ import { createTraceabilityRoutes } from "./traceability.js";
 import { createScrapReportRoutes } from "./scrap-report.js";
 import { createReportRoutes } from "./reports.js";
 import { createPurchasingRoutes } from "./purchasing.js";
+import { keyPermits, createApiKeyRoutes } from "./api-keys.js";
+import { createWebhookRoutes } from "./webhook-routes.js";
+import { createInvoiceRoutes } from "./invoices.js";
+import { createPaymentRoutes } from "./payments.js";
+import { createShipmentRoutes } from "./shipments.js";
 import { createDocumentRoutes } from "./doc-settings.js";
 import { createSalesRoutes } from "./sales.js";
 import { ROLE_RANK, requireRole, type OrgEnv } from "./org-access.js";
@@ -78,6 +83,19 @@ export function createOrgRoutes(store: Store) {
     const raw = c.req.param("orgId") ?? "";
     // Non-members get the same 404 as a missing org so ids can't be probed.
     if (!/^[0-9a-f]{24}$/i.test(raw)) return c.json({ error: "Organization not found" }, 404);
+    // An API key belongs to one organization and acts as a member limited to what its scope allows.
+    const key = c.get("apiKey");
+    if (key) {
+      if (key.orgId !== raw.toLowerCase()) return c.json({ error: "Organization not found" }, 404);
+      const keyOrg = await store.orgs.findOne({ _id: new ObjectId(raw) });
+      if (!keyOrg) return c.json({ error: "Organization not found" }, 404);
+      if (!keyPermits(key.scope, c.req.method, c.req.path.slice(`/api/orgs/${raw}`.length) || "/")) {
+        return c.json({ error: "This API key isn't allowed to do that" }, 403);
+      }
+      c.set("org", keyOrg);
+      c.set("role", "member");
+      return next();
+    }
     const membership = await store.memberships.findOne({
       orgId: new ObjectId(raw),
       userId: new ObjectId(c.get("user").id),
@@ -161,6 +179,11 @@ export function createOrgRoutes(store: Store) {
     return c.json(members);
   });
 
+  scoped.route("/invoices", createInvoiceRoutes(store));
+  scoped.route("/payments", createPaymentRoutes(store));
+  scoped.route("/shipments", createShipmentRoutes(store));
+  scoped.route("/api-keys", createApiKeyRoutes(store));
+  scoped.route("/webhooks", createWebhookRoutes(store));
   scoped.route("/alerts", createAlertRoutes(store));
   scoped.route("/approvals", createApprovalRoutes(store));
   scoped.route("/exchange", createExchangeRoutes(store));

@@ -177,6 +177,63 @@ The **owner** can restore an archive into an organization that has no data (a ne
 - Numbering carries on: the next purchase order, work order, count, NCR, import or roll label continues after the highest restored.
 - Dates, whole-number quantities and units survive exactly. The restore is written to the audit log.
 
+### API keys and webhooks
+
+**Settings > API keys** (admins) makes keys for other software. A key is `ivk_` plus 256 random bits, **shown once** when it is made; only a SHA-256 hash is kept, so a database leak doesn't leak keys. Send it as `Authorization: Bearer ivk_...` to `/api/orgs/:orgId/...`.
+
+- **Two kinds.** *Read only* looks things up: items, locations, ledger entries, overview, rolls, purchase orders and suppliers, counts, scan lookup. *Read and write* also creates and edits items, adjusts and transfers stock, receives and moves (`/receipts`, `/moves`), receives rolls and moves or adjusts them, and receives against a purchase order. Nothing else: **no deletes, no imports or archive, no members, settings, approvals, audit log, other keys or webhooks, and no listing or creating organizations.** Anything outside answers `403`.
+- A key belongs to **one organization** (any other answers `404`) and acts like a **member** named "API key: <name>", so the ledger and audit log say which key did something and approval rules still apply (an over-limit adjustment answers `202 { approvalRequired }`).
+- Optional **expiry**; **revoke** stops it straight away (the record stays so the log still makes sense). Each key is limited to 600 requests a minute (`429` with `Retry-After`), and an address that sends 20 wrong keys is locked out for 15 minutes. A wrong key looks exactly like no key (`401`). The key is never written to a log or the audit trail.
+
+**Settings > Webhooks** (admins) tells another system when something happens. Pick the events (or everything): `item.created/updated/deleted`, `stock.received/adjusted/moved/reversed`, `purchase_order.created/ordered/received/cancelled/closed`, `count.posted`, `work_order.created/released/completed`, `approval.requested/approved/rejected`, `import.applied/undone`. Each is a POST of JSON:
+
+```json
+{ "id": "6ad4…", "type": "stock.adjusted", "createdAt": "2026-10-18T14:40:54.466Z", "organizationId": "6ad4…", "seq": 29,
+  "actor": { "name": "Ada" }, "entity": { "type": "item", "id": "6ad4…", "label": "Bolt M8 (BOLT-M8)" },
+  "summary": "Adjusted Bolt M8: -3 (Used)", "changes": [ … ], "refs": { "movementIds": ["…"] } }
+```
+
+Headers: `X-Invintel-Event`, `X-Invintel-Event-Id` (the same on every retry and for every webhook, so a receiver can ignore repeats), `X-Invintel-Delivery`, and **`X-Invintel-Signature: t=<unix seconds>,v1=<hex>`** where `v1` is the HMAC-SHA256 of `"<t>.<raw body>"` with the webhook's secret (`whsec_...`, shown once; "New secret" replaces it). Check it, and reject a `t` that is more than a few minutes old:
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+function verify(secret, rawBody, header) {
+  const m = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(header ?? "");
+  if (!m || Math.abs(Date.now() / 1000 - Number(m[1])) > 300) return false;
+  const want = createHmac("sha256", secret).update(`${m[1]}.${rawBody}`).digest();
+  return timingSafeEqual(want, Buffer.from(m[2], "hex"));
+}
+```
+
+- **Delivery:** answer any 2xx. Anything else (4xx, 5xx, a redirect, a timeout of 8 seconds) is retried after 1 min, 5 min, 30 min, 2 h and 6 h, then it gives up and shows in the log with a "Try again" button. After 10 deliveries in a row give up, the webhook **switches itself off** and says why. *Send test* sends a `webhook.test` event right now, even to a switched-off webhook.
+- **Private networks are blocked.** Only `https://` addresses on the public internet are accepted: no `localhost`, private, link-local (including cloud metadata `169.254.169.254`), carrier-NAT, loopback or reserved ranges, IPv4 hidden inside IPv6, or odd number forms of an IP. The check runs when the address is saved **and again on every connection** against what the name really resolves to, redirects are never followed, and only a few kilobytes of an answer are read. For local development only, `INVINTEL_WEBHOOKS_ALLOW_PRIVATE=true` allows http and private addresses (never set it in production); `INVINTEL_WEBHOOK_TIMEOUT_MS` changes the timeout.
+- The worker that sends deliveries runs inside the API process (every 5 seconds); two API processes are safe, a delivery is claimed atomically. Delivery logs clear after 30 days. Webhook secrets are stored in the database (an HMAC key has to be recoverable), unlike API keys.
+
+API: `GET/POST /api-keys`, `POST /api-keys/:id/revoke`; `GET/POST /webhooks`, `PATCH/DELETE /webhooks/:id`, `POST /webhooks/:id/test`, `POST /webhooks/:id/rotate-secret`, `GET /webhooks/:id/deliveries`, `POST /webhooks/:id/deliveries/:deliveryId/retry`. All need an admin signed in as a person; a key can't call them.
+
+### Payables: invoices, shipments and payments
+
+**Payables** (sidebar, with Purchasing on) is where supplier paperwork meets what you ordered and what actually arrived. No money moves anywhere: a payment is a record you make, and everything exports as CSV for your accounting system.
+
+**Supplier invoices** (admins). Enter one against a purchase order (or none): the supplier's own invoice number, dates, currency, lines (an item in its own unit, or a free line for freight and fees), per-line tax and freight. Totals are always worked out by the server from the lines, in the item's units (12.500 kg x $1.20 is $15.00), and an optional "their total" is checked against them. **Fill from what arrived** takes the quantities received and the order's prices.
+
+- **Three-way match.** Matching compares the invoice with the **order's price and quantity** and with **what was actually received** (ledger receipts against the order that haven't been reversed), including what other approved invoices for the same order already billed. A problem is one of: `price_higher` (above the order by more than the tolerance; a lower price is only noted), `not_received`, `over_billed` (more billed than received, across invoices), `over_ordered`, `not_on_po`, `duplicate` (same supplier invoice number already entered), `currency`, `total_differs`, `po_not_open` or `po_supplier`; an invoice with no order is `no_po`. Receipts made after the invoice was entered count the next time it is looked at.
+- **Rules** (Matching rules): the currency of your books, how far a price may be above the order (default 1%), how far billed may exceed received (default 0%) and how far their total may differ (default $0.05).
+- **Flow.** Enter (draft) > **Match it** > a clean match goes straight to *Ready to pay*; anything else is *Needs review*. An admin approves a flagged invoice by saying **why** it is fine ("price confirmed by phone"), which is kept with the invoice and the audit log; the person who entered it can't override its problems unless they are the only approver. Editing sends it back to draft. An invoice can be voided (with a reason) until something is paid against it.
+- **Second person's OK** (INV-7). Settings > Approvals now has two more rules: *Supplier invoices* from $X, and *Changes to how a supplier is paid*. A matching invoice at or over the line, or a payment-details change, waits as an approval request; the second person's approval re-runs the match first, so it can't be approved on stale information.
+
+**Captured invoices.** An invoice that arrived by email or upload (Documents) shows as a banner on the Invoices tab with **Enter as invoice**: the invoice form opens filled in from the capture (supplier, order, number, dates, lines in stored units, their total), and saving closes the capture. A capture never becomes a payable by itself: it still goes through the same matching and approval.
+
+**How a supplier is paid.** Method, account name, bank and the **last four digits**, and instructions. A full account or card number is refused on purpose. Changing it is audited, and can require a second person's OK (changing where money goes is how invoice fraud works).
+
+**Incoming shipments** (an advance ship notice, anyone on the dock; a shipment you send to a customer lives on the sales order). Record what the supplier says is coming: their reference (unique per supplier), carrier, tracking, expected date and lines with their lot, optionally against a purchase order. Warnings say what doesn't match the order (not on it, more than ordered). **Receive** puts stock in through the ledger like any receipt, tagged with the shipment and the order (so the order, the match and the lot trail all see it), in full or in part, optionally held for inspection. A shipment never changes stock by itself, and can be cancelled until something arrives.
+
+**Payments** (admins). Pay one or several approved invoices of one supplier: method, date (not in the future), reference, note. Each invoice's balance is kept exact with an atomic guard, so two people paying the same invoice can't pay it past its total. Voiding a payment (with a reason) puts the balance back. **Remittance advice** prints a page for the supplier.
+
+**Exports**: `GET /invoices/export/bills.csv` (one row per line of approved and paid invoices, plus a freight row) and `/invoices/export/payments.csv`. The column layout is generic; mapping it to a particular accounting system's import format is not done (unverified).
+
+API (admins, signed in as a person; API keys can't reach these): `/invoices` (list, create, `GET/PATCH /:id`, `POST /:id/submit|approve|void`), `GET/PUT /invoices/settings`, `GET/PUT /invoices/suppliers/:id/payment-details`, `/payments` (list, create, `/:id/void`, `/:id/remittance`), `/shipments` (list, create, `/:id/receive`, `/:id/cancel`; members can record and receive). Invoices, shipments, payments and the rules travel in the full archive.
+
 ### Units of measure
 
 Every item says what it is counted in. Set **Unit** and **Decimal places** in the item form (presets for kg, g, lb, m, m², L, ft, or any text up to 16 characters), and optionally **Also bought or counted in**: `1 bag = 25 kg`. Receiving and counting then take `12.5` for a 3-decimal kg item, and the unit picker next to a quantity box converts bags to kilograms as you type (`2 bag = 50.000 kg`) and refuses anything that wouldn't come out as a whole number of the smallest unit.
