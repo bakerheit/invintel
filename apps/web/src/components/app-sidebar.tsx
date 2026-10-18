@@ -43,9 +43,9 @@ export const navItems = (orgId: string) => [
   { to: `/o/${orgId}`, end: true, label: "Overview", icon: LayoutDashboard, adminOnly: false },
   { to: `/o/${orgId}/inventory`, end: false, label: "Inventory", icon: Package, adminOnly: false },
   { to: `/o/${orgId}/purchasing`, end: false, label: "Purchasing", icon: ShoppingCart, adminOnly: false },
+  { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false },
   { to: `/o/${orgId}/activity`, end: false, label: "Activity", icon: History, adminOnly: false },
   { to: `/o/${orgId}/locations`, end: false, label: "Locations", icon: MapPin, adminOnly: false },
-  { to: `/o/${orgId}/production`, end: false, label: "Production", icon: Factory, adminOnly: false },
   { to: `/o/${orgId}/audit`, end: false, label: "Audit log", icon: ShieldCheck, adminOnly: true },
   { to: `/o/${orgId}/settings`, end: false, label: "Settings", icon: Settings, adminOnly: false },
 ];

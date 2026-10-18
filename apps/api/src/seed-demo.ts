@@ -107,6 +107,14 @@ await call(`${prod}/boms`, {
 const wo = await call<{ id: string }>(`${prod}/work-orders`, { outputItemId: rsc, quantity: 100, workCenterId: wc.id, dueDate: null, note: "Demo order" });
 await call(`${prod}/work-orders/${wo.id}/action`, { action: "release" });
 
+// A supplier and an order that has been placed, so Purchasing has something in it.
+const supplier = await call<{ id: string }>(`${base}/purchasing/suppliers`, { name: "Midwest Paper Mill", contact: "Sam Ortiz", email: "orders@midwestpaper.example", phone: "555-0142" });
+const po = await call<{ id: string }>(`${base}/purchasing/orders`, {
+  supplierId: supplier.id, expectedDate: new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10),
+  lines: [{ itemId: test, quantity: 6, unitCostCents: 42000 }, { itemId: inkB, quantity: 8, unitCostCents: 9500 }],
+});
+await call(`${base}/purchasing/orders/${po.id}/place`, {});
+
 console.log(`Demo loaded into database "${store.db.databaseName}". Sign in as ${DEMO_EMAIL} (password is at the top of apps/api/src/seed-demo.ts).`);
 await store.close();
 process.exit(0);
