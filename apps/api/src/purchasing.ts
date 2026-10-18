@@ -228,6 +228,7 @@ export function createPurchasingRoutes(store: Store) {
     for (const i of items) {
       if (!wanted.has(i._id.toHexString())) continue;
       const have = i.stock.reduce((s, x) => s + x.quantity, 0);
+      if (i.reorderLevel <= 0 || have > i.reorderLevel) continue; // only what the screen suggests
       const qty = Math.max(0, i.reorderLevel * 2 - have - (onOrder.get(i._id.toHexString()) ?? 0));
       if (qty > 0) lines.push({ itemId: i._id.toHexString(), quantity: qty, unitCostCents: i.unitCostCents });
     }
@@ -272,8 +273,13 @@ export function createPurchasingRoutes(store: Store) {
     const refusal = extra?.(before!);
     if (refusal) return c.json({ error: refusal }, 409);
     // The state is part of the filter so two people clicking at once can't both win.
-    const res = await store.purchaseOrders.findOneAndUpdate({ _id: doc._id, state: doc.state }, { $set: { state: to, updatedAt: new Date() } }, { returnDocument: "after" });
-    if (!res) return c.json({ error: "Someone else just changed this order. Reload it." }, 409);
+    // A receive in progress holds a short lease; cancelling or closing waits for it.
+    const res = await store.purchaseOrders.findOneAndUpdate(
+      { _id: doc._id, state: doc.state, $or: [{ receivingUntil: { $exists: false } }, { receivingUntil: { $lt: new Date() } }] },
+      { $set: { state: to, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!res) return c.json({ error: "Someone is receiving against this order, or just changed it. Reload and try again." }, 409);
     const [after] = await toOrders(store, [res]);
     await recordAudit(store, { orgId, actor: auditActor(c.get("user")), action, entity: poEntity(doc), summary: `${verb[0]!.toUpperCase()}${verb.slice(1)} ${doc.number}`, refs: { status: after!.status } });
     return c.json(after);
@@ -306,6 +312,9 @@ export function createPurchasingRoutes(store: Store) {
       return c.json({ error: "One of those items has been deleted. Nothing was received." }, 404);
     }
     const [before] = await toOrders(store, [doc]);
+    // Take the lease only if the order is still open, so a cancel that just won can't be followed by stock landing on it.
+    const lease = await store.purchaseOrders.findOneAndUpdate({ _id: doc._id, state: "ordered" }, { $set: { receivingUntil: new Date(Date.now() + 30_000) } });
+    if (!lease) return c.json({ error: "This order was just changed. Reload it." }, 409);
     const actor = actorOf(c.get("user"));
     const movementIds: ObjectId[] = [];
     for (const l of input.lines) {
@@ -317,6 +326,7 @@ export function createPurchasingRoutes(store: Store) {
       await store.movements.updateMany({ _id: { $in: res.movementIds } }, { $set: { purchaseOrderId: doc._id } });
       movementIds.push(...res.movementIds);
     }
+    await store.purchaseOrders.updateOne({ _id: doc._id }, { $unset: { receivingUntil: "" }, $set: { updatedAt: new Date() } });
     const [order] = await toOrders(store, [doc]);
     const overReceived = order!.lines.filter((l) => l.received > l.quantity).map((l) => ({ itemId: l.itemId, itemName: l.itemName, over: l.received - l.quantity }));
     await recordAudit(store, {

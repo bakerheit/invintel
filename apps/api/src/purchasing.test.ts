@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { ObjectId } from "mongodb";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { connect, type Store } from "./db.js";
@@ -131,5 +132,21 @@ describe("purchasing", () => {
     const { p } = await setup();
     const other = await signUp({ mode: "create", name: "Other" });
     expect((await call(other.cookie, `${p}/orders`)).status).toBe(404);
+  });
+
+  it("only orders what is actually running low, and a receive in progress blocks cancel and close", async () => {
+    const { owner, glue, kraft, supplier, p } = await setup();
+    // Glue has 20 of reorder 5, so it is not on the suggestion list and can't be ordered through it.
+    const res = await call(owner.cookie, `${p}/orders/from-suggestions`, { supplierId: supplier, itemIds: [glue] });
+    expect(res.status).toBe(400);
+
+    const po = (await call(owner.cookie, `${p}/orders`, { supplierId: supplier, lines: [{ itemId: kraft, quantity: 5, unitCostCents: 100 }] })).body;
+    await call(owner.cookie, `${p}/orders/${po.id}/place`, {});
+    // Pretend a receive is mid-flight: its lease is still valid.
+    await store.purchaseOrders.updateOne({ _id: new ObjectId(po.id) }, { $set: { receivingUntil: new Date(Date.now() + 20_000) } });
+    expect((await call(owner.cookie, `${p}/orders/${po.id}/cancel`, {})).status).toBe(409);
+    // An expired lease (a receive that died) doesn't block forever.
+    await store.purchaseOrders.updateOne({ _id: new ObjectId(po.id) }, { $set: { receivingUntil: new Date(Date.now() - 1000) } });
+    expect((await call(owner.cookie, `${p}/orders/${po.id}/cancel`, {})).body.status).toBe("cancelled");
   });
 });

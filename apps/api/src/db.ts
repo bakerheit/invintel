@@ -180,6 +180,8 @@ export interface PurchaseOrderDoc {
   supplierId: ObjectId;
   expectedDate: string | null;
   note: string;
+  /** Set for a few seconds while stock is being received, so a cancel or close can't slip in between the check and the posting. */
+  receivingUntil?: Date;
   lines: { itemId: ObjectId; quantity: number; unitCostCents: number }[];
   createdAt: Date;
   updatedAt: Date;

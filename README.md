@@ -80,7 +80,7 @@ API under `/api/orgs/:orgId/purchasing`: `GET/POST /suppliers`, `PATCH /supplier
 - Needs a SKU and a name column. Common header names work (`Part number`, `Qty`, `On hand`, `UPC`, `Bin`...). Optional: category, notes, reorder level, unit cost (`$12.50` is fine), barcodes (separate with `|`), location (its code, full path or unique name) and quantity.
 - It only **creates**: an existing SKU is never changed, so importing the same file twice can't double anything. Repeat a SKU on another line to put stock in a second location.
 - Opening stock goes through the ledger as receipts ("Imported from CSV"), and each new item is in the audit log.
-- One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 5000 rows, about 2 MB.
+- One bad row blocks the whole import (the preview says which line), so you never end up half-loaded. Limits: 1000 rows per file, about 2 MB. Unit costs are rounded to the cent.
 
 API: `GET /data/items.csv`, `POST /data/items/import` with `{ csv, dryRun }`.
 

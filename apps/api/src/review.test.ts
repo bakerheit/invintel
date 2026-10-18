@@ -105,20 +105,20 @@ describe("receiving against a purchase order", () => {
 });
 
 describe("import limits", () => {
-  it("a 5000-row file previews and imports in reasonable time, and 5001 rows are refused", async () => {
+  it("a 1000-row file previews and imports in reasonable time, and 1001 rows are refused", async () => {
     const a = await signUp({ mode: "create", name: "Big Co" });
     const base = `/api/orgs/${a.org.id}`;
     const row = (i: number) => `SKU-${i},Item ${i},Cat,3,1.25,BC${String(i).padStart(9, "0")},Main,2`;
     const csv = (rows: number) => ["sku,name,category,reorder,cost,barcode,location,qty", ...Array.from({ length: rows }, (_, i) => row(i))].join("\n");
     const t0 = Date.now();
-    const dry = await call(a.cookie, `${base}/data/items/import`, { csv: csv(5000), dryRun: true });
+    const dry = await call(a.cookie, `${base}/data/items/import`, { csv: csv(1000), dryRun: true });
     expect(dry.status).toBe(200);
-    expect(dry.body).toMatchObject({ itemsToCreate: 5000, errors: 0 });
+    expect(dry.body).toMatchObject({ itemsToCreate: 1000, errors: 0 });
     const dryMs = Date.now() - t0;
-    expect((await call(a.cookie, `${base}/data/items/import`, { csv: csv(5001), dryRun: true })).status).toBe(400);
+    expect((await call(a.cookie, `${base}/data/items/import`, { csv: csv(1001), dryRun: true })).status).toBe(400);
     const t1 = Date.now();
-    expect((await call(a.cookie, `${base}/data/items/import`, { csv: csv(1000), dryRun: false })).status).toBe(201); // applying 5000 takes about 19 s (see the review notes)
-    console.log(`import timing: preview of 5000 ${dryMs} ms, apply of 1000 ${Date.now() - t1} ms`);
+    expect((await call(a.cookie, `${base}/data/items/import`, { csv: csv(1000), dryRun: false })).status).toBe(201); // applying 1000 takes a few seconds
+    console.log(`import timing: preview of 1000 ${dryMs} ms, apply of 1000 ${Date.now() - t1} ms`);
     expect(dryMs).toBeLessThan(20_000);
   }, 120_000);
 

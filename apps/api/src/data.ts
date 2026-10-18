@@ -5,7 +5,7 @@ import { bodyLimit } from "hono/body-limit";
 import { ObjectId } from "mongodb";
 import { auditActor, itemEntity, recordAudit } from "./audit.js";
 import { csvNumber, csvText, parseCsv } from "./csv.js";
-import type { ItemDoc, LocationDoc, Store } from "./db.js";
+import { isDuplicateKey, type ItemDoc, type LocationDoc, type Store } from "./db.js";
 import { conflictMessage, findCodeConflict } from "./item-codes.js";
 import { loadItems } from "./item-queries.js";
 import { actorOf } from "./items.js";
@@ -13,7 +13,8 @@ import { indexLocations, loadLocations } from "./locations.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { postAdjustment } from "./stock-service.js";
 
-const MAX_ROWS = 5000;
+// Applying is one insert plus audit entry per item (about 19 ms each), so keep a single request well under a proxy timeout.
+const MAX_ROWS = 1000;
 
 /** Header names people actually use, mapped to our columns. */
 const ALIASES: Record<string, string> = {
@@ -201,17 +202,30 @@ export function createDataRoutes(store: Store) {
     if (result.errors) return c.json({ error: "Fix the rows marked as errors first. Nothing was imported.", ...result }, 422);
 
     const actor = actorOf(c.get("user"));
+    const failRow = (line: number, message: string) => {
+      const row = result.rows.find((x) => x.line === line);
+      if (row) { row.status = "error"; row.message = message; }
+      result.errors++;
+    };
     for (const p of plans.values()) {
       const now = new Date();
       const doc: ItemDoc = { _id: new ObjectId(), orgId, ...p.input, createdAt: now, updatedAt: now };
-      await store.items.insertOne(doc);
+      try {
+        await store.items.insertOne(doc);
+      } catch (e) {
+        // Someone created the same SKU or barcode while this ran. Report it; the rest carries on and a rerun is safe.
+        failRow(p.line, isDuplicateKey(e) ? "Created by someone else while importing, left as it is" : "Couldn't be saved");
+        result.itemsToCreate--;
+        continue;
+      }
       await recordAudit(store, {
         orgId, actor: auditActor(c.get("user")), action: "item.created", entity: itemEntity(doc._id, doc),
         summary: `Created ${doc.name} (${doc.sku}) from a CSV import`,
         snapshot: { sku: doc.sku, name: doc.name, description: doc.description, category: doc.category, reorderLevel: doc.reorderLevel, unitCostCents: doc.unitCostCents, barcodes: doc.barcodes ?? [] },
       });
       for (const s of p.stock) {
-        await postAdjustment(store, orgId, actor, { itemId: doc._id, locationId: s.location._id, delta: s.quantity, reason: "Imported from CSV", type: "receive" });
+        const posted = await postAdjustment(store, orgId, actor, { itemId: doc._id, locationId: s.location._id, delta: s.quantity, reason: "Imported from CSV", type: "receive" });
+        if (!posted.ok) failRow(p.line, `Item created but its stock at ${s.location.name} wasn't: ${posted.error}`);
       }
     }
     return c.json(result, 201);
