@@ -2,6 +2,8 @@
 
 Open source inventory management, built by Bakerheit Technologies.
 
+**Status: early (0.x) software.** It is built and tested in a demo setting, with no production customers yet. Invintel makes no compliance or certification claims (no SOC 2, ISO, GDPR, FDA/FSMA or EDI conformance claims); the "known limits" sections below say what is and isn't done. See [SECURITY.md](SECURITY.md) for reporting problems, [CONTRIBUTING.md](CONTRIBUTING.md) for how to take part, and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the licences of what it builds on.
+
 ## Stack
 
 | Layer    | Tech |
@@ -339,7 +341,7 @@ Things to know:
 
 ## Demo data
 
-`pnpm --filter @invintel/api seed:demo` loads a small corrugated plant (nested locations, ten items, receipts, moves, an adjustment) into the configured database and creates `demo@invintel.local` (the password is at the top of `apps/api/src/seed-demo.ts`). It refuses to run if that account already exists. Point it at a scratch database with `MONGODB_DB=invintel_demo`.
+`pnpm --filter @invintel/api seed:demo` loads a small corrugated plant (nested locations, ten items, receipts, moves, an adjustment) into the configured database and creates `demo@invintel.local` (the password is at the top of `apps/api/src/seed-demo.ts`, or set `DEMO_EMAIL` / `DEMO_PASSWORD`). **That login is for local demos only. It is published in this repository, so never load the demo data into a database that faces the internet.** It refuses to run if that account already exists. Point it at a scratch database with `MONGODB_DB=invintel_demo`.
 
 ## Scripts
 
@@ -463,4 +465,4 @@ MIT
 
 The API listens on 127.0.0.1 only (set `HOST` to change that), so everything goes through nginx or the Vite proxy. Behind a tunnel on this machine nginx takes each visitor's real address from `CF-Connecting-IP` (only when the connection is from loopback), so the sign-in limit is per person, not per tunnel. Set `BASIC_AUTH_FILE` to a htpasswd file to put a username and password in front of the whole site before sharing a link with anyone else.
 
-It speaks plain HTTP. Put TLS in front of it before anyone outside your own network uses it, and have Frida review it before it faces the internet.
+It speaks plain HTTP. Put TLS in front of it before anyone outside your own network uses it, and get a security review of your setup before it faces the internet.
