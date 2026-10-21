@@ -14,7 +14,8 @@ const oklch = (l: string, c: string, h: string) => oklchToRgb(num(l), num(c), nu
 
 const gradients = [...css.matchAll(/--sidebar-gradient:\s*linear-gradient\(160deg,\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\),\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\),\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)\)/g)];
 const highlight = Math.max(...[...css.matchAll(/radial-gradient\(circle at 12% 0%, oklch\(1 0 0 \/ ([\d.]+)\)/g)].map((m) => num(m[1]!)));
-const mutedAlpha = Math.min(...[...css.matchAll(/\[data-sidebar="sidebar"\] \.text-muted-foreground\s*\{\s*color:\s*oklch\(1 0 0 \/ (\d+)%\)/g)].map((m) => num(m[1]!) / 100));
+// Every override that sets sidebar text to a see-through white: the secondary text and the group headings. The weakest one is checked.
+const mutedAlpha = Math.min(...[...css.matchAll(/\[data-sidebar="sidebar"\]\s+(?:\.text-muted-foreground|\[data-sidebar="group-label"\])\s*\{\s*color:\s*oklch\(1 0 0 \/ (\d+)%\)/g)].map((m) => num(m[1]!) / 100));
 const accent = css.match(/--sidebar-accent:\s*oklch\((\d) 0 0 \/ (\d+)%\)/);
 const accentOver: Rgb = accent && accent[1] === "0" ? BLACK : WHITE;
 const accentAlpha = accent ? num(accent[2]!) / 100 : 0;

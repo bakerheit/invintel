@@ -141,7 +141,7 @@ function UserMenu() {
             render={<SidebarMenuButton size="lg" className="data-popup-open:bg-sidebar-accent" />}
           >
             <Avatar className="size-8">
-              <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">
+              <AvatarFallback className="bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground">
                 {initials(user.name)}
               </AvatarFallback>
             </Avatar>
