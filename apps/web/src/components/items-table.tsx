@@ -242,7 +242,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className={cn("inline-flex items-center gap-1 rounded hover:text-foreground", meta.align === "right" && "flex-row-reverse")}
+                          className={cn("-mx-1.5 inline-flex h-8 items-center gap-1 rounded px-1.5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none", meta.align === "right" && "flex-row-reverse")}
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
                           <SortIcon state={header.column.getIsSorted()} />

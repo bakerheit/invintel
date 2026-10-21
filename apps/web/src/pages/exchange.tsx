@@ -68,7 +68,7 @@ function Connect({ orgId }: { orgId: string }) {
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span>They are my</span>
           {(["supplier", "customer"] as const).map((k) => (
-            <label key={k} className="flex items-center gap-1.5"><input type="radio" name="ex-kind" checked={kind === k} onChange={() => setKind(k)} /> {k}</label>
+            <label key={k} className="flex min-h-6 items-center gap-1.5 py-0.5"><input type="radio" name="ex-kind" checked={kind === k} onChange={() => setKind(k)} /> {k}</label>
           ))}
           <Button size="sm" disabled={!text.trim() || connect.isPending} onClick={() => connect.mutate()}><Link2 /> Connect</Button>
         </div>
@@ -82,9 +82,9 @@ function PermissionBoxes({ p, onChange, disabled }: { p: ExchangePermissions; on
   const set = (patch: Partial<ExchangePermissions>) => onChange({ ...p, ...patch });
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-      <label className="flex items-center gap-1.5"><input type="checkbox" disabled={disabled} checked={p.shareStock} onChange={(e) => set({ shareStock: e.target.checked, ...(e.target.checked ? {} : { shareStockQuantities: false }) })} /> may ask if an item is in stock</label>
-      <label className="flex items-center gap-1.5"><input type="checkbox" disabled={disabled || !p.shareStock} checked={p.shareStockQuantities} onChange={(e) => set({ shareStockQuantities: e.target.checked })} /> and see the quantity</label>
-      <label className="flex items-center gap-1.5"><input type="checkbox" disabled={disabled} checked={p.shareOrderStatus} onChange={(e) => set({ shareOrderStatus: e.target.checked })} /> may ask where their order is</label>
+      <label className="flex min-h-6 items-center gap-1.5 py-0.5"><input type="checkbox" disabled={disabled} checked={p.shareStock} onChange={(e) => set({ shareStock: e.target.checked, ...(e.target.checked ? {} : { shareStockQuantities: false }) })} /> may ask if an item is in stock</label>
+      <label className="flex min-h-6 items-center gap-1.5 py-0.5"><input type="checkbox" disabled={disabled || !p.shareStock} checked={p.shareStockQuantities} onChange={(e) => set({ shareStockQuantities: e.target.checked })} /> and see the quantity</label>
+      <label className="flex min-h-6 items-center gap-1.5 py-0.5"><input type="checkbox" disabled={disabled} checked={p.shareOrderStatus} onChange={(e) => set({ shareOrderStatus: e.target.checked })} /> may ask where their order is</label>
     </div>
   );
 }
