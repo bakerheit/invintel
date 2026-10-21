@@ -320,7 +320,7 @@ export default function PurchasingPage() {
               {sup.map((s) => (
                 <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
                   <div><p className="font-medium">{s.name}</p><p className="text-xs text-muted-foreground">{s.contact}{s.address ? `${s.contact ? " · " : ""}${addressOneLine(s.address)}` : ""}</p></div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">
                     {s.email && <span className="flex items-center gap-1"><Mail className="size-3.5" />{s.email}</span>}
                     {s.phone && <span className="flex items-center gap-1"><Phone className="size-3.5" />{s.phone}</span>}
                     {s.openOrders > 0 && <Badge variant="secondary">{s.openOrders} open</Badge>}

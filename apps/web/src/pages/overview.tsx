@@ -61,7 +61,7 @@ function GettingStarted({ orgId, items, locations, units, members, movements }: 
                 {s.done ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" /> : <Circle className="mt-0.5 size-5 shrink-0 text-muted-foreground" />}
                 <span>
                   <span className={cn("block text-sm font-medium", s.done && "text-muted-foreground line-through")}>{s.label}</span>
-                  <span className="block text-xs text-muted-foreground">{s.hint}</span>
+                  <span className="hidden text-xs text-muted-foreground sm:block">{s.hint}</span>
                 </span>
               </Link>
             </li>

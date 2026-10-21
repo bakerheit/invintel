@@ -39,8 +39,8 @@ function Identity({ orgId, admin }: { orgId: string; admin: boolean }) {
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => void copyText(JSON.stringify(inv.data), "Invitation")}><Copy /> Copy my invitation</Button>
           {admin && (
-            <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
-              <Input aria-label="Public address of this server" className="h-8 w-72" placeholder="https://invintel.mycompany.com (only if partners are on other servers)" value={addr ?? id.data.baseUrl} onChange={(e) => setAddr(e.target.value)} />
+            <form className="flex w-full flex-wrap items-center gap-2 sm:w-auto" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+              <Input aria-label="Public address of this server" className="h-8 w-full min-w-0 sm:w-72" placeholder="https://invintel.mycompany.com (only if partners are on other servers)" value={addr ?? id.data.baseUrl} onChange={(e) => setAddr(e.target.value)} />
               <Button size="sm" type="submit" disabled={addr === null || save.isPending}>Save address</Button>
             </form>
           )}

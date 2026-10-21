@@ -86,6 +86,8 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
           <div className="min-w-0">
             <Link to={`/o/${org.id}/inventory/${row.original.id}`} className="block truncate font-medium hover:underline">{row.original.name}</Link>
             <div className="truncate font-mono text-xs text-muted-foreground">{row.original.sku}</div>
+            {/* On phones the Status column is hidden to make room for Qty, so the badge sits here instead. */}
+            <div className="mt-1 sm:hidden"><StatusBadge status={stockStatus(row.original)} /></div>
           </div>
         ),
       },
@@ -99,7 +101,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         id: "quantity",
         header: filtering ? "Qty here" : "Qty",
         accessorFn: (i) => (filtering ? stockIn(i, idSet) : i.quantity),
-        meta: { align: "right" } satisfies Meta,
+        meta: { align: "right", className: "w-28 sm:w-auto" } satisfies Meta,
         cell: ({ row, getValue }) => (
           <div className="text-right">
             <span className="font-medium tabular-nums">{formatQty(getValue<number>(), row.original)}</span>
@@ -115,6 +117,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         id: "status",
         header: "Status",
         accessorFn: (i) => stockStatus(i),
+        meta: { className: "hidden sm:table-cell" } satisfies Meta,
         cell: ({ row }) => <StatusBadge status={stockStatus(row.original)} />,
       },
       ...(filtering
@@ -168,7 +171,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
         id: "actions",
         enableSorting: false,
         header: () => <span className="sr-only">Actions</span>,
-        meta: { align: "right" } satisfies Meta,
+        meta: { align: "right", className: "w-12 sm:w-auto" } satisfies Meta,
         cell: ({ row }) => (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -229,7 +232,7 @@ export function ItemsTable({ items, locations, locationId, locationIds, onDelete
   return (
     <div className="space-y-2">
       <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-        <Table>
+        <Table className="table-fixed sm:table-auto">
           <TableHeader className="bg-muted/40">
             {table.getHeaderGroups().map((group) => (
               <TableRow key={group.id} className="hover:bg-transparent">
