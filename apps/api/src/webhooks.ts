@@ -4,6 +4,7 @@ import { ObjectId } from "mongodb";
 import { onAuditEvent, recordAudit } from "./audit.js";
 import type { AuditEventDoc, Store, WebhookDeliveryDoc, WebhookDoc } from "./db.js";
 import { BlockedAddressError, postJson } from "./webhook-safety.js";
+import { isSealed, openWebhookSecret, SecretUnavailableError, sealWebhookSecret, webhookSecretKey } from "./webhook-secrets.js";
 
 /** Seconds to wait after each failed attempt. After the last one the delivery gives up. */
 export const RETRY_DELAYS = [60, 5 * 60, 30 * 60, 2 * 3600, 6 * 3600];
@@ -113,6 +114,16 @@ export async function attempt(store: Store, d: WebhookDeliveryDoc): Promise<Webh
   // A test is allowed through even on a switched-off webhook (that is how you check a fix). Real events are not.
   if (!hook.enabled && d.type !== WEBHOOK_TEST_EVENT) return finish({ status: "failed", nextAttemptAt: null, error: "The webhook is switched off" });
 
+  // The secret is encrypted at rest when the server has a key. A plain one from before that is encrypted now, on first use.
+  let secret: string;
+  try {
+    secret = openWebhookSecret(hook.secret);
+    if (webhookSecretKey() && !isSealed(hook.secret)) await store.webhooks.updateOne({ _id: hook._id, secret: hook.secret }, { $set: { secret: sealWebhookSecret(secret) } });
+  } catch (e) {
+    if (!(e instanceof SecretUnavailableError)) throw e;
+    // Waiting won't fix a missing or wrong key, and it isn't the receiver's fault, so it doesn't count toward switching the webhook off.
+    return finish({ status: "failed", error: e.message, nextAttemptAt: null });
+  }
   const body = d.body;
   let failure: string;
   let status: number | undefined;
@@ -123,7 +134,7 @@ export async function attempt(store: Store, d: WebhookDeliveryDoc): Promise<Webh
       "x-invintel-event": d.type,
       "x-invintel-event-id": d.eventId,
       "x-invintel-delivery": d._id.toHexString(),
-      "x-invintel-signature": sign(hook.secret, body),
+      "x-invintel-signature": sign(secret, body),
     });
     status = res.status;
     if (res.status >= 200 && res.status < 300) {

@@ -107,6 +107,9 @@ export function isPublicIp(address: string): boolean {
   return false;
 }
 
+/** The ports a webhook may use unless the development switch is on. */
+export const ALLOWED_PORTS = [443, 8443];
+
 const BLOCKED_NAMES = [/^localhost$/, /\.localhost$/, /\.local$/, /\.internal$/, /\.localdomain$/, /\.lan$/, /\.home$/, /\.corp$/, /^metadata$/];
 
 /** Checks an address typed into the form. Says what is wrong in words, or returns the parsed URL. */
@@ -125,6 +128,9 @@ export function validateWebhookUrl(raw: string): { ok: true; url: URL } | { ok: 
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (!host) return { ok: false, error: "The address has no host name." };
   if (!policy.allowPrivate) {
+    // Only the usual web ports, so this server can't be used to poke other services on a public host.
+    const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+    if (!ALLOWED_PORTS.includes(port)) return { ok: false, error: `Webhooks can only be sent to port 443 or 8443 (that address uses ${port}).` };
     if (BLOCKED_NAMES.some((re) => re.test(host))) return { ok: false, error: "That name points inside a private network. Webhooks can only go to public addresses." };
     if (net.isIP(host) && !isPublicIp(host)) return { ok: false, error: "That is a private or reserved address. Webhooks can only go to public addresses." };
     // Looks like a number but isn't a normal one (http://2130706433/, http://0x7f.1/): the URL parser has already turned
@@ -171,6 +177,7 @@ export function postJson(
 
   return new Promise((resolve, reject) => {
     const lib = url.protocol === "https:" ? https : http;
+    let deadlineHit = false;
     const req = lib.request(
       url,
       {
@@ -188,10 +195,10 @@ export function postJson(
           if (size <= maxBytes) chunks.push(chunk);
           else res.destroy(); // enough to know what it said
         });
-        const finish = () => resolve({ status: res.statusCode ?? 0, snippet: Buffer.concat(chunks).toString("utf8").slice(0, 300) });
+        const finish = () => { clearTimeout(deadline); resolve({ status: res.statusCode ?? 0, snippet: Buffer.concat(chunks).toString("utf8").slice(0, 300) }); };
         res.on("end", finish);
-        res.on("close", finish);
-        res.on("error", finish);
+        res.on("close", () => { if (size > maxBytes || res.complete) finish(); else { clearTimeout(deadline); reject(new Error(deadlineHit ? giveUpMessage : "The connection was cut off")); } });
+        res.on("error", () => { clearTimeout(deadline); reject(new Error(deadlineHit ? giveUpMessage : "The connection was cut off")); });
       },
     );
     // A literal IP never goes through lookup, so it is checked here.
@@ -200,8 +207,13 @@ export function postJson(
       req.destroy();
       return reject(new BlockedAddressError("That is a private or reserved address, so nothing was sent."));
     }
-    req.on("timeout", () => req.destroy(new Error(`No answer within ${Math.round(timeoutMs / 1000)} seconds`)));
-    req.on("error", reject);
+    const giveUpMessage = `No answer within ${Math.round(timeoutMs / 1000)} seconds`;
+    // The timeout option only fires when the connection goes quiet, so a receiver that sends a byte every few seconds
+    // could hold a worker for hours. This one is a hard limit on the whole exchange, quiet or not.
+    const deadline = setTimeout(() => { deadlineHit = true; req.destroy(new Error(giveUpMessage)); }, timeoutMs);
+    req.on("timeout", () => req.destroy(new Error(giveUpMessage)));
+    req.on("error", (e) => { clearTimeout(deadline); reject(e); });
+    req.on("close", () => clearTimeout(deadline));
     req.end(body);
   });
 }

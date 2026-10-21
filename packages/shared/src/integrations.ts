@@ -9,12 +9,14 @@ export const API_SCOPES = ["read", "write"] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
 export const API_KEY_PREFIX = "ivk_";
+/** How long a key lasts if nobody chooses. */
+export const DEFAULT_KEY_DAYS = 365;
 
 export const apiKeyInputSchema = z.object({
   name: z.string().trim().min(1, "Give the key a name").max(80),
   scope: z.enum(API_SCOPES),
-  /** Days until it stops working. Null means it works until revoked. */
-  expiresInDays: z.number().int().min(1).max(730).nullable().default(null),
+  /** Days until it stops working. A year unless said otherwise; null means it works until revoked, which is better avoided. */
+  expiresInDays: z.number().int().min(1).max(730).nullable().default(DEFAULT_KEY_DAYS),
 });
 export type ApiKeyInput = z.input<typeof apiKeyInputSchema>;
 

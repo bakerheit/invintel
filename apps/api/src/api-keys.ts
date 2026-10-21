@@ -1,13 +1,13 @@
 import { zValidator } from "@hono/zod-validator";
 import { API_KEY_PREFIX, apiKeyInputSchema, objectIdSchema, type ApiKey, type ApiKeyCreated, type ApiScope } from "@invintel/shared";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { getConnInfo } from "@hono/node-server/conninfo";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { auditActor, recordAudit } from "./audit.js";
 import type { ApiKeyDoc, Store } from "./db.js";
+import { clientIp } from "./client-ip.js";
 import { requireRole, type OrgEnv } from "./org-access.js";
 import { FailureLimiter } from "./ratelimit.js";
 
@@ -77,14 +77,6 @@ export function keyPermits(scope: ApiScope, method: string, path: string): boole
 
 // ---------------- using a key ----------------
 
-const clientAddress = (c: Context) => {
-  try {
-    return getConnInfo(c).remote.address ?? "unknown";
-  } catch {
-    return "unknown";
-  }
-};
-
 const WINDOW_MS = 60_000;
 
 /**
@@ -98,9 +90,9 @@ export function createKeyAuth(store: Store, opts: { perMinute?: number } = {}) {
 
   return createMiddleware<{ Variables: { user: { id: string; name: string; email: string }; apiKey?: KeyAuth } }>(async (c, next) => {
     const header = c.req.header("authorization");
-    const match = header ? /^Bearer\s+(ivk_[A-Za-z0-9_-]{20,100})$/.exec(header.trim()) : null;
+    const match = header ? /^Bearer\s+(ivk_[A-Za-z0-9_-]{20,100})$/i.exec(header.trim()) : null;
     if (!match) return c.json({ error: "Not signed in" }, 401);
-    const address = clientAddress(c);
+    const address = clientIp(c);
     if (wrong.isLocked(address)) return c.json({ error: "Too many wrong keys. Try again in a few minutes." }, 429);
 
     const key = match[1]!;

@@ -85,8 +85,8 @@ export function ApiKeysCard({ orgId }: { orgId: string }) {
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="key-expires">Expires</Label>
-            <select id="key-expires" name="expires" defaultValue="never" className={selectClass}>
-              <option value="never">Never</option><option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In a year</option>
+            <select id="key-expires" name="expires" defaultValue="365" className={selectClass}>
+              <option value="30">In 30 days</option><option value="90">In 90 days</option><option value="365">In a year</option><option value="730">In two years</option><option value="never">Never (not recommended)</option>
             </select>
           </div>
           <div className="flex gap-2"><Button type="submit" disabled={create.isPending}>Create key</Button><Button type="button" variant="ghost" onClick={() => { setAdding(false); setError(null); }}>Cancel</Button></div>
@@ -108,11 +108,12 @@ export function ApiKeysCard({ orgId }: { orgId: string }) {
                     {k.name}
                     <Badge variant="secondary">{k.scope === "write" ? "Read and write" : "Read only"}</Badge>
                     <Badge variant="secondary" className={cn(status === "Active" ? "bg-success-soft text-success" : "bg-destructive/10 text-destructive")}>{status}</Badge>
+                    {status === "Active" && !k.expiresAt && <Badge variant="secondary" className="bg-warning-soft text-warning">Never expires</Badge>}
                   </p>
                   <p className="font-mono text-xs text-muted-foreground">{k.prefix}</p>
                   <p className="text-xs text-muted-foreground">
                     Made by {k.createdBy}, {formatRelative(k.createdAt)} · {k.lastUsedAt ? `last used ${formatRelative(k.lastUsedAt)}` : "never used"}
-                    {k.expiresAt && status === "Active" ? ` · expires ${new Date(k.expiresAt).toLocaleDateString()}` : ""}
+                    {k.expiresAt && status === "Active" ? ` · expires ${new Date(k.expiresAt).toLocaleDateString()}` : status === "Active" ? " · no expiry" : ""}
                   </p>
                 </div>
                 {status === "Active" && (

@@ -36,13 +36,23 @@ Owner: Will. Branch: `inv-10/api-keys-webhooks` (stacked on `inv-4/import-export
 
 Browser (desktop and phone): created a write key (shown once with Copy), used it from curl (read 200, adjust 200 and named "API key: Shopify sync" in the ledger, delete / members / list organizations 403, wrong key 401); the metadata address was refused with a clear message; with the development switch, an independent receiver script verified the signature of a real `item.created` delivered by the background worker, *Send test* showed "The receiver answered 200", and the log listed both deliveries.
 
+## Review fixes (Frida, 2026-10-18; branch `inv-10b/review-fixes`)
+
+1. **Basic auth no longer breaks the web app.** Only `Authorization: Bearer ivk_...` takes the key path; anything else (nginx's Basic) leaves the cookie session alone.
+2. **Limits are per visitor, not per proxy.** `clientIp(c)` believes `X-Real-IP` only when the socket peer is loopback; used by the wrong-key lockout, the wrong-join-code limit and (new) a sign-in limit across emails (30 wrong passwords per address).
+3. **Hard total deadline** in `postJson`: the whole exchange is cut off after the timeout even if bytes keep trickling.
+4. **Webhook secrets encrypted at rest** (AES-256-GCM, `WEBHOOK_SECRET_KEY`), plain fallback without a key, lazy migration of old rows, clear failure (not counted against the receiver) if the key is missing or wrong.
+5. **Ports** 443 and 8443 only unless the development switch is on (checked on save and at delivery).
+6. **Keys default to a one-year expiry**; the form offers 30 days to two years and "never (not recommended)"; the list flags active keys with no expiry.
+
+Tests: `apps/api/src/inv10-review-fixes.test.ts` (14): Basic auth / other schemes / lowercase scheme / both cookie and key; `pickClientIp` table; per-visitor key lockout behind a proxy, spoofed `X-Real-IP` from outside ignored, join-code and sign-in limits per address and per email; trickling and half-sent answers cut off within the deadline; sealed secrets never in the database or the list, signing still correct, rotation, lazy migration, missing and wrong key, tamper and round trip; port rules on save, on edit and at delivery; default and explicit expiry and bounds. Two older tests changed because they assumed things that are no longer true (delivery order across four workers; the rebinding test needs an allowed port). Full API suite 511, web 20.
+
 ## Known limits
 
-- **Not reviewed by Frida yet.** Please check: the allowlist in `keyPermits`, the lookup-time address check in `postJson`, and the choice to store webhook secrets recoverably.
-- Webhook secrets are not encrypted at rest.
+- The encryption key lives in the server's environment: whoever can read both the environment and the database can read the secrets. Rotating `WEBHOOK_SECRET_KEY` is not supported yet (a webhook sealed with an old key needs a new secret from "New secret").
 - Rate limits and lockouts are in memory per process (reset on restart, not shared across several API processes), like the existing login limiter.
 - No per-key IP allowlist, no per-key scopes finer than read/write, no webhook payload versioning yet (`type` names are the contract).
-- Delivery order isn't guaranteed (retries can arrive after later events); `seq` and `createdAt` in the body let a receiver order them.
+- Delivery order isn't guaranteed (retries can arrive after later events, and four deliveries are sent at once); `seq` and `createdAt` in the body let a receiver order them.
 - Requires the API process to stay up for retries; a delivery due while it is down is sent when it returns.
 - IPv6-only receivers aren't tested against a real network; the address logic is unit tested.
-- A receiver that is slow for 8 seconds on every event delays that worker's other deliveries (four run at once).
+- A receiver that is slow for the full 8 seconds on every event still delays that worker's other deliveries (four run at once).
