@@ -5,3 +5,9 @@ dist
 .env.*
 !.env.example
 .DS_Store
+
+# Research, strategy and credentials live in Notion / the private team folder, never in this repo
+docs/research/
+docs/review/
+.env
+*.pem
