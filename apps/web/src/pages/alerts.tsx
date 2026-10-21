@@ -28,7 +28,7 @@ function AlertRow({ a }: { a: Alert }) {
     <li className="flex flex-wrap items-start gap-3 py-3 text-sm">
       <span className={cn("mt-1 size-2.5 shrink-0 rounded-full", a.severity === "critical" ? "bg-destructive" : "bg-warning")} aria-label={a.severity} />
       <div className="min-w-0 flex-1">
-        <Link to={a.link} className="font-medium hover:underline">{a.title}</Link>
+        <Link to={a.link} className="-my-1 inline-block py-1 font-medium hover:underline">{a.title}</Link>
         <p className="text-xs text-muted-foreground">{a.detail}</p>
         {a.state === "acknowledged" && <p className="mt-0.5 text-xs text-muted-foreground">Acknowledged by {a.by} {a.at ? formatRelative(a.at) : ""}. It stays here until the problem is fixed.</p>}
         {a.state === "snoozed" && <p className="mt-0.5 text-xs text-muted-foreground">Snoozed by {a.by} until {a.snoozedUntil?.slice(0, 10)}.</p>}

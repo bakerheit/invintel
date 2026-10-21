@@ -85,11 +85,11 @@
     --sidebar-foreground: oklch(0.99 0.005 350);
     --sidebar-primary: oklch(0.99 0.005 350);
     --sidebar-primary-foreground: oklch(0.42 0.2 350);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 350);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 350);
-    --sidebar-gradient: linear-gradient(160deg, oklch(0.66 0.19 356), oklch(0.54 0.23 350), oklch(0.42 0.19 326));
+    --sidebar-gradient: linear-gradient(160deg, oklch(0.50 0.19 356), oklch(0.43 0.23 350), oklch(0.34 0.19 326));
 }
 
 .dark {
@@ -124,7 +124,7 @@
     --sidebar-foreground: oklch(0.99 0.005 350);
     --sidebar-primary: oklch(0.99 0.005 350);
     --sidebar-primary-foreground: oklch(0.42 0.2 350);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 350);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 350);
@@ -159,20 +159,22 @@
 
 /* In dark mode the sidebar is a deep rose, so its secondary text is light rather than the page's muted grey. */
 .dark [data-sidebar="sidebar"] .text-muted-foreground {
-  color: oklch(1 0 0 / 70%);
+  color: oklch(1 0 0 / 95%);
 }
 
 /* The sidebar and the frame around the page use the same gradient as the sign-in page. */
 [data-slot="sidebar-wrapper"] {
-  background: radial-gradient(circle at 12% 0%, oklch(1 0 0 / 0.2), transparent 45%), var(--sidebar-gradient);
+  background: radial-gradient(circle at 12% 0%, oklch(1 0 0 / 0.08), transparent 45%), var(--sidebar-gradient);
   background-attachment: fixed;
 }
 [data-slot="sidebar-inner"] { background: transparent; }
 [data-sidebar="sidebar"][data-mobile="true"] {
-  background: radial-gradient(circle at 12% 0%, oklch(1 0 0 / 0.2), transparent 45%), var(--sidebar-gradient);
+  background: radial-gradient(circle at 12% 0%, oklch(1 0 0 / 0.08), transparent 45%), var(--sidebar-gradient);
 }
 /* Secondary text in the sidebar is light on the gradient. */
-[data-sidebar="sidebar"] .text-muted-foreground { color: oklch(1 0 0 / 78%); }
+[data-sidebar="sidebar"] .text-muted-foreground { color: oklch(1 0 0 / 95%); }
+/* The group headings ("Workspace", "Tools") default to 70% white, which is too faint on the gradient. */
+[data-sidebar="sidebar"] [data-sidebar="group-label"] { color: oklch(1 0 0 / 95%); }
 
 /* Colour palettes: the default is pink. A palette recolours the sidebar, buttons and highlights; the dark main area stays neutral. */
 :root[data-palette="ocean"] {
@@ -208,11 +210,11 @@
     --sidebar-foreground: oklch(0.99 0.005 240);
     --sidebar-primary: oklch(0.99 0.005 240);
     --sidebar-primary-foreground: oklch(0.42 0.2 240);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 240);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 240);
-    --sidebar-gradient: linear-gradient(160deg, oklch(0.66 0.19 246), oklch(0.54 0.23 240), oklch(0.42 0.19 216));
+    --sidebar-gradient: linear-gradient(160deg, oklch(0.50 0.19 246), oklch(0.43 0.23 240), oklch(0.34 0.19 216));
 }
 
 :root[data-palette="ocean"].dark {
@@ -247,7 +249,7 @@
     --sidebar-foreground: oklch(0.99 0.005 240);
     --sidebar-primary: oklch(0.99 0.005 240);
     --sidebar-primary-foreground: oklch(0.42 0.2 240);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 240);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 240);
@@ -286,11 +288,11 @@
     --sidebar-foreground: oklch(0.99 0.004 155);
     --sidebar-primary: oklch(0.99 0.004 155);
     --sidebar-primary-foreground: oklch(0.42 0.17 155);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.004 155);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.043 155);
-    --sidebar-gradient: linear-gradient(160deg, oklch(0.66 0.162 161), oklch(0.54 0.196 155), oklch(0.42 0.162 131));
+    --sidebar-gradient: linear-gradient(160deg, oklch(0.47 0.162 161), oklch(0.40 0.196 155), oklch(0.31 0.162 131));
 }
 
 :root[data-palette="forest"].dark {
@@ -325,7 +327,7 @@
     --sidebar-foreground: oklch(0.99 0.004 155);
     --sidebar-primary: oklch(0.99 0.004 155);
     --sidebar-primary-foreground: oklch(0.42 0.17 155);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.004 155);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.043 155);
@@ -364,11 +366,11 @@
     --sidebar-foreground: oklch(0.99 0.005 48);
     --sidebar-primary: oklch(0.99 0.005 48);
     --sidebar-primary-foreground: oklch(0.42 0.2 48);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 48);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 48);
-    --sidebar-gradient: linear-gradient(160deg, oklch(0.66 0.19 54), oklch(0.54 0.23 48), oklch(0.42 0.19 24));
+    --sidebar-gradient: linear-gradient(160deg, oklch(0.50 0.19 54), oklch(0.43 0.23 48), oklch(0.34 0.19 24));
 }
 
 :root[data-palette="sunset"].dark {
@@ -403,7 +405,7 @@
     --sidebar-foreground: oklch(0.99 0.005 48);
     --sidebar-primary: oklch(0.99 0.005 48);
     --sidebar-primary-foreground: oklch(0.42 0.2 48);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 48);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 48);
@@ -442,11 +444,11 @@
     --sidebar-foreground: oklch(0.99 0.005 305);
     --sidebar-primary: oklch(0.99 0.005 305);
     --sidebar-primary-foreground: oklch(0.42 0.2 305);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 305);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 305);
-    --sidebar-gradient: linear-gradient(160deg, oklch(0.66 0.19 311), oklch(0.54 0.23 305), oklch(0.42 0.19 281));
+    --sidebar-gradient: linear-gradient(160deg, oklch(0.50 0.19 311), oklch(0.43 0.23 305), oklch(0.34 0.19 281));
 }
 
 :root[data-palette="grape"].dark {
@@ -481,7 +483,7 @@
     --sidebar-foreground: oklch(0.99 0.005 305);
     --sidebar-primary: oklch(0.99 0.005 305);
     --sidebar-primary-foreground: oklch(0.42 0.2 305);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.005 305);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.05 305);
@@ -520,11 +522,11 @@
     --sidebar-foreground: oklch(0.99 0.001 255);
     --sidebar-primary: oklch(0.99 0.001 255);
     --sidebar-primary-foreground: oklch(0.42 0.024 255);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.001 255);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.006 255);
-    --sidebar-gradient: linear-gradient(160deg, oklch(0.66 0.023 261), oklch(0.54 0.028 255), oklch(0.42 0.023 231));
+    --sidebar-gradient: linear-gradient(160deg, oklch(0.50 0.023 261), oklch(0.43 0.028 255), oklch(0.34 0.023 231));
 }
 
 :root[data-palette="graphite"].dark {
@@ -559,7 +561,7 @@
     --sidebar-foreground: oklch(0.99 0.001 255);
     --sidebar-primary: oklch(0.99 0.001 255);
     --sidebar-primary-foreground: oklch(0.42 0.024 255);
-    --sidebar-accent: oklch(1 0 0 / 20%);
+    --sidebar-accent: oklch(0 0 0 / 20%);
     --sidebar-accent-foreground: oklch(0.99 0.001 255);
     --sidebar-border: oklch(1 0 0 / 22%);
     --sidebar-ring: oklch(0.95 0.006 255);

@@ -250,8 +250,10 @@ function Suggestions({ suppliers }: { suppliers: Supplier[] }) {
         <ul className="divide-y">
           {rows.map((r) => (
             <li key={r.itemId} className="flex items-center gap-3 py-2 text-sm">
-              <input type="checkbox" className="size-4" aria-label={`Include ${r.name}`} checked={!skip.has(r.itemId)}
-                onChange={(e) => setSkip((s) => { const n = new Set(s); if (e.target.checked) n.delete(r.itemId); else n.add(r.itemId); return n; })} />
+              <label className="-m-1 flex size-8 shrink-0 cursor-pointer items-center justify-center">
+                <input type="checkbox" className="size-4" aria-label={`Include ${r.name}`} checked={!skip.has(r.itemId)}
+                  onChange={(e) => setSkip((s) => { const n = new Set(s); if (e.target.checked) n.delete(r.itemId); else n.add(r.itemId); return n; })} />
+              </label>
               <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.name}</p><p className="truncate text-xs text-muted-foreground">{r.sku} · {stockWhy({ onHand: r.quantity, reserved: r.reserved, onHold: Math.max(0, r.quantity - r.reserved - r.available), available: r.available, reorderLevel: r.reorderLevel }, (n) => formatQty(n, r.uom, { unit: false }))}{r.onOrder ? `, ${formatQty(r.onOrder, r.uom, { unit: false })} already on order` : ""}</p></div>
               <span className="shrink-0 tabular-nums font-medium">+{formatQty(r.suggestedQuantity, r.uom)}</span>
             </li>
